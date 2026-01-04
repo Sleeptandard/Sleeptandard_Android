@@ -63,6 +63,7 @@ import com.example.sleeptandard_mvp_demo.ViewModel.AlarmViewModel
 fun HomeScreen(
     alarmViewModel: AlarmViewModel,
     scheduler: AlarmScheduler,
+    onSoundClick: ()-> Unit,
     onClickConfirm: ()-> Unit,
 ) {
     val context = LocalContext.current
@@ -178,6 +179,8 @@ fun HomeScreen(
 
                     // 링톤 설정
                     onSoundClick = {
+                        onSoundClick()
+                        /* 원래 기본 알람음 설정 창
                         val intent = Intent(RingtoneManager.ACTION_RINGTONE_PICKER)
                             .apply {
                                 // 추가적으로 설정합니다
@@ -190,11 +193,13 @@ fun HomeScreen(
                                     "알람음 선택"
                                 )                // 링톤 설정창 제목
                                 putExtra(
-                                    RingtoneManager.EXTRA_RINGTONE_EXISTING_URI,                               // 기존 선택 알람 설정
+                                    RingtoneManager.EXTRA_RINGTONE_EXISTING_URI,    // 기존 선택 알람 설정
                                     selectedRingtoneUri.toUri()
                                 )
                             }
                         ringtonePickerLauncher.launch(intent)
+
+                         */
                     },
 
                     // 진동 토글
@@ -213,8 +218,9 @@ fun HomeScreen(
                     onClick = { showModal = true }
                 )
 
-                // ====== BottomSheet ======
+                /*** 바텀 모달 ***/
                 if (showModal) {
+
                     val sheetState = rememberModalBottomSheetState(
                         skipPartiallyExpanded = true
                     )
@@ -223,7 +229,7 @@ fun HomeScreen(
                         onDismissRequest = { showModal = false },
                         sheetState = sheetState,
                         containerColor = Color(0xFF1B2432),
-                        // 밖 영역은 자동으로 어두워지고 클릭 막힘(scrim)
+                        // 밖 영역은 어두워지고 클릭 막힘(scrim)
                         scrimColor = Color.Black.copy(alpha = 0.55f),
                         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
                     ) {
@@ -305,6 +311,7 @@ fun HomeScreen(
                                 Text("완료")
                             }
                         }
+
                     }
                 }
             }
@@ -332,72 +339,6 @@ val alarmPrefs = AlarmPreferences(context)
 alarmPrefs.saveAlarm(alarmViewModel.alarm)
 
  */
-
-@Preview
-@Composable
-fun HomeScreenPreview() {
-
-    var bool = true
-    var h = 6
-    var m = 25
-    var i = true
-    var selectedIndex by remember { mutableStateOf(0) }
-
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 24.dp, vertical = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Spacer(
-                modifier = Modifier.height(92.dp)
-            )
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 36.dp)
-            ) {
-                CustomTimePicker(
-                    onTimeChange = { hour12, minute, isAm ->
-                        h = hour12
-                        m = minute
-                        i = isAm
-                    },
-                )
-            }
-            Divider(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 30.dp)
-            )
-
-            OptionsSection(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 35.dp),
-
-                // 링톤 설정
-                onSoundClick = {},
-
-                // 진동 토글
-                onVibrationClick = { },
-                checked = bool,
-                onCheckedChange = { bool = it },
-                alarmName = "alarmName"
-            )
-
-            Spacer(modifier = Modifier.height(64.dp))
-
-            ConfirmButton(
-                modifier = Modifier
-                    .fillMaxWidth(193f / 350f),
-                onClick = {}
-            )
-
-        }
-    }
-
 
 
 /********************** UI 변경 전 **********************/

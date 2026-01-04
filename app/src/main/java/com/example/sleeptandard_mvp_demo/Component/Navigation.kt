@@ -20,6 +20,7 @@ import com.example.sleeptandard_mvp_demo.ClassFile.Alarm
 import com.example.sleeptandard_mvp_demo.ClassFile.AlarmScheduler
 import com.example.sleeptandard_mvp_demo.ClassFile.QnARepository
 import com.example.sleeptandard_mvp_demo.Prefs.AlarmPreferences
+import com.example.sleeptandard_mvp_demo.Screen.AlarmSoundSettingScreen
 import com.example.sleeptandard_mvp_demo.Screen.ExperimentScreen
 import com.example.sleeptandard_mvp_demo.Screen.InquireScreen
 import com.example.sleeptandard_mvp_demo.Screen.JournalScreen
@@ -49,6 +50,7 @@ sealed class Screen(val route: String, val showBottomBar: Boolean = true) {
     object QnA: Screen("qna", showBottomBar = false)
     object Inquire: Screen("inquire", showBottomBar = false )
     object Tutorial: Screen("tutorial", showBottomBar = false)
+    object AlarmSoundSetting: Screen("alarmsoundsetting", showBottomBar = false)
 
 
     object Experiment : Screen("experiment", showBottomBar = false)
@@ -94,6 +96,9 @@ fun AppNav(
             HomeScreen(
                 alarmViewModel = alarmViewModel,
                 scheduler = scheduler,
+                onSoundClick = {
+                    rememberNavController.navigate(Screen.AlarmSoundSetting.route)
+                },
                 onClickConfirm = {
                     rememberNavController.navigate(Screen.SettedAlarm.route){
                         popUpTo(Screen.Home.route){inclusive = true}
@@ -101,6 +106,13 @@ fun AppNav(
                 },
             )
         }
+
+        composable(Screen.AlarmSoundSetting.route){
+            AlarmSoundSettingScreen(
+
+            )
+        }
+
         composable(Screen.SettedAlarm.route){
             SettedAlarmScreen(
                 alarmViewModel = alarmViewModel,

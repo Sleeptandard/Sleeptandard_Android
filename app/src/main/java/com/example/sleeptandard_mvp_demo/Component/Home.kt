@@ -1,6 +1,7 @@
 package com.example.sleeptandard_mvp_demo.Component
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.height
@@ -27,12 +28,20 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
@@ -217,8 +226,9 @@ fun OptionsSection(
                         .scale(37f/52f),
                     colors = SwitchDefaults.colors(
                         checkedThumbColor = Color.White,
+                        checkedTrackColor = Color(0xFFB1F7FC),
                         uncheckedThumbColor = Color.White,
-                        uncheckedTrackColor = Color(0xFF858585)
+                        uncheckedTrackColor = Color(0xFF858585),
                     ),
                     checked = checked,
                     onCheckedChange = onCheckedChange
@@ -317,7 +327,7 @@ fun OptionSectionPreview(
                         .scale(37f/52f),
                     colors = SwitchDefaults.colors(
                         checkedThumbColor = Color.White,
-                        checkedTrackColor = Color(0xFFE0F5FD),
+                        checkedTrackColor = Color(0xFFB1F7FC),
                         uncheckedThumbColor = Color.Gray,
                         uncheckedTrackColor = Color(0xFF858585)
                     ),
