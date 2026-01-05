@@ -44,7 +44,8 @@ sealed class Screen(val route: String, val showBottomBar: Boolean = true) {
         fun createRoute(id: String) = "qna_detail/$id"
     }
 
-    object Splash : Screen("splash" , showBottomBar = false)
+    // 컴포즈 스플래시 화면
+    // object Splash : Screen("splash" , showBottomBar = false)
     object SettedAlarm : Screen("settedAlarm", showBottomBar = false)
     object ReviewAlarm : Screen("reviewAlarm", showBottomBar = false)
     object QnA: Screen("qna", showBottomBar = false)
@@ -60,7 +61,7 @@ sealed class Screen(val route: String, val showBottomBar: Boolean = true) {
 fun AppNav(
     scheduler: AlarmScheduler,
     // 실험중
-    startDestination: String = Screen.Splash.route,
+    startDestination: String = Screen.Home.route,
     initialAlarm: Alarm? = null   // ✨ 추가
 ){
 
@@ -82,6 +83,7 @@ fun AppNav(
 
     val navGraph = rememberNavController.createGraph(startDestination = startDestination){
 
+        /* 컴포즈 스플래시
         composable(Screen.Splash.route){
             LaunchedEffect(Unit) {
                 delay(900) // 0.9초 보여주기
@@ -91,6 +93,7 @@ fun AppNav(
             }
             SplashScreen()
         }
+         */
 
         composable(Screen.Home.route){
             HomeScreen(

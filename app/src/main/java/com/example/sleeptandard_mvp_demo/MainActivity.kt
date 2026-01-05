@@ -40,8 +40,8 @@ class MainActivity : ComponentActivity() {
         val startDestination =
             startDestinationFromIntent
                 ?: if (alarmPrefs.isAlarmSet()) Screen.SettedAlarm.route
-                else Screen.Splash.route
-
+                // else Screen.Splash.route // 컴포즈 스플래시 화면
+                else Screen.Home.route
 
         enableEdgeToEdge()
         setContent {
