@@ -24,7 +24,7 @@
 
         <service
             android:name="com.example.sleeptandard_mvp_demo.service.SmartAlarmService"
-            android:foregroundServiceType="health"
+            android:foregroundServiceType="health|dataSync"
             android:exported="false" />
 
         <service

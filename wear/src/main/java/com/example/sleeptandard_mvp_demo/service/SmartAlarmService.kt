@@ -85,6 +85,16 @@ class SmartAlarmService : Service(), SensorEventListener {
                 targetAlarmTime = intent.getLongExtra(EXTRA_TARGET_TIME, 0L)
                 sessionStartTime = System.currentTimeMillis()
                 Log.i(TAG, "Service Started. Target Time: $targetAlarmTime")
+                
+                // [핵심] Foreground Service는 가능한 빨리 startForeground 호출 필요
+                createNotificationChannel()
+                val notification = buildNotification()
+                if (Build.VERSION.SDK_INT >= 34) {
+                    startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH)
+                } else {
+                    startForeground(NOTIFICATION_ID, notification)
+                }
+                
                 initializeService()
             }
             ACTION_STOP_AND_SEND_RESULT -> {
@@ -120,18 +130,9 @@ class SmartAlarmService : Service(), SensorEventListener {
             inferenceManager = InferenceManager(this)
 
             registerSensors()
-            createNotificationChannel()
-
-            val notification = buildNotification()
-
-            if (Build.VERSION.SDK_INT >= 34) {
-                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH)
-            } else {
-                startForeground(NOTIFICATION_ID, notification)
-            }
 
             isServiceRunning = true
-            Log.i(TAG, "Foreground service started successfully")
+            Log.i(TAG, "Service initialized successfully")
 
         } catch (e: Exception) {
             Log.e(TAG, "Service initialization failed", e)
