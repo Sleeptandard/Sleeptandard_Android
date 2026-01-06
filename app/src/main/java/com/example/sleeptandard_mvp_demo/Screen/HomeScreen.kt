@@ -73,6 +73,7 @@ import com.example.sleeptandard_mvp_demo.ViewModel.AlarmViewModel
 import com.example.sleeptandard_mvp_demo.ui.theme.AppIcons
 import com.example.sleeptandard_mvp_demo.Prefs.CustomSituationItem
 import com.example.sleeptandard_mvp_demo.Prefs.CustomSituationPreferences
+import com.example.sleeptandard_mvp_demo.ui.theme.DarkBackground
 
 
 @SuppressLint("ConfigurationScreenWidthHeight")
@@ -82,6 +83,8 @@ fun HomeScreen(
     alarmViewModel: AlarmViewModel,
     scheduler: AlarmScheduler,
     onClickConfirm: ()-> Unit,
+    goToAlarmRingScreen: ()-> Unit,
+    goToFeedbackScreen: ()-> Unit
 ) {
     val context = LocalContext.current
 
@@ -91,6 +94,7 @@ fun HomeScreen(
     var selectedIsAm by remember { mutableStateOf(true) }
     var selectedRingtoneUri by remember { mutableStateOf("") }
     var selectedVibrationEnabled by remember { mutableStateOf(true) }
+    var selectedVolume by remember { mutableIntStateOf(alarmViewModel.alarm.volume) }
 
     // 알람 SharedPreference 가져오기
     val alarmPrefs = remember(context) { AlarmPreferences(context) }  // (선택) 매번 생성 안 하게
@@ -300,6 +304,18 @@ fun HomeScreen(
                     onClick = { showSituationModal = true }
                 )
 
+                Button(
+                    onClick = goToAlarmRingScreen
+                ){
+                    Text("디버깅용 알람 울림화면")
+                }
+
+                Button(
+                    onClick = goToFeedbackScreen
+                ){
+                    Text("디버깅용 피드백 화면")
+                }
+
                 /***사운드 선택 모달***/
                 if (showSoundSheet) {
                     val soundSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -307,7 +323,7 @@ fun HomeScreen(
                     ModalBottomSheet(
                         onDismissRequest = { showSoundSheet = false },
                         sheetState = soundSheetState,
-                        containerColor = Color(0xFF1B2432),
+                        containerColor = DarkBackground,
                         scrimColor = Color.Black.copy(alpha = 0.55f),
                         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
                         contentWindowInsets = { WindowInsets(0, 0, 0, 0) }, // 여백 없애기
@@ -316,6 +332,8 @@ fun HomeScreen(
                     ) {
                         // ✅ 여기 안에 AlarmSoundSettingScreen의 "내용"을 넣는다
                         AlarmSoundSettingContent(
+                            currentAlarm = alarmViewModel.alarm.copy(volume = selectedVolume),
+                            onVolumeChange = { selectedVolume = it },
                             currentUriString = alarmViewModel.alarm.ringtoneUri,
                             onClose = { showSoundSheet = false },
                             onSelectUriString = { uriStr ->
@@ -325,9 +343,9 @@ fun HomeScreen(
                                     minute = alarmViewModel.alarm.minute,
                                     isAm = alarmViewModel.alarm.isAm,
                                     ringtoneUri = uriStr,
-                                    vibrationEnabled = alarmViewModel.alarm.vibrationEnabled
+                                    vibrationEnabled = alarmViewModel.alarm.vibrationEnabled,
+                                    volume = selectedVolume
                                 )
-                                alarmPrefs.saveAlarm(alarmViewModel.alarm)
                             }
                         )
                     }
@@ -529,7 +547,8 @@ fun HomeScreen(
                                                 selectedMinute,
                                                 selectedIsAm,
                                                 selectedRingtoneUri,
-                                                selectedVibrationEnabled
+                                                selectedVibrationEnabled,
+                                                selectedVolume
                                             )
                                             scheduler.schedule(alarmViewModel.alarm)
 
@@ -570,7 +589,8 @@ fun HomeScreen(
                                                 selectedMinute,
                                                 selectedIsAm,
                                                 selectedRingtoneUri,
-                                                selectedVibrationEnabled
+                                                selectedVibrationEnabled,
+                                                selectedVolume
                                             )
                                             scheduler.schedule(alarmViewModel.alarm)
 
@@ -665,7 +685,8 @@ fun HomeScreen(
                                                 selectedMinute,
                                                 selectedIsAm,
                                                 selectedRingtoneUri,
-                                                selectedVibrationEnabled
+                                                selectedVibrationEnabled,
+                                                selectedVolume
                                             )
                                             scheduler.schedule(alarmViewModel.alarm)
 

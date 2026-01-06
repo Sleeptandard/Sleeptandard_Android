@@ -8,29 +8,47 @@ import android.media.RingtoneManager
 import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.VolumeDown
 import androidx.compose.material3.Divider
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
+import com.example.sleeptandard_mvp_demo.ClassFile.Alarm
 import com.example.sleeptandard_mvp_demo.ui.theme.AppIcons
+import com.example.sleeptandard_mvp_demo.ui.theme.DarkBackground
 import kotlinx.coroutines.delay
 
 private data class SystemTone(
@@ -38,11 +56,14 @@ private data class SystemTone(
     val uri: Uri
 )
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AlarmSoundSettingContent(
     currentUriString: String,
     onClose: () -> Unit,
-    onSelectUriString: (String) -> Unit
+    onSelectUriString: (String) -> Unit,
+    currentAlarm: Alarm, // ✅ 알람 객체를 직접 받거나 volume 값을 받도록 수정
+    onVolumeChange: (Int) -> Unit, // ✅ 볼륨 변경 콜백 추가
 ) {
     val context = LocalContext.current
 
@@ -61,12 +82,8 @@ fun AlarmSoundSettingContent(
     var playingRingtone by remember { mutableStateOf<Ringtone?>(null) }
     var previewToken by remember { mutableIntStateOf(0) }
 
-    // 볼륨 (시스템 ALARM 스트림 볼륨)
-    val audioManager = remember(context) {
-        context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-    }
-    val maxVol = remember { audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM) }
-    var vol by remember { mutableIntStateOf(audioManager.getStreamVolume(AudioManager.STREAM_ALARM)) }
+    val maxVol = 15
+    var vol by remember { mutableIntStateOf(currentAlarm?.volume ?: 10) }
 
     fun stopPreview() {
         try {
@@ -88,6 +105,7 @@ fun AlarmSoundSettingContent(
         previewToken++
     }
 
+    /*
     // 2초 자동 정지
     LaunchedEffect(previewToken) {
         if (previewToken == 0) return@LaunchedEffect
@@ -95,12 +113,14 @@ fun AlarmSoundSettingContent(
         stopPreview()
     }
 
+    */
+
     // 시트 닫힐 때 미리듣기 정지
     DisposableEffect(Unit) {
         onDispose { stopPreview() }
     }
 
-    val card = Color(0x1AF1F1F1)
+    val card = Color(0x26F1F1F1)
 
     val sliderHeight = 95.dp   // 슬라이더 영역 높이(대충)
     val sliderPaddingBottom = 12.dp
@@ -108,7 +128,8 @@ fun AlarmSoundSettingContent(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(top = 54.dp),  // ✅ 이거 추가 (핵심)
+            .padding(top = 54.dp)
+            .background(DarkBackground),  // ✅ 이거 추가 (핵심)
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Row(
@@ -131,11 +152,13 @@ fun AlarmSoundSettingContent(
             }
         }
 
+        Spacer(Modifier.height(24.dp))
+
         // 상단 토글 바
         Surface(
             modifier = Modifier
                 .fillMaxWidth(5 / 6f)
-                .height(56.dp),
+                .height(50.dp),
             shape = RoundedCornerShape(100.dp),
             color = card,
             tonalElevation = 0.dp
@@ -143,15 +166,23 @@ fun AlarmSoundSettingContent(
             Row(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 18.dp),
+                    .padding(horizontal = 30.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
                     text = if (soundEnabled) "소리 ON" else "소리 OFF",
-                    color = Color.White
+                    style = MaterialTheme.typography.bodyMedium,
                 )
                 Switch(
+                    modifier = Modifier
+                        .scale(37f/52f),
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Color.White,
+                        checkedTrackColor = Color(0xFFB1F7FC),
+                        uncheckedThumbColor = Color.White,
+                        uncheckedTrackColor = Color(0xFF858585),
+                    ),
                     checked = soundEnabled,
                     onCheckedChange = { enabled ->
                         soundEnabled = enabled
@@ -171,11 +202,12 @@ fun AlarmSoundSettingContent(
             }
         }
 
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(26.dp))
 
         Box(
             modifier = Modifier
                 .fillMaxWidth()
+                .padding( top= 16.dp)
                 .weight(1f) // ✅ 남은 공간을 전부 차지하게
         ) {
 
@@ -184,7 +216,7 @@ fun AlarmSoundSettingContent(
                 // ✅ 리스트가 토글 밑으로 쫙 깔리게
                 Surface(
                     modifier = Modifier.fillMaxSize(),
-                    shape = RoundedCornerShape(22.dp),
+                    shape = RoundedCornerShape(40.dp),
                     color = card,
                     tonalElevation = 0.dp
                 ) {
@@ -194,7 +226,8 @@ fun AlarmSoundSettingContent(
                             top = 10.dp,
                             bottom = sliderHeight + sliderPaddingBottom + 10.dp
                             // ✅ 맨 아래 슬라이더가 덮어쓰는 만큼 "리스트가 가려지지 않게" 패딩 확보
-                        )
+                        ),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         items(tones) { tone ->
                             ToneRow(
@@ -230,30 +263,36 @@ fun AlarmSoundSettingContent(
                     .align(Alignment.BottomCenter),
                 color = Color(0xFF060D17) // 배경 깔고 싶으면 card.copy(alpha=0.9f) 같은걸로
             ) {
-                // 슬라이더 Row 그대로(지금 네 코드)
-                Row(
+                Column(
                     modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .fillMaxWidth()
+                        .navigationBarsPadding() // 시스템 하단바 여백 대응
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.VolumeDown,
-                        contentDescription = "볼륨",
-                        tint = if (soundEnabled) Color.White else Color(0x66FFFFFF)
-                    )
-                    Spacer(Modifier.width(12.dp))
-                    Slider(
-                        value = vol.toFloat(),
-                        onValueChange = { v ->
-                            val newVol = v.toInt().coerceIn(0, maxVol)
-                            vol = newVol
-                            audioManager.setStreamVolume(AudioManager.STREAM_ALARM, newVol, 0)
-                        },
-                        valueRange = 0f..maxVol.toFloat(),
-                        enabled = soundEnabled,
-                        modifier = Modifier.weight(1f)
-                    )
+                    // 슬라이더 Row 그대로(지금 네 코드)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 30.dp, vertical = 20.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            painter = painterResource(AppIcons.HomeVolume),
+                            contentDescription = "볼륨",
+                            tint = if (soundEnabled) Color.White else Color(0x66FFFFFF),
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+
+                        CustomVolumeSlider(
+                            value = vol.toFloat(),
+                            onValueChange = { v ->
+                                vol = v.toInt().coerceIn(0, maxVol)
+                            },
+                            enabled = soundEnabled,
+                            valueRange = 0f..maxVol.toFloat(),
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
                 }
             }
         }
@@ -267,30 +306,113 @@ private fun ToneRow(
     selected: Boolean,
     onClick: () -> Unit
 ) {
-    val line = Color(0x1AF1F1F1)
+    val line = Color(0xFFD4DCE4)
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .padding(horizontal = 20.dp)
             .clickable(onClick = onClick)
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
+                .padding(vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             RadioButton(
+                modifier = Modifier.scale(1.25f),
                 selected = selected,
-                onClick = onClick
+                onClick = onClick,
+                colors = RadioButtonDefaults.colors().copy(
+                    selectedColor = Color(0xFFAAEDF2),
+                    unselectedColor = Color(0xFFD4DCE4)
+                )
             )
             Spacer(Modifier.width(10.dp))
             Text(
                 text = title,
-                color = Color.White
+                style = MaterialTheme.typography.bodySmall.copy(
+                    fontSize = 18.sp
+                ),
             )
         }
-        Divider(color = line, thickness = 1.dp)
+        HorizontalDivider(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 52.dp, end = 10.dp),
+            thickness = 0.6.dp,
+            color = line
+        )
+    }
+}
+
+@Composable
+fun CustomVolumeSlider(
+    value: Float,
+    onValueChange: (Float) -> Unit,
+    enabled: Boolean = true, // ✅ 비활성화 여부 추가
+    modifier: Modifier = Modifier,
+    valueRange: ClosedFloatingPointRange<Float> = 0f..1f,
+    activeColor: Color = Color(0xFFB9E0E3),
+    inactiveColor: Color = Color(0xFF858585)
+) {
+    // ✅ 비활성화 시 색상 계산 (투명도 조절)
+    val currentActiveColor = if (enabled) activeColor else activeColor.copy(alpha = 0.3f)
+    val currentInactiveColor = if (enabled) inactiveColor else inactiveColor.copy(alpha = 0.3f)
+    val thumbColor = if (enabled) Color.White else Color(0xFF424242)
+
+    BoxWithConstraints(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(40.dp)
+            .pointerInput(enabled, valueRange) { // ✅ enabled가 바뀔 때마다 재설정
+                if (!enabled) return@pointerInput // 비활성화 시 터치 무시
+                detectTapGestures { offset ->
+                    val ratio = (offset.x / size.width).coerceIn(0f, 1f)
+                    onValueChange(valueRange.start + (valueRange.endInclusive - valueRange.start) * ratio)
+                }
+            }
+            .pointerInput(enabled, valueRange) {
+                if (!enabled) return@pointerInput // 비활성화 시 드래그 무시
+                detectDragGestures { change, _ ->
+                    val ratio = (change.position.x / size.width).coerceIn(0f, 1f)
+                    onValueChange(valueRange.start + (valueRange.endInclusive - valueRange.start) * ratio)
+                }
+            }
+    ) {
+        val width = constraints.maxWidth.toFloat()
+        val fraction = (value - valueRange.start) / (valueRange.endInclusive - valueRange.start)
+        val thumbCenterX = width * fraction
+
+        // 1. 트랙 (비활성 배경)
+        Box(
+            modifier = Modifier
+                .align(Alignment.Center)
+                .fillMaxWidth()
+                .height(14.dp)
+                .background(currentInactiveColor, RoundedCornerShape(100.dp))
+        )
+
+        // 2. 트랙 (활성 - 색칠되는 부분)
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .width(with(LocalDensity.current) { (thumbCenterX).toDp() })
+                .height(14.dp)
+                .background(currentActiveColor, RoundedCornerShape(100.dp))
+        )
+
+        // 3. Thumb (동그라미)
+        Box(
+            modifier = Modifier
+                .offset { IntOffset(thumbCenterX.toInt() - 13.dp.toPx().toInt(), 0) }
+                .align(Alignment.CenterStart)
+                .size(26.dp)
+                // 비활성화 시 그림자 제거 혹은 축소
+                .shadow(if (enabled) 4.dp else 0.dp, CircleShape)
+                .background(thumbColor, CircleShape)
+        )
     }
 }
 

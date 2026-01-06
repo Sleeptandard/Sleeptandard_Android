@@ -26,9 +26,8 @@ class AlarmViewModel(application: Application): AndroidViewModel(application) {
     private val _alarms = mutableStateListOf<Alarm>()
     val alarms: List<Alarm> get() = _alarms
 
-    fun saveAlarm(hour: Int, minute: Int, isAm: Boolean, ringtoneUri: String, vibrationEnabled: Boolean): Boolean {
-
-        _alarm = Alarm(1, hour, minute, isAm, ringtoneUri, vibrationEnabled)
+    fun saveAlarm(hour: Int, minute: Int, isAm: Boolean, ringtoneUri: String, vibrationEnabled: Boolean, volume: Int): Boolean {
+        _alarm = Alarm(1, hour, minute, isAm, ringtoneUri, vibrationEnabled, volume) // ✅ volume 추가
         return true
     }
 

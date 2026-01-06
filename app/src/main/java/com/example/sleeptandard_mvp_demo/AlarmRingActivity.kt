@@ -14,6 +14,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -32,11 +33,13 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -95,7 +98,6 @@ class AlarmRingActivity : ComponentActivity() {
         }
         */
 
-
         setContent {
             Sleeptandard_MVP_DemoTheme {
                 AlarmRingScreen(
@@ -146,16 +148,24 @@ class AlarmRingActivity : ComponentActivity() {
 @Composable
 fun AlarmRingScreen(
     label: String,
+    sleepStage: String = "N1",
     onStop: () -> Unit
 ) {
     val currentTime = remember {
         LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm"))
     }
 
+    val linearGradation = Brush.verticalGradient(
+        colorStops = arrayOf(
+            0f to Color(0xFF050C16),
+            1f to Color(0xFF1C447C)
+        )
+    )
+
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(AlarmBackground)
+            .background(linearGradation)
             .padding(12.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -181,18 +191,22 @@ fun AlarmRingScreen(
                 contentDescription = "",
                 tint = Color.White
             )
+
+            Spacer(Modifier.height(18.dp ))
+
+            Text(
+                text = "${sleepStage} 단계에서 깨워드렸어요.",
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontSize = 16.sp
+                )
+            )
         }
 
         Spacer(modifier = Modifier.height(250.dp))
 
-        /*
-        Button(onClick = onStop) {
-            Text("알람 끄기")
-        }
-         */
 
         SwipeToStopButton(
-            text = "피드백",   // 사진처럼
+            text = "피드백",
             onComplete = {
                 Log.d("Swipe", "COMPLETED!")
                 onStop() },
@@ -208,72 +222,74 @@ fun SwipeToStopButton(
     text: String,
     onComplete: () -> Unit,
     modifier: Modifier = Modifier,
-    height: Dp = 67.dp,
-    thumbSize: Dp = 57.dp,
-    horizontalPadding: Dp = 6.dp,
-    completeThreshold: Float = 0.92f,
+    height: Dp = 56.dp, // 디자인에 맞춰 조정
+    thumbSize: Dp = 48.dp, // 트랙 높이보다 약간 작게 설정하면 예쁩니다
+    horizontalPadding: Dp = 4.dp, // 왼쪽 끝과의 간격
+    completeThreshold: Float = 0.85f, // 85% 이상 밀면 성공
 ) {
     val density = LocalDensity.current
     val thumbPx = with(density) { thumbSize.toPx() }
     val padPx = with(density) { horizontalPadding.toPx() }
 
     var dragX by remember { mutableFloatStateOf(0f) }
-    var completed by remember { androidx.compose.runtime.mutableStateOf(false) }
+    var completed by remember { mutableStateOf(false) }
 
-    androidx.compose.foundation.layout.BoxWithConstraints(modifier = modifier) {
+    BoxWithConstraints(modifier = modifier) {
         val trackWidthPx = with(density) { maxWidth.toPx() }
-        val maxDrag = max(0f, trackWidthPx - thumbPx - padPx * 2)
+        // 실제 이동 가능한 최대 거리는 (전체 너비 - 썸 너비 - 양쪽 패딩)
+        val maxDrag = (trackWidthPx - thumbPx - (padPx * 2)).coerceAtLeast(0f)
 
-        val animatedX by animateFloatAsState(dragX, label = "thumbX")
-        val progress = if (maxDrag == 0f) 0f else (animatedX / maxDrag).coerceIn(0f, 1f)
+        val animatedX by animateFloatAsState(
+            targetValue = dragX,
+            label = "thumbX",
+            // 성공 시 애니메이션 없이 즉시 이동, 실패 시 부드럽게 복귀
+            animationSpec = androidx.compose.animation.core.spring()
+        )
 
-        // ✅ 트랙 전체가 드래그를 받게!
+        // 트랙 (배경)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(height)
-                .clip(RoundedCornerShape(999.dp))
+                .clip(RoundedCornerShape(height / 2))
                 .background(Color.White.copy(alpha = 0.18f))
-                .pointerInput(completed, maxDrag) {
+                .pointerInput(maxDrag, completed) {
+                    if (completed) return@pointerInput
                     detectHorizontalDragGestures(
-                        onDragStart = { Log.d("Swipe", "drag start") },
-                        onHorizontalDrag = { _, dragAmount ->
-                            if (completed) return@detectHorizontalDragGestures
-                            dragX = (dragX + dragAmount).coerceIn(0f, maxDrag)
-                            Log.d("Swipe", "dragX=$dragX / maxDrag=$maxDrag")
-                        },
                         onDragEnd = {
-                            val endProgress = if (maxDrag == 0f) 0f else (dragX / maxDrag)
-                            Log.d("Swipe", "drag end progress=$endProgress")
-
-                            if (completed) return@detectHorizontalDragGestures
-                            if (endProgress >= completeThreshold) {
-                                completed = true
+                            if (dragX >= maxDrag * completeThreshold) {
                                 dragX = maxDrag
-                                Log.d("Swipe", "COMPLETED!")
+                                completed = true
                                 onComplete()
                             } else {
-                                dragX = 0f
+                                dragX = 0f // 실패 시 왼쪽으로 복귀
                             }
+                        },
+                        onHorizontalDrag = { change, dragAmount ->
+                            change.consume()
+                            // 0부터 maxDrag 사이로 드래그 제한
+                            dragX = (dragX + dragAmount).coerceIn(0f, maxDrag)
                         }
                     )
                 },
-            contentAlignment = Alignment.Center
+            contentAlignment = Alignment.CenterStart // 기본 정렬을 왼쪽 시작으로 고정
         ) {
+            // "피드백" 텍스트 (중앙 배치)
             Text(
                 text = text,
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 style = MaterialTheme.typography.bodyMedium.copy(
                     fontSize = 18.sp,
                     color = Color.White
                 )
             )
 
-            // thumb (흰 원) - 이건 이제 "표시만"
+            // Thumb (움직이는 흰 원)
             Box(
                 modifier = Modifier
-                    .align(Alignment.CenterStart)
-                    .padding(start = horizontalPadding)
-                    .offset { IntOffset(animatedX.roundToInt(), 0) }   // ✅ 여기!
+                    .padding(start = horizontalPadding) // 초기 고정 위치
+                    .offset { IntOffset(animatedX.roundToInt(), 0) } // 드래그 시 이동량
                     .size(thumbSize)
                     .clip(CircleShape)
                     .background(Color.White),
@@ -282,15 +298,10 @@ fun SwipeToStopButton(
                 Icon(
                     painter = painterResource(AppIcons.ArrowRight),
                     contentDescription = null,
-                    tint = Color.Black
+                    tint = Color.Black,
+                    modifier = Modifier.size(24.dp)
                 )
             }
         }
     }
-}
-
-@Preview
-@Composable
-fun AlarmRingScreenPreview(){
-    AlarmRingScreen("preview", {})
 }

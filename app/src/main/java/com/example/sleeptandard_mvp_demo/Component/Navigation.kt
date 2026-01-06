@@ -17,6 +17,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.createGraph
+import com.example.sleeptandard_mvp_demo.AlarmRingScreen
 
 import com.example.sleeptandard_mvp_demo.ClassFile.Alarm
 import com.example.sleeptandard_mvp_demo.ClassFile.AlarmScheduler
@@ -53,7 +54,7 @@ sealed class Screen(val route: String, val showBottomBar: Boolean = true) {
     object QnA: Screen("qna", showBottomBar = false)
     object Inquire: Screen("inquire", showBottomBar = false )
     object Tutorial: Screen("tutorial", showBottomBar = false)
-    object AlarmSoundSetting: Screen("alarmsoundsetting", showBottomBar = false)
+    object AlarmRing: Screen("alarmringscreen", showBottomBar = false)
 
 
     object Experiment : Screen("experiment", showBottomBar = false)
@@ -106,6 +107,12 @@ fun AppNav(
                         popUpTo(Screen.Home.route){inclusive = true}
                     }
                 },
+                goToAlarmRingScreen = {
+                    rememberNavController.navigate(Screen.AlarmRing.route)
+                },
+                goToFeedbackScreen = {
+                    rememberNavController.navigate(Screen.ReviewAlarm.route)
+                }
             )
         }
 
@@ -203,6 +210,13 @@ fun AppNav(
         /** 실험장 **/
         composable(Screen.Experiment.route){
             ExperimentScreen()
+        }
+
+        composable(Screen.AlarmRing.route){
+            AlarmRingScreen(
+                label = "시험용임",
+                onStop = {}
+            )
         }
 
     }
