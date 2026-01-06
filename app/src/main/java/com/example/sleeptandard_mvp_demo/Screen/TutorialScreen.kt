@@ -6,7 +6,26 @@ import androidx.compose.runtime.Composable
 
 @Composable
 fun TutorialScreen(){
-    Column {
+    Column(
+
+    ) {
         Text("This is Tutorial")
     }
+}
+
+@Composable
+fun StartPage(){
+
+}
+@Composable
+fun AlarmSettingPart(){
+
+}
+@Composable
+fun AlarmSettedPart(){
+
+}
+@Composable
+fun FeedbackPart(){
+
 }

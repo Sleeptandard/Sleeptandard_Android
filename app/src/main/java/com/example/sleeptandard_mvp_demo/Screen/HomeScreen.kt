@@ -4,10 +4,10 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.media.RingtoneManager
 import android.net.Uri
-import android.content.Intent
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -15,31 +15,41 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.LaunchedEffect
+
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Divider
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -47,33 +57,23 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
+
 import androidx.core.net.toUri
 
 import com.example.sleeptandard_mvp_demo.ClassFile.AlarmScheduler
+import com.example.sleeptandard_mvp_demo.Component.AlarmSoundSettingContent
 import com.example.sleeptandard_mvp_demo.Component.ConfirmButton
 import com.example.sleeptandard_mvp_demo.Component.CustomTimePicker
 import com.example.sleeptandard_mvp_demo.Component.OptionsSection
 import com.example.sleeptandard_mvp_demo.Prefs.AlarmPreferences
 import com.example.sleeptandard_mvp_demo.ViewModel.AlarmViewModel
 import com.example.sleeptandard_mvp_demo.ui.theme.AppIcons
-
-// 메모창
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Checkbox
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.material3.CheckboxDefaults
 import com.example.sleeptandard_mvp_demo.Prefs.CustomSituationItem
 import com.example.sleeptandard_mvp_demo.Prefs.CustomSituationPreferences
+
 
 @SuppressLint("ConfigurationScreenWidthHeight")
 @OptIn(ExperimentalMaterial3Api::class)
@@ -81,33 +81,37 @@ import com.example.sleeptandard_mvp_demo.Prefs.CustomSituationPreferences
 fun HomeScreen(
     alarmViewModel: AlarmViewModel,
     scheduler: AlarmScheduler,
-    onSoundClick: ()-> Unit,
     onClickConfirm: ()-> Unit,
 ) {
     val context = LocalContext.current
 
+    // 알람뷰모델에 넣을 값들임.
     var selectedHour by remember { mutableIntStateOf(8) }
     var selectedMinute by remember { mutableIntStateOf(30) }
     var selectedIsAm by remember { mutableStateOf(true) }
     var selectedRingtoneUri by remember { mutableStateOf("") }
     var selectedVibrationEnabled by remember { mutableStateOf(true) }
+
+    // 알람 SharedPreference 가져오기
+    val alarmPrefs = remember(context) { AlarmPreferences(context) }  // (선택) 매번 생성 안 하게
+
     // 알람음 이름
     var alarmName by remember { mutableStateOf("") }
-    // 타임피커 멈춤 신호
+    // 타임피커 멈춤 트리거
     var stopSignal by remember { mutableIntStateOf(0) }
 
-
-    // 모달창 띄우는지 여부
-    var showModal by remember { mutableStateOf(false) }
+    // 메모 모달창 띄우는 트리거
+    var showSituationModal by remember { mutableStateOf(false) }
     // ✅ 모달에서 선택한 상태(여러 개 토글 가능)
     var selectedSituation by remember { mutableStateOf(setOf<String>()) }
+
     // 상태 종류
     data class SituationOption(
         val id: String,
         val label: String,
         val iconRes: Int?
     )
-
+    // 기본 상태 (커스텀 x)
     var situationOptions = listOf(
         SituationOption("custom", "직접 추가", AppIcons.MemoPencil),
         SituationOption("sick", "아픔", AppIcons.MemoAid),
@@ -117,37 +121,46 @@ fun HomeScreen(
         SituationOption("pill", "수면제", AppIcons.MemoPill),
     )
 
-    // "직접추가" 모드인지
+    // "직접추가" 모드 트리거
     var isCustomMode by remember { mutableStateOf(false) }
 
-    // 입력 텍스트
+    // "직접추가"에서 입력한 텍스트
+    // TODO: 하나만 선택되게 해야하나?
     var customText by remember { mutableStateOf("") }
 
-    // 체크박스 상태 ("추가")
+    // "직접추가"에서 체크박스 상태
     var customChecked by remember { mutableStateOf(false) }
 
     // 커스텀으로 추가된 옵션들
     var customOptions by remember { mutableStateOf(listOf<SituationOption>()) }
-    val customIdSet = remember(customOptions) { customOptions.map { it.id }.toSet() }
+    val customIdSet = remember(customOptions) { customOptions.map { it.id }.toSet() }   // id만 따로 모아놓음
 
-    // 편집(삭제 선택) 모드
+    // 편집 모드 트리거
     var isEditMode by remember { mutableStateOf(false) }
 
     // 삭제 대상으로 체크한 커스텀 옵션 id들
     var selectedCustomForDelete by remember { mutableStateOf(setOf<String>()) }
 
+    // "직접추가"한 상황들을 담고 있는 Prefs
+    val customSituationPrefs = remember { CustomSituationPreferences(context) }
 
-    val customPrefs = remember { CustomSituationPreferences(context) }
-
+    // 커스텀으로 추가한 아이템이 있는지 여부
     val hasCustom = customOptions.isNotEmpty()
+    // 모달창에서 추가한 아이템이 있다면 4행을 보여주고 없다면 3행을 보여줌
     val visibleRows = if (hasCustom) 4 else 3
-
+    // 모달창 lazycolumn 크기 수치
     val itemHeight = 88.dp
     val spacing = 12.dp
     val gridHeight = itemHeight * visibleRows + spacing * (visibleRows - 1)
 
+    /*** sound모달창 ***/
+    var showSoundSheet by remember { mutableStateOf(false) }
+
+
+
+    // CustomSituationPrefs 불러오기
     LaunchedEffect(Unit) {
-        val loaded = customPrefs.load()
+        val loaded = customSituationPrefs.load()
         customOptions = loaded.map {
             SituationOption(
                 id = it.id,
@@ -157,7 +170,7 @@ fun HomeScreen(
         }
     }
 
-
+    // 알람뷰모델에 저장되어 있는 알람음 이름 가져오기
     LaunchedEffect(alarmViewModel.alarm.ringtoneUri) {
         val uriStr = alarmViewModel.alarm.ringtoneUri
         if (uriStr.isNotBlank()) {
@@ -247,8 +260,9 @@ fun HomeScreen(
 
                     // 링톤 설정
                     onSoundClick = {
-                        onSoundClick()
-                        /* 원래 기본 알람음 설정 창
+                        showSoundSheet = true
+
+                        /* 원래 기본 알람음 설정 창. 링톤피커 액티비티 인텐트 설정
                         val intent = Intent(RingtoneManager.ACTION_RINGTONE_PICKER)
                             .apply {
                                 // 추가적으로 설정합니다
@@ -283,11 +297,44 @@ fun HomeScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(48.dp),
-                    onClick = { showModal = true }
+                    onClick = { showSituationModal = true }
                 )
 
-                /*** 바텀 모달 ***/
-                if (showModal) {
+                /***사운드 선택 모달***/
+                if (showSoundSheet) {
+                    val soundSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+                    ModalBottomSheet(
+                        onDismissRequest = { showSoundSheet = false },
+                        sheetState = soundSheetState,
+                        containerColor = Color(0xFF1B2432),
+                        scrimColor = Color.Black.copy(alpha = 0.55f),
+                        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+                        contentWindowInsets = { WindowInsets(0, 0, 0, 0) }, // 여백 없애기
+                        dragHandle = null, // 드래그핸들 없앰.
+                        sheetGesturesEnabled = false
+                    ) {
+                        // ✅ 여기 안에 AlarmSoundSettingScreen의 "내용"을 넣는다
+                        AlarmSoundSettingContent(
+                            currentUriString = alarmViewModel.alarm.ringtoneUri,
+                            onClose = { showSoundSheet = false },
+                            onSelectUriString = { uriStr ->
+                                // ViewModel에 저장 (그리고 prefs 저장)
+                                alarmViewModel.saveAlarm(
+                                    hour = alarmViewModel.alarm.hour,
+                                    minute = alarmViewModel.alarm.minute,
+                                    isAm = alarmViewModel.alarm.isAm,
+                                    ringtoneUri = uriStr,
+                                    vibrationEnabled = alarmViewModel.alarm.vibrationEnabled
+                                )
+                                alarmPrefs.saveAlarm(alarmViewModel.alarm)
+                            }
+                        )
+                    }
+                }
+
+                /*** 상황 설정 모달 ***/
+                if (showSituationModal) {
 
                     val sheetState = rememberModalBottomSheetState(
                         skipPartiallyExpanded = true
@@ -297,7 +344,7 @@ fun HomeScreen(
 
 
                     ModalBottomSheet(
-                        onDismissRequest = { showModal = false },
+                        onDismissRequest = { showSituationModal = false },
                         sheetState = sheetState,
                         containerColor = Color(0xFF1B2432),
                         // 밖 영역은 어두워지고 클릭 막힘(scrim)
@@ -344,7 +391,7 @@ fun HomeScreen(
                                                             customOptions = updated
                                                             selectedSituation = selectedSituation - selectedCustomForDelete
 
-                                                            customPrefs.save(
+                                                            customSituationPrefs.save(
                                                                 updated.map { option ->
                                                                     CustomSituationItem(id = option.id, label = option.label)
                                                                 }
@@ -364,7 +411,7 @@ fun HomeScreen(
                                         isEditMode = false
                                         selectedCustomForDelete = emptySet()
                                         isCustomMode = false
-                                        showModal = false
+                                        showSituationModal = false
                                     }) {
                                         Text("✕", color = Color.White)
                                     }
@@ -474,7 +521,7 @@ fun HomeScreen(
                                 ){
                                     Button(
                                         onClick = {
-                                            showModal = false
+                                            showSituationModal = false
 
                                             // 알람정보 뷰모델로 저장하고 스케쥴러에 등록하고 다음 화면으로
                                             alarmViewModel.saveAlarm(
@@ -492,7 +539,6 @@ fun HomeScreen(
                                             alarmViewModel.startSleepTracking(triggerTime)
 
                                             // 여기서 알람 정보를 디스크에 저장
-                                            val alarmPrefs = AlarmPreferences(context)
                                             alarmPrefs.saveAlarm(alarmViewModel.alarm)
 
                                             onClickConfirm()
@@ -515,7 +561,7 @@ fun HomeScreen(
                                     }
                                     Button(
                                         onClick = {
-                                            showModal = false
+                                            showSituationModal = false
 
                                             // 알람정보 뷰모델로 저장하고 스케쥴러에 등록하고 다음 화면으로
 
@@ -600,7 +646,7 @@ fun HomeScreen(
                                             // ✅ "추가"가 체크되어 있고, 텍스트가 비어있지 않으면 그리드 아이템으로 추가
                                             val trimmed = customText.trim()
                                             if (customChecked && trimmed.isNotEmpty()) {
-                                                val saved = customPrefs.add(trimmed) // ✅ prefs에 저장 + 새 item 반환
+                                                val saved = customSituationPrefs.add(trimmed) // ✅ prefs에 저장 + 새 item 반환
 
                                                 customOptions = customOptions + SituationOption(
                                                     id = saved.id,
@@ -655,27 +701,6 @@ fun HomeScreen(
         }
     }
 }
-/* 잠깐 빼놓을게요 (확인버튼 액션)
-onClickConfirm()
-alarmViewModel.saveAlarm(
-selectedHour,
-selectedMinute,
-selectedIsAm,
-selectedRingtoneUri,
-selectedVibrationEnabled
-)
-scheduler.schedule(alarmViewModel.alarm)
-
-val triggerTime = scheduler.getTriggerTime()
-
-// 알람뷰모델에 triggerTime 보내기
-alarmViewModel.startSleepTracking(triggerTime)
-
-// 여기서 알람 정보를 디스크에 저장
-val alarmPrefs = AlarmPreferences(context)
-alarmPrefs.saveAlarm(alarmViewModel.alarm)
-
- */
 
 
 /********************** UI 변경 전 **********************/

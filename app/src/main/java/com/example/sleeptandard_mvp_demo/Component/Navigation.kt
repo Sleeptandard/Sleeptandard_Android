@@ -1,5 +1,6 @@
 package com.example.sleeptandard_mvp_demo.Component
 
+import android.net.Uri
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import com.example.sleeptandard_mvp_demo.Screen.HomeScreen
@@ -9,6 +10,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.net.toUri
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -99,20 +101,11 @@ fun AppNav(
             HomeScreen(
                 alarmViewModel = alarmViewModel,
                 scheduler = scheduler,
-                onSoundClick = {
-                    rememberNavController.navigate(Screen.AlarmSoundSetting.route)
-                },
                 onClickConfirm = {
                     rememberNavController.navigate(Screen.SettedAlarm.route){
                         popUpTo(Screen.Home.route){inclusive = true}
                     }
                 },
-            )
-        }
-
-        composable(Screen.AlarmSoundSetting.route){
-            AlarmSoundSettingScreen(
-
             )
         }
 
