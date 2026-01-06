@@ -33,6 +33,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -173,11 +174,15 @@ fun DifficultySelectorCustomDraggable(
     val steps = 3
     val lastIndex = steps - 1
 
+    val faceResId = listOf(AppIcons.ReviewBad, AppIcons.ReviewMeh, AppIcons.ReviewSmile)
+
     // 각 점의 x 위치(px)를 계산
+    val thumbRadiusPx = with(LocalDensity.current) { 9.dp.toPx() }
+    val usableWidth = (trackWidthPx.toFloat() - 2 * thumbRadiusPx).coerceAtLeast(0f)
+
     fun anchorX(index: Int): Float {
-        if (trackWidthPx <= 0) return 0f
-        val step = trackWidthPx.toFloat() / lastIndex
-        return step * index
+        val step = usableWidth / lastIndex
+        return thumbRadiusPx + step * index
     }
 
     // 현재 value에 해당하는 thumb 위치
@@ -202,17 +207,19 @@ fun DifficultySelectorCustomDraggable(
                 .height(28.dp)
                 .onSizeChanged { trackWidthPx = it.width }
                 .pointerInput(trackWidthPx) {
+                    var dragX = 0f
+
                     detectDragGestures(
                         onDragStart = { start ->
-                            // 탭 시작 위치로도 바로 스냅
-                            val idx = nearestIndex(start.x)
-                            onValueChange(idx)
+                            dragX = start.x
+                            onValueChange(nearestIndex(dragX))
                         },
-                        onDrag = { change, _ ->
-                            val idx = nearestIndex(change.position.x)
+                        onDrag = { change, dragAmount ->
+                            change.consume()
+                            dragX = (dragX + dragAmount.x).coerceIn(0f, trackWidthPx.toFloat())
+                            val idx = nearestIndex(dragX)
                             if (idx != value) onValueChange(idx)
-                        },
-                        onDragEnd = { /* value가 이미 가장 가까운 값으로 갱신되어 있음 */ }
+                        }
                     )
                 },
             contentAlignment = Alignment.CenterStart
@@ -265,9 +272,45 @@ fun DifficultySelectorCustomDraggable(
                 modifier = Modifier
                     .offset { IntOffset((animatedX - rPx).roundToInt(), 0) }
                     .align(Alignment.CenterStart)
-                    .size(18.dp)
-                    .background(Color.White, CircleShape)
-            )
+                    .size(18.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                // 1) Glow (살짝 큰 원 + 반투명 + blur 느낌)
+                Box(
+                    modifier = Modifier
+                        .size(26.dp)
+                        .graphicsLayer {
+                            alpha = 0.35f
+                            // 약간 퍼진 느낌: scale
+                            scaleX = 1.1f
+                            scaleY = 1.1f
+                            // (선택) shadow로 더 퍼진 느낌
+                            shadowElevation = 18.dp.toPx()
+                            shape = CircleShape
+                            clip = false
+                        }
+                        .background(Color.White, CircleShape)
+                )
+
+                // 2) Thumb 본체
+                Box(
+                    modifier = Modifier
+                        .size(18.dp)
+                        .shadow(
+                            elevation = 6.dp,
+                            shape = CircleShape,
+                            ambientColor = Color.White.copy(alpha = 0.25f),
+                            spotColor = Color.White.copy(alpha = 0.25f)
+                        )
+                        .background(Color.White, CircleShape)
+                )
+
+                Icon(
+                    painter = painterResource(faceResId[value]),
+                    contentDescription = "얼굴표정",
+                    tint = Color.Unspecified
+                )
+            }
         }
 
         Spacer(Modifier.height(5.dp))
@@ -287,7 +330,6 @@ fun DifficultySelectorCustomDraggable(
                     text = text,
                     color = Color.White.copy(alpha = alpha),
                     modifier = Modifier
-                        .pointerInput(Unit) {} // 클릭 영역 확보(선택사항)
                         .clickable { onValueChange(idx) }
                 )
             }

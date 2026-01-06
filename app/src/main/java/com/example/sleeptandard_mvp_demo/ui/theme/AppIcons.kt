@@ -25,6 +25,9 @@ object AppIcons {
     @DrawableRes val ReviewBadFace = R.drawable.ic_review_badface
     @DrawableRes val ReviewSosoFace = R.drawable.ic_review_sosoface
     @DrawableRes val ReviewGoodFace = R.drawable.ic_review_goodface
+    @DrawableRes val ReviewSmile = R.drawable.ic_review_smile
+    @DrawableRes val ReviewMeh = R.drawable.ic_review_meh
+    @DrawableRes val ReviewBad = R.drawable.ic_review_bad
 
     // 알람 설정 완료 화면
     @DrawableRes val SettedActivityDark = R.drawable.ic_setted_activity_dark
