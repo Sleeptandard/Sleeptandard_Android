@@ -56,4 +56,6 @@ object AppIcons {
     @DrawableRes val MemoNap = R.drawable.ic_memo_nap
     @DrawableRes val MemoPill = R.drawable.ic_memo_pill
     @DrawableRes val MemoDrink = R.drawable.ic_memo_drink
+
+    @DrawableRes val TutorialGraph = R.drawable.image_tutorial_graph
 }

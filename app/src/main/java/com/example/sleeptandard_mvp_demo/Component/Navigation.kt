@@ -188,7 +188,13 @@ fun AppNav(
             InquireScreen()
         }
         composable(Screen.Tutorial.route){
-            TutorialScreen()
+            TutorialScreen(
+                onFinish = {
+                    rememberNavController.navigate(Screen.Home.route){
+                        popUpTo(Screen.Home.route){inclusive = true}
+                    }
+                }
+            )
         }
         composable(Screen.SendingData.route) {
             SendingDataScreen()
