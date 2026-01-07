@@ -304,6 +304,7 @@ fun HomeScreen(
                     onClick = { showSituationModal = true }
                 )
 
+                /*
                 Button(
                     onClick = goToAlarmRingScreen
                 ){
@@ -315,6 +316,8 @@ fun HomeScreen(
                 ){
                     Text("디버깅용 피드백 화면")
                 }
+
+                 */
 
                 /***사운드 선택 모달***/
                 if (showSoundSheet) {
@@ -674,32 +677,38 @@ fun HomeScreen(
                                                     iconRes = null
                                                 )
                                                 selectedSituation = selectedSituation + saved.id
+
+                                                // 모드 종료 -> 원래 그리드로 복귀
+                                                isCustomMode = false
+                                                customChecked = false
                                             }
-                                            // 모드 종료 -> 원래 그리드로 복귀
-                                            isCustomMode = false
 
-                                            // 알람정보 뷰모델로 저장하고 스케쥴러에 등록하고 다음 화면으로
+                                            if(!customChecked){
+                                                // 알람정보 뷰모델로 저장하고 스케쥴러에 등록하고 다음 화면으로
 
-                                            alarmViewModel.saveAlarm(
-                                                selectedHour,
-                                                selectedMinute,
-                                                selectedIsAm,
-                                                selectedRingtoneUri,
-                                                selectedVibrationEnabled,
-                                                selectedVolume
-                                            )
-                                            scheduler.schedule(alarmViewModel.alarm)
+                                                alarmViewModel.saveAlarm(
+                                                    selectedHour,
+                                                    selectedMinute,
+                                                    selectedIsAm,
+                                                    selectedRingtoneUri,
+                                                    selectedVibrationEnabled,
+                                                    selectedVolume
+                                                )
+                                                scheduler.schedule(alarmViewModel.alarm)
 
-                                            val triggerTime = scheduler.getTriggerTime()
+                                                val triggerTime = scheduler.getTriggerTime()
 
-                                            // 알람뷰모델에 triggerTime 보내기
-                                            alarmViewModel.startSleepTracking(triggerTime)
+                                                // 알람뷰모델에 triggerTime 보내기
+                                                alarmViewModel.startSleepTracking(triggerTime)
 
-                                            // 여기서 알람 정보를 디스크에 저장
-                                            val alarmPrefs = AlarmPreferences(context)
-                                            alarmPrefs.saveAlarm(alarmViewModel.alarm)
+                                                // 여기서 알람 정보를 디스크에 저장
+                                                val alarmPrefs = AlarmPreferences(context)
+                                                alarmPrefs.saveAlarm(alarmViewModel.alarm)
 
-                                            onClickConfirm()
+                                                onClickConfirm()
+                                            }
+
+
                                         },
                                         modifier = Modifier
                                             .fillMaxWidth()

@@ -5,6 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.interpolator.view.animation.FastOutSlowInInterpolator
 
 import com.example.sleeptandard_mvp_demo.ClassFile.AlarmScheduler
 import com.example.sleeptandard_mvp_demo.Component.AppNav
@@ -18,7 +19,7 @@ import com.example.sleeptandard_mvp_demo.Prefs.AlarmPreferences
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
-        installSplashScreen()
+        val splash = installSplashScreen()
 
         super.onCreate(savedInstanceState)
 
@@ -44,6 +45,23 @@ class MainActivity : ComponentActivity() {
                 else Screen.Home.route
 
         enableEdgeToEdge()
+
+        splash.setOnExitAnimationListener { splashScreenView ->
+
+            // 예쁜 “창 전환” 느낌: 살짝 축소 + 페이드아웃
+            splashScreenView.view.animate()
+                .alpha(0f)
+                .scaleX(0.98f)
+                .scaleY(0.98f)
+                .setDuration(750L)
+                .setInterpolator(FastOutSlowInInterpolator())
+                .withEndAction {
+                    // ✅ 반드시 제거해줘야 함
+                    splashScreenView.remove()
+                }
+                .start()
+        }
+
         setContent {
             Sleeptandard_MVP_DemoTheme {
                 AppNav(
