@@ -540,5 +540,4 @@ fun VibrationOptionCard(
         }
     }
 }
-
  */

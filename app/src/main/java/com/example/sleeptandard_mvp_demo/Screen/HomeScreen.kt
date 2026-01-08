@@ -255,9 +255,7 @@ fun HomeScreen(
                 modifier = Modifier
                     .fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally
-
             ) {
-
                 OptionsSection(
                     modifier = Modifier
                         .fillMaxWidth(),
@@ -294,6 +292,7 @@ fun HomeScreen(
                     onCheckedChange = { selectedVibrationEnabled = it },
                     alarmName = alarmName
                 )
+
 
                 Spacer(modifier = Modifier.height(24.dp))
 
@@ -557,8 +556,10 @@ fun HomeScreen(
 
                                             val triggerTime = scheduler.getTriggerTime()
 
-                                            // 알람뷰모델에 triggerTime 보내기
-                                            alarmViewModel.startSleepTracking(triggerTime)
+                                            // 2. 워치 깨우기 (전선 연결!)
+                                            alarmViewModel.startSleepTracking(triggerTime) // ✅ 주석 해제됨!
+                                            // 3. 눈으로 확인하기 위한 토스트 메시지 (추가)
+                                            android.widget.Toast.makeText(context, "워치 연결 시도 중...", android.widget.Toast.LENGTH_SHORT).show()
 
                                             // 여기서 알람 정보를 디스크에 저장
                                             alarmPrefs.saveAlarm(alarmViewModel.alarm)
@@ -598,14 +599,16 @@ fun HomeScreen(
                                             scheduler.schedule(alarmViewModel.alarm)
 
                                             val triggerTime = scheduler.getTriggerTime()
-
-                                            // 알람뷰모델에 triggerTime 보내기
-                                            alarmViewModel.startSleepTracking(triggerTime)
+                                            
+                                            // 2. 워치 깨우기 (전선 연결!)
+                                            alarmViewModel.startSleepTracking(triggerTime) // ✅ 주석 해제됨!
+                                            // 3. 눈으로 확인하기 위한 토스트 메시지 (추가)
+                                            android.widget.Toast.makeText(context, "워치 연결 시도 중...", android.widget.Toast.LENGTH_SHORT).show()
 
                                             // 여기서 알람 정보를 디스크에 저장
                                             val alarmPrefs = AlarmPreferences(context)
                                             alarmPrefs.saveAlarm(alarmViewModel.alarm)
-
+                                            
                                             onClickConfirm()
                                         },
                                         modifier = Modifier
@@ -697,9 +700,10 @@ fun HomeScreen(
                                                 scheduler.schedule(alarmViewModel.alarm)
 
                                                 val triggerTime = scheduler.getTriggerTime()
-
-                                                // 알람뷰모델에 triggerTime 보내기
-                                                alarmViewModel.startSleepTracking(triggerTime)
+                                                // 2. 워치 깨우기 (전선 연결!)
+                                                alarmViewModel.startSleepTracking(triggerTime) // ✅ 주석 해제됨!
+                                                // 3. 눈으로 확인하기 위한 토스트 메시지 (추가)
+                                                android.widget.Toast.makeText(context, "워치 연결 시도 중...", android.widget.Toast.LENGTH_SHORT).show()
 
                                                 // 여기서 알람 정보를 디스크에 저장
                                                 val alarmPrefs = AlarmPreferences(context)
@@ -766,6 +770,10 @@ Surface(modifier = Modifier
                 if (uri != null) {
                     selectedRingtoneUri = uri.toString()   // state에 저장
                 }
+
+            ) {
+                Text("GTS")
+
             }
         }
 
@@ -818,4 +826,16 @@ Surface(modifier = Modifier
         }
     }
 }
+*/
+
+/**** 기존 front에 있던 워치 통신 함수들 ****/
+/*
+
+                    // 2. 워치 깨우기 (전선 연결!)
+                    val triggerTime = scheduler.getTriggerTime()
+                    alarmViewModel.startSleepTracking(triggerTime) // ✅ 주석 해제됨!
+                    
+                    // 3. 눈으로 확인하기 위한 토스트 메시지 (추가)
+                    android.widget.Toast.makeText(context, "워치 연결 시도 중...", android.widget.Toast.LENGTH_SHORT).show()
+
 */

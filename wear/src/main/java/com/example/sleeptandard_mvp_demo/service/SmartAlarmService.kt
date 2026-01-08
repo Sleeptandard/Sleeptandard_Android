@@ -12,7 +12,6 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.os.Build
-import android.os.IBinder
 import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -25,167 +24,139 @@ import com.example.sleeptandard_mvp_demo.backend.processing.FeatureExtractor
 import com.example.sleeptandard_mvp_demo.backend.processing.InferenceManager
 import com.example.sleeptandard_mvp_demo.backend.repository.DataRepository
 import com.example.sleeptandard_mvp_demo.backend.repository.UserStatsManager
-import com.google.android.gms.tasks.Tasks
-import com.google.android.gms.wearable.MessageClient
 import com.google.android.gms.wearable.Wearable
+import com.google.android.gms.wearable.MessageClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await // [핵심] 이 친구가 .await()를 가능하게 합니다
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.nio.ByteBuffer
 import java.util.ArrayDeque
 import java.util.Collections
+import java.util.concurrent.ConcurrentLinkedDeque
+import android.os.IBinder
 
 class SmartAlarmService : Service(), SensorEventListener {
 
     private lateinit var sensorManager: SensorManager
     private lateinit var dataRepository: DataRepository
     private lateinit var userStatsManager: UserStatsManager
-    private lateinit var inferenceManager: InferenceManager
     private val featureExtractor = FeatureExtractor()
+    private lateinit var inferenceManager: InferenceManager
+
     private val serviceScope = CoroutineScope(Dispatchers.Default)
 
-    // WakeLock for preventing CPU sleep during tracking
     private lateinit var wakeLock: PowerManager.WakeLock
-    
-    // Wearable Message Client for Phone communication
     private lateinit var messageClient: MessageClient
-    
-    // Synchronization lock for window access
-    private val windowLock = Any()
 
-    // Window sizes (30s intervals for power optimization)
-    private val HR_WINDOW_SIZE = 30  // 30 seconds * 1Hz
-    private val ACC_WINDOW_SIZE = 750  // 30 seconds * 25Hz
-    
+    private var isServiceRunning = false
+
+    private val HR_WINDOW_SIZE = 30
+    private val ACC_WINDOW_SIZE = 750
+
     private val hrWindow = ArrayDeque<Float>(HR_WINDOW_SIZE)
-    private val accWindow = ArrayDeque<Triple<Float, Float, Float>>(ACC_WINDOW_SIZE)
+    private val accWindow = ConcurrentLinkedDeque<Triple<Float, Float, Float>>()
     private var lastFeatureExtractionTime = 0L
 
-    // Sampling rates and intervals (Power Budget Optimization)
-    private val ACC_SAMPLE_RATE_US = 40000  // 25Hz
-    private val HR_SAMPLE_RATE_US = 1000000  // 1Hz
-    private val BATCH_LATENCY_US = 30_000_000  // 30 seconds batch latency
-    private val FEATURE_INTERVAL_MS = 30000L  // 30 seconds inference interval
-    
-    // Smart Window Logic (Phase 3)
+    private val ACC_SAMPLE_RATE_US = 40000
+    private val HR_SAMPLE_RATE_US = 1000000
+    private val BATCH_LATENCY_US = 30_000_000
+    private val FEATURE_INTERVAL_MS = 30000L
+
     private var targetAlarmTime: Long = 0L
     private var sessionStartTime: Long = 0L
     private val inferenceHistory = Collections.synchronizedList(mutableListOf<StageEntry>())
     private var consecutiveLightCount = 0
     private var lastStage: SleepStage = SleepStage.UNKNOWN
-    private var hasTriggered = false 
+    private var hasTriggered = false
 
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "SmartAlarmService onCreate()")
     }
-    
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // Handle different actions
         when (intent?.action) {
             ACTION_START_TRACKING -> {
-                // Extract targetAlarmTime from intent
                 targetAlarmTime = intent.getLongExtra(EXTRA_TARGET_TIME, 0L)
                 sessionStartTime = System.currentTimeMillis()
-                
-                Log.i(TAG, "Service Started with Batch=30s, Interval=30s")
-                Log.i(TAG, "Target Alarm Time: $targetAlarmTime")
-                
+                Log.i(TAG, "Service Started. Target Time: $targetAlarmTime")
                 initializeService()
             }
             ACTION_STOP_AND_SEND_RESULT -> {
-                Log.i(TAG, "Stop and send result requested")
+                Log.i(TAG, "Stop requested")
                 stopAndSendResult()
                 return START_NOT_STICKY
             }
             else -> {
-                Log.w(TAG, "Unknown action: ${intent?.action}")
                 stopSelf()
                 return START_NOT_STICKY
             }
         }
-        
         return START_NOT_STICKY
     }
-    
+
     private fun initializeService() {
         try {
-            // 1. Initialize WakeLock
             val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
             wakeLock = powerManager.newWakeLock(
                 PowerManager.PARTIAL_WAKE_LOCK,
                 "SmartAlarm:TrackingWakeLock"
             )
-            
+
             if (!wakeLock.isHeld) {
-                wakeLock.acquire(8 * 60 * 60 * 1000L) // Max 8 hours
+                wakeLock.acquire(8 * 60 * 60 * 1000L)
                 Log.d(TAG, "WakeLock acquired")
             }
-            
-            // 2. Initialize backend components
+
             sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
             dataRepository = DataRepository(this)
             userStatsManager = UserStatsManager(this)
-            inferenceManager = InferenceManager(this)
             messageClient = Wearable.getMessageClient(this)
-            
-            // 3. Register sensors with hardware batching
-            val hrSensor = sensorManager.getDefaultSensor(Sensor.TYPE_HEART_RATE)
-            val accSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
-            
-            if (hrSensor == null || accSensor == null) {
-                throw IllegalStateException("Required sensors not available")
-            }
-            
-            // Register HR sensor (1Hz, no batching needed)
-            sensorManager.registerListener(this, hrSensor, HR_SAMPLE_RATE_US)
-            
-            // Register ACC sensor with 30s batch latency (Power Optimization)
-            sensorManager.registerListener(
-                this, 
-                accSensor, 
-                ACC_SAMPLE_RATE_US,
-                BATCH_LATENCY_US
-            )
-            
-            Log.d(TAG, "Sensors registered with 30s batch latency")
-            
-            // 4. Create notification and promote to foreground
+            inferenceManager = InferenceManager(this)
+
+            registerSensors()
             createNotificationChannel()
+
             val notification = buildNotification()
-            
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                startForeground(
-                    NOTIFICATION_ID,
-                    notification,
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH
-                )
+
+            if (Build.VERSION.SDK_INT >= 34) {
+                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH)
             } else {
                 startForeground(NOTIFICATION_ID, notification)
             }
-            
+
+            isServiceRunning = true
             Log.i(TAG, "Foreground service started successfully")
-            
+
         } catch (e: Exception) {
             Log.e(TAG, "Service initialization failed", e)
-            
-            // Release WakeLock if acquired
             try {
                 if (::wakeLock.isInitialized && wakeLock.isHeld) {
                     wakeLock.release()
                 }
-            } catch (ex: Exception) {
-                Log.e(TAG, "Failed to release WakeLock during cleanup", ex)
-            }
-            
-            // Stop service immediately
+            } catch (ex: Exception) { /* Ignore */ }
             stopSelf()
         }
     }
-    
+
+    private fun registerSensors() {
+        val hrSensor = sensorManager.getDefaultSensor(Sensor.TYPE_HEART_RATE)
+        val accSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+
+        if (hrSensor != null) {
+            sensorManager.registerListener(this, hrSensor, HR_SAMPLE_RATE_US)
+        }
+        if (accSensor != null) {
+            sensorManager.registerListener(this, accSensor, ACC_SAMPLE_RATE_US, BATCH_LATENCY_US)
+        }
+        Log.d(TAG, "Sensors registered")
+    }
+
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
@@ -193,23 +164,19 @@ class SmartAlarmService : Service(), SensorEventListener {
                 "Sleep Tracking",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Monitors sleep stages using sensors"
                 setShowBadge(false)
             }
-            
-            val notificationManager = getSystemService(NotificationManager::class.java)
-            notificationManager.createNotificationChannel(channel)
+            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         }
     }
-    
+
     private fun buildNotification(): Notification {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Sleep Tracking Active")
             .setContentText("Monitoring sensors...")
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.mipmap.ic_launcher)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
-            .setShowWhen(false)
             .build()
     }
 
@@ -217,283 +184,230 @@ class SmartAlarmService : Service(), SensorEventListener {
         event ?: return
         val timestamp = System.currentTimeMillis()
 
-        when (event.sensor.type) {
-            Sensor.TYPE_ACCELEROMETER -> {
-                val x = event.values[0]
-                val y = event.values[1]
-                val z = event.values[2]
-                
-                if (!x.isFinite() || !y.isFinite() || !z.isFinite()) return
-                
-                // Log raw data
-                dataRepository.enqueueSensorData(timestamp, SensorType.ACC, x, y, z)
-                
-                // Update ACC window with thread safety
-                synchronized(windowLock) {
-                    if (accWindow.size >= ACC_WINDOW_SIZE) {
-                        accWindow.removeFirst()
-                    }
-                    accWindow.addLast(Triple(x, y, z))
-                }
+        if (event.sensor.type == Sensor.TYPE_ACCELEROMETER) {
+            val x = event.values[0]
+            val y = event.values[1]
+            val z = event.values[2]
+
+            if (!x.isFinite() || !y.isFinite() || !z.isFinite()) return
+
+            dataRepository.enqueueSensorData(timestamp, SensorType.ACC, x, y, z)
+            accWindow.add(Triple(x, y, z))
+            if (accWindow.size > ACC_WINDOW_SIZE) {
+                accWindow.poll()
             }
-            
-            Sensor.TYPE_HEART_RATE -> {
-                val hrValue = event.values[0]
-                
-                if (!hrValue.isFinite() || hrValue <= 0) return
 
-                // Log raw data
-                dataRepository.enqueueSensorData(timestamp, SensorType.HR, hrValue, 0f, 0f)
-                
-                // Update statistics
-                userStatsManager.update(hrValue)
+        } else if (event.sensor.type == Sensor.TYPE_HEART_RATE) {
+            val hrValue = event.values[0]
+            if (!hrValue.isFinite() || hrValue <= 0) return
 
-                // Update HR window and check inference trigger
-                handleHeartRateLogic(hrValue, timestamp)
-            }
-        }
-    }
+            dataRepository.enqueueSensorData(timestamp, SensorType.HR, hrValue, 0f, 0f)
+            userStatsManager.update(hrValue)
 
-    private fun handleHeartRateLogic(hrValue: Float, timestamp: Long) {
-        val shouldRunInference: Boolean
-        val hrSnapshot: List<Float>
-        val accSnapshot: List<Triple<Float, Float, Float>>
-
-        synchronized(windowLock) {
-            // Update HR window
             if (hrWindow.size >= HR_WINDOW_SIZE) {
                 hrWindow.removeFirst()
             }
             hrWindow.addLast(hrValue)
 
-            // Check if inference should run (60s interval)
-            shouldRunInference = (hrWindow.size == HR_WINDOW_SIZE) &&
-                    (accWindow.size >= ACC_WINDOW_SIZE) &&
-                    (timestamp - lastFeatureExtractionTime >= FEATURE_INTERVAL_MS)
-            
-            if (shouldRunInference) {
-                hrSnapshot = hrWindow.toList()
-                accSnapshot = accWindow.toList()
-            } else {
-                hrSnapshot = emptyList()
-                accSnapshot = emptyList()
+            if (timestamp - lastFeatureExtractionTime >= FEATURE_INTERVAL_MS) {
+                if (hrWindow.size >= HR_WINDOW_SIZE && accWindow.size >= ACC_WINDOW_SIZE) {
+                    runInferencePipeline(timestamp)
+                    lastFeatureExtractionTime = timestamp
+                }
             }
         }
-
-        if (shouldRunInference) {
-            lastFeatureExtractionTime = timestamp
-            runInferencePipeline(timestamp, hrSnapshot, accSnapshot)
-        }
     }
 
-    private fun runInferencePipeline(
-        timestamp: Long, 
-        hrBuffer: List<Float>,
-        accBuffer: List<Triple<Float, Float, Float>>
-    ) {
+    private fun runInferencePipeline(timestamp: Long) {
+        val hrSnapshot = hrWindow.toList()
+        val accSnapshot = accWindow.toList()
+
         serviceScope.launch {
-            val userMean = userStatsManager.getUserMean()
-            val userStd = userStatsManager.getUserStd()
+            try {
+                val userMean = userStatsManager.getUserMean()
+                val userStd = userStatsManager.getUserStd()
 
-            // Extract HR features
-            val hrFeatures = featureExtractor.getFeatures(hrBuffer, userMean, userStd)
-            val featureString = hrFeatures.joinToString(",")
+                val hrFeatures = featureExtractor.getFeatures(hrSnapshot, userMean, userStd)
+                val featureString = hrFeatures.joinToString(",")
 
-            // PyTorch Mobile inference
-            val (currentStage, confidence) = inferenceManager.predict(accBuffer, hrFeatures)
-            
-            // Save to inference history
-            val stageEntry = StageEntry(timestamp, currentStage.name)
-            inferenceHistory.add(stageEntry)
-            
-            // Log to file with confidence score
-            dataRepository.enqueueInferenceLog(
-                timestamp, 
-                "${currentStage.name},$confidence,$featureString,accSamples=${accBuffer.size}"
-            )
-            
-            // Smart Window Logic
-            checkSmartWindowAndTrigger(timestamp, currentStage)
-            
-            Log.d(TAG, "Inference completed: Stage=$currentStage (Conf: $confidence), HR=${hrBuffer.size}, ACC=${accBuffer.size}")
+                val currentStage = inferenceManager.predict(accSnapshot, hrFeatures)
+
+                inferenceHistory.add(StageEntry(timestamp, currentStage.name))
+                dataRepository.enqueueInferenceLog(timestamp, "${currentStage.name},0.0,$featureString")
+
+                Log.d(TAG, "Inference Result: $currentStage")
+                checkSmartWindowAndTrigger(timestamp, currentStage)
+
+            } catch (e: Exception) {
+                Log.e(TAG, "Inference Failed", e)
+            }
         }
     }
-    
-    
-    /**
-     * Smart Window 체크 및 트리거 로직
-     */
+
     private fun checkSmartWindowAndTrigger(currentTime: Long, currentStage: SleepStage) {
         if (hasTriggered || targetAlarmTime == 0L) return
-        
+
         val windowStart = targetAlarmTime - SMART_WINDOW_MS
-        val isInWindow = currentTime in windowStart..targetAlarmTime
+
+        if (currentTime < windowStart) return
         
-        Log.d(TAG, "SmartLogic - Time: $currentTime, Target: $targetAlarmTime, InWindow: $isInWindow, Stage: $currentStage")
-        
-        if (currentTime < windowStart) {
-            // Too early - just log
-            Log.d(TAG, "Outside window (too early). Just logging.")
-            return
-        }
-        
+        // [개선] 목표 시간 초과 시 폴백 알람 실행
         if (currentTime > targetAlarmTime) {
-            // Too late - Phone handles backup alarm
-            Log.d(TAG, "Outside window (too late). Phone handles backup.")
+            Log.w(TAG, "⏰ Target time reached without smart trigger. Triggering fallback alarm...")
+            hasTriggered = true // 중복 실행 방지
+            
+            serviceScope.launch {
+                try {
+                    // 1. 폴백 알람 전송 (목표 시간에 무조건 울림)
+                    sendTriggerSignalSuspend(targetAlarmTime)
+                    
+                    // 2. 짧은 대기 (메시지 전송 안정성 확보)
+                    delay(500L)
+                    
+                    // 3. 결과 전송 및 서비스 종료
+                    stopAndSendResultSuspend()
+                } catch (e: Exception) {
+                    Log.e(TAG, "❌ Error during fallback alarm", e)
+                    stopSelf() // 에러 발생 시에도 서비스는 종료
+                }
+            }
             return
         }
-        
-        // Inside Smart Window - Check trigger conditions
-        if (isInWindow) {
-            checkTriggerConditions(currentTime, currentStage)
+
+        var shouldTrigger = false
+        var triggerReason = ""
+
+        if (currentStage == SleepStage.WAKE) {
+            shouldTrigger = true
+            triggerReason = "WAKE detected"
+        } else if (currentStage == SleepStage.LIGHT) {
+            if (lastStage == SleepStage.LIGHT) {
+                consecutiveLightCount++
+            } else {
+                consecutiveLightCount = 1
+            }
+
+            if (consecutiveLightCount >= 3) {
+                shouldTrigger = true
+                triggerReason = "3 consecutive LIGHT"
+            }
+        } else {
+            consecutiveLightCount = 0
         }
-    }
-    
-    /**
-     * 트리거 조건 체크
-     * - WAKE: 즉시 트리거
-     * - LIGHT: 3회 연속 시 트리거
-     */
-    private fun checkTriggerConditions(currentTime: Long, currentStage: SleepStage) {
-        when (currentStage) {
-            SleepStage.WAKE -> {
-                Log.i(TAG, "WAKE detected! Triggering alarm immediately.")
-                sendTriggerSignal(currentTime)
-                hasTriggered = true
-            }
-            SleepStage.LIGHT -> {
-                if (lastStage == SleepStage.LIGHT) {
-                    consecutiveLightCount++
-                } else {
-                    consecutiveLightCount = 1
+
+        // [핵심] 트리거 조건 충족 시 자동 종료 시퀀스 실행
+        if (shouldTrigger) {
+            Log.i(TAG, "🔔 Trigger Condition Met: $triggerReason! Initiating shutdown sequence...")
+            hasTriggered = true // 중복 실행 방지
+
+            serviceScope.launch {
+                try {
+                    // 1. 알람 신호 전송 (폰 울리기)
+                    sendTriggerSignalSuspend(currentTime)
+
+                    // 2. 짧은 대기 (메시지 전송 안정성 확보)
+                    delay(500L)
+
+                    // 3. 결과 전송 및 서비스 종료 (내부에서 stopSelf 호출됨)
+                    stopAndSendResultSuspend()
+
+                } catch (e: Exception) {
+                    Log.e(TAG, "❌ Error during auto-shutdown sequence", e)
+                    stopSelf() // 에러 발생 시에도 서비스는 종료
                 }
-                
-                Log.d(TAG, "LIGHT detected (${consecutiveLightCount}/3)")
-                
-                if (consecutiveLightCount >= 3) {
-                    Log.i(TAG, "3 consecutive LIGHT stages! Triggering alarm.")
-                    sendTriggerSignal(currentTime)
-                    hasTriggered = true
-                }
-            }
-            else -> {
-                consecutiveLightCount = 0
             }
         }
-        
+
         lastStage = currentStage
     }
 
-    override fun onDestroy() {
-        // 1. Unregister sensors to stop data flow
-        sensorManager.unregisterListener(this)
-        
-        // 2. Stop logging and flush remaining data
-        dataRepository.stopLogging()
-        
-        // 3. Release inference model resources
-        if (::inferenceManager.isInitialized) {
-            inferenceManager.release()
-        }
-        
-        // 4. Cancel coroutine scope
-        serviceScope.cancel()
-        
-        // 5. Release WakeLock
+    // [리팩토링] Suspend 함수로 변경 - 순차 실행 가능
+    private suspend fun sendTriggerSignalSuspend(triggerTime: Long) {
         try {
-            if (wakeLock.isHeld) {
+            val nodeClient = Wearable.getNodeClient(this@SmartAlarmService)
+            val connectedNodes = nodeClient.connectedNodes.await()
+
+            if (connectedNodes.isNotEmpty()) {
+                val payload = ByteBuffer.allocate(8).putLong(triggerTime).array()
+                val phoneNodeId = connectedNodes.first().id
+
+                messageClient.sendMessage(phoneNodeId, PATH_TRIGGER_ALARM, payload).await()
+                Log.i(TAG, "✅ Trigger signal sent to phone!")
+            } else {
+                Log.w(TAG, "No connected nodes to send trigger signal")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to send trigger", e)
+        }
+    }
+
+    // [리팩토링] Suspend 함수로 변경 - 순차 실행 가능
+    private suspend fun stopAndSendResultSuspend() {
+        try {
+            val result = SleepSessionResult(
+                startTime = sessionStartTime,
+                endTime = System.currentTimeMillis(),
+                stageHistory = inferenceHistory.toList()
+            )
+            val jsonPayload = Json.encodeToString(result)
+
+            val nodeClient = Wearable.getNodeClient(this@SmartAlarmService)
+            val connectedNodes = nodeClient.connectedNodes.await()
+
+            if (connectedNodes.isNotEmpty()) {
+                val phoneNodeId = connectedNodes.first().id
+                messageClient.sendMessage(phoneNodeId, PATH_SLEEP_DATA_RESULT, jsonPayload.toByteArray()).await()
+                Log.i(TAG, "✅ Result sent to phone.")
+            } else {
+                Log.w(TAG, "No connected nodes to send result")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to send result", e)
+        } finally {
+            stopSelf()
+        }
+    }
+
+    // [래퍼] onStartCommand에서 호출되는 기존 함수 유지
+    private fun stopAndSendResult() {
+        serviceScope.launch {
+            stopAndSendResultSuspend()
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        isServiceRunning = false
+        sensorManager.unregisterListener(this)
+        dataRepository.stopLogging()
+        serviceScope.cancel()
+
+        try {
+            if (::wakeLock.isInitialized && wakeLock.isHeld) {
                 wakeLock.release()
                 Log.d(TAG, "WakeLock released")
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to release WakeLock", e)
+            Log.e(TAG, "WakeLock release error", e)
         }
-        
-        super.onDestroy()
+
         Log.d(TAG, "SmartAlarmService destroyed")
     }
-    
+
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
     override fun onBind(intent: Intent?): IBinder? = null
-    
-    /**
-     * 폰으로 트리거 신호 전송
-     */
-    private fun sendTriggerSignal(triggerTime: Long) {
-        serviceScope.launch {
-            try {
-                val connectedNodes = Tasks.await(Wearable.getNodeClient(this@SmartAlarmService).connectedNodes)
-                
-                if (connectedNodes.isEmpty()) {
-                    Log.e(TAG, "No connected phone found")
-                    return@launch
-                }
-                
-                val phoneNodeId = connectedNodes.first().id
-                val payload = ByteBuffer.allocate(8).putLong(triggerTime).array()
-                
-                Tasks.await(messageClient.sendMessage(phoneNodeId, PATH_TRIGGER_ALARM, payload))
-                Log.i(TAG, "Trigger signal sent to phone successfully")
-                
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to send trigger signal", e)
-            }
-        }
-    }
-    
-    /**
-     * 서비스 중지 및 결과 전송
-     */
-    private fun stopAndSendResult() {
-        serviceScope.launch {
-            try {
-                // Step 1: Prepare sleep session result
-                val result = SleepSessionResult(
-                    startTime = sessionStartTime,
-                    endTime = System.currentTimeMillis(),
-                    stageHistory = inferenceHistory.toList()
-                )
-                
-                // Step 2: Serialize to JSON
-                val jsonPayload = Json.encodeToString(result)
-                Log.d(TAG, "Sleep result serialized: ${inferenceHistory.size} stages")
-                
-                // Step 3: Send to Phone
-                val connectedNodes = Tasks.await(Wearable.getNodeClient(this@SmartAlarmService).connectedNodes)
-                
-                if (connectedNodes.isNotEmpty()) {
-                    val phoneNodeId = connectedNodes.first().id
-                    Tasks.await(messageClient.sendMessage(phoneNodeId, PATH_SLEEP_DATA_RESULT, jsonPayload.toByteArray()))
-                    Log.i(TAG, "Sleep result sent to phone successfully")
-                } else {
-                    Log.w(TAG, "No connected phone found, data not sent")
-                }
-                
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to send sleep result", e)
-            } finally {
-                // Step 4: Stop service
-                stopSelf()
-            }
-        }
-    }
-    
+
     companion object {
         private const val TAG = "SmartAlarmService"
         private const val NOTIFICATION_ID = 1001
         private const val CHANNEL_ID = "sleep_tracking_channel"
-        
-        // Smart Window (30 minutes before target)
-        private const val SMART_WINDOW_MS = 30 * 60 * 1000L  // 30 minutes
-        
-        // Actions
+
+        private const val SMART_WINDOW_MS = 30 * 60 * 1000L
+
         const val ACTION_START_TRACKING = "com.example.sleeptandard_mvp_demo.START_TRACKING"
         const val ACTION_STOP_AND_SEND_RESULT = "com.example.sleeptandard_mvp_demo.STOP_AND_SEND_RESULT"
-        
-        // Intent Extras
         const val EXTRA_TARGET_TIME = "EXTRA_TARGET_TIME"
-        
-        // Message paths to Phone
+
         private const val PATH_TRIGGER_ALARM = "/TRIGGER_ALARM"
         private const val PATH_SLEEP_DATA_RESULT = "/SLEEP_DATA_RESULT"
     }

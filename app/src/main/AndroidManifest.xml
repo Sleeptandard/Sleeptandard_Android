@@ -40,10 +40,6 @@
             android:name=".AlarmRingActivity"
             android:exported="false"
             android:excludeFromRecents="true" />
-
-        <receiver
-            android:name=".ClassFile.AlarmReceiver"
-            android:exported="false" />
         
         <!-- Phone Listener Service (Watch-to-Phone Communication) -->
         <service

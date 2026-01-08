@@ -25,3 +25,28 @@
     *** serializer(...);
 }
 
+# ==================== PyTorch Mobile Keep Rules ====================
+# Keep all PyTorch classes
+-keep class org.pytorch.** { *; }
+-keep class com.facebook.jni.** { *; }
+
+# Keep native methods
+-keepclasseswithmembernames class * {
+    native <methods>;
+}
+
+# Keep model loading related classes
+-keep class org.pytorch.LiteModuleLoader { *; }
+-keep class org.pytorch.Module { *; }
+-keep class org.pytorch.IValue { *; }
+-keep class org.pytorch.Tensor { *; }
+
+# Prevent stripping of native libraries
+-keepclasseswithmembers class * {
+    @org.pytorch.* <methods>;
+}
+
+# Keep backend model classes (sleep stage prediction)
+-keep class com.example.sleeptandard_mvp_demo.backend.model.** { *; }
+-keep class com.example.sleeptandard_mvp_demo.backend.processing.** { *; }
+
