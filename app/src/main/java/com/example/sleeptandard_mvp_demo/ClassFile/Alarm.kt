@@ -19,6 +19,7 @@ data class Alarm (
     val isAm: Boolean = true,
     val ringtoneUri: String = "",
     val vibrationEnabled: Boolean = true,
+    val volume: Int = 10 // ✅ 앱 전용 볼륨 값 (0~15 단계) 추가
     /* Not using: 알람은 하루치만 설정 하도록 함
 val days: Set<AlarmDay> = emptySet(),*/
     /* Not using: 알람 설정을 완료여부로 판단

@@ -1,77 +1,180 @@
 package com.example.sleeptandard_mvp_demo.Screen
 
+import android.annotation.SuppressLint
 import android.app.Activity
-import android.content.Context
+import android.media.RingtoneManager
+import android.net.Uri
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
-import androidx.compose.material3.Text
+
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.LaunchedEffect
+
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-
-import android.media.RingtoneManager
-
-import android.net.Uri
-
-import android.content.Intent
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.height
-import androidx.compose.material3.Divider
-import androidx.compose.material3.Scaffold
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 
 import androidx.core.net.toUri
 
-import com.chargemap.compose.numberpicker.AMPMHours
-
 import com.example.sleeptandard_mvp_demo.ClassFile.AlarmScheduler
-import com.example.sleeptandard_mvp_demo.Component.AlarmBottomNavBar
+import com.example.sleeptandard_mvp_demo.Component.AlarmSoundSettingContent
 import com.example.sleeptandard_mvp_demo.Component.ConfirmButton
 import com.example.sleeptandard_mvp_demo.Component.CustomTimePicker
 import com.example.sleeptandard_mvp_demo.Component.OptionsSection
-import com.example.sleeptandard_mvp_demo.Component.TimeAmPmPicker
 import com.example.sleeptandard_mvp_demo.Prefs.AlarmPreferences
 import com.example.sleeptandard_mvp_demo.ViewModel.AlarmViewModel
+import com.example.sleeptandard_mvp_demo.ui.theme.AppIcons
+import com.example.sleeptandard_mvp_demo.Prefs.CustomSituationItem
+import com.example.sleeptandard_mvp_demo.Prefs.CustomSituationPreferences
+import com.example.sleeptandard_mvp_demo.ui.theme.DarkBackground
 
+
+@SuppressLint("ConfigurationScreenWidthHeight")
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
     alarmViewModel: AlarmViewModel,
     scheduler: AlarmScheduler,
-    onClickSetting: ()-> Unit,
-    isAm : Boolean = true,
-    hour12 : Int = 8,
-    minute : Int = 30,
-){
+    onClickConfirm: ()-> Unit,
+    goToAlarmRingScreen: ()-> Unit,
+    goToFeedbackScreen: ()-> Unit
+) {
     val context = LocalContext.current
 
+    // 알람뷰모델에 넣을 값들임.
     var selectedHour by remember { mutableIntStateOf(8) }
     var selectedMinute by remember { mutableIntStateOf(30) }
     var selectedIsAm by remember { mutableStateOf(true) }
     var selectedRingtoneUri by remember { mutableStateOf("") }
     var selectedVibrationEnabled by remember { mutableStateOf(true) }
-    var alarmName by remember {mutableStateOf("")}
+    var selectedVolume by remember { mutableIntStateOf(alarmViewModel.alarm.volume) }
 
+    // 알람 SharedPreference 가져오기
+    val alarmPrefs = remember(context) { AlarmPreferences(context) }  // (선택) 매번 생성 안 하게
+
+    // 알람음 이름
+    var alarmName by remember { mutableStateOf("") }
+    // 타임피커 멈춤 트리거
+    var stopSignal by remember { mutableIntStateOf(0) }
+
+    // 메모 모달창 띄우는 트리거
+    var showSituationModal by remember { mutableStateOf(false) }
+    // ✅ 모달에서 선택한 상태(여러 개 토글 가능)
+    var selectedSituation by remember { mutableStateOf(setOf<String>()) }
+
+    // 상태 종류
+    data class SituationOption(
+        val id: String,
+        val label: String,
+        val iconRes: Int?
+    )
+    // 기본 상태 (커스텀 x)
+    var situationOptions = listOf(
+        SituationOption("custom", "직접 추가", AppIcons.MemoPencil),
+        SituationOption("sick", "아픔", AppIcons.MemoAid),
+        SituationOption("drink", "과음", AppIcons.MemoDrink),
+        SituationOption("nap", "낮잠", AppIcons.MemoNap),
+        SituationOption("eat", "과식", AppIcons.MemoHamburger),
+        SituationOption("pill", "수면제", AppIcons.MemoPill),
+    )
+
+    // "직접추가" 모드 트리거
+    var isCustomMode by remember { mutableStateOf(false) }
+
+    // "직접추가"에서 입력한 텍스트
+    // TODO: 하나만 선택되게 해야하나?
+    var customText by remember { mutableStateOf("") }
+
+    // "직접추가"에서 체크박스 상태
+    var customChecked by remember { mutableStateOf(false) }
+
+    // 커스텀으로 추가된 옵션들
+    var customOptions by remember { mutableStateOf(listOf<SituationOption>()) }
+    val customIdSet = remember(customOptions) { customOptions.map { it.id }.toSet() }   // id만 따로 모아놓음
+
+    // 편집 모드 트리거
+    var isEditMode by remember { mutableStateOf(false) }
+
+    // 삭제 대상으로 체크한 커스텀 옵션 id들
+    var selectedCustomForDelete by remember { mutableStateOf(setOf<String>()) }
+
+    // "직접추가"한 상황들을 담고 있는 Prefs
+    val customSituationPrefs = remember { CustomSituationPreferences(context) }
+
+    // 커스텀으로 추가한 아이템이 있는지 여부
+    val hasCustom = customOptions.isNotEmpty()
+    // 모달창에서 추가한 아이템이 있다면 4행을 보여주고 없다면 3행을 보여줌
+    val visibleRows = if (hasCustom) 4 else 3
+    // 모달창 lazycolumn 크기 수치
+    val itemHeight = 88.dp
+    val spacing = 12.dp
+    val gridHeight = itemHeight * visibleRows + spacing * (visibleRows - 1)
+
+    /*** sound모달창 ***/
+    var showSoundSheet by remember { mutableStateOf(false) }
+
+
+
+    // CustomSituationPrefs 불러오기
+    LaunchedEffect(Unit) {
+        val loaded = customSituationPrefs.load()
+        customOptions = loaded.map {
+            SituationOption(
+                id = it.id,
+                label = it.label,
+                iconRes = null
+            )
+        }
+    }
+
+    // 알람뷰모델에 저장되어 있는 알람음 이름 가져오기
     LaunchedEffect(alarmViewModel.alarm.ringtoneUri) {
         val uriStr = alarmViewModel.alarm.ringtoneUri
         if (uriStr.isNotBlank()) {
@@ -89,13 +192,14 @@ fun HomeScreen(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
-            val uri = result.data?.getParcelableExtra<Uri>(RingtoneManager.EXTRA_RINGTONE_PICKED_URI)
+            val uri =
+                result.data?.getParcelableExtra<Uri>(RingtoneManager.EXTRA_RINGTONE_PICKED_URI)
             if (uri != null) {
                 selectedRingtoneUri = uri.toString()   // state에 저장
-                // ✅ 표시할 이름 업데이트
+                // 표시할 이름 업데이트
                 val ringtone = RingtoneManager.getRingtone(context, uri)
                 alarmName = ringtone?.getTitle(context) ?: "소리 없음"
-            }else {
+            } else {
                 // 사용자가 '없음' 선택했거나 취소 케이스 대응
                 selectedRingtoneUri = ""
                 alarmName = "소리 없음"
@@ -103,180 +207,531 @@ fun HomeScreen(
         }
     }
 
-    Scaffold(
-        bottomBar = {
-            AlarmBottomNavBar(
-                onHomeClick = {},
-                onScheduleClick = {},
-                onSettingsClick = {}
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Spacer(
+            modifier = Modifier.height(171.dp)
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 28.dp)
+                .height(186.dp)
+                .width(255.dp)
+        ) {
+            CustomTimePicker(
+                defaultHour12 = alarmViewModel.alarm.hour,
+                defaultMinute = alarmViewModel.alarm.minute,
+                defaultIsAm = alarmViewModel.alarm.isAm,
+                stopSignal = stopSignal,
+                onTimeChange = { hour12, minute, isAm ->
+                    selectedHour = hour12
+                    selectedMinute = minute
+                    selectedIsAm = isAm
+                },
             )
         }
-    ) { innerPadding ->
-        Column(
+
+        Spacer(Modifier.height(93.dp))
+
+        Box(
             modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .padding(horizontal = 16.dp, vertical = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Spacer(
-                modifier = Modifier.height(92.dp)
-            )
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 36.dp)
-            ){
-                CustomTimePicker(
-                    defaultHour12 = alarmViewModel.alarm.hour,
-                    defaultMinute = alarmViewModel.alarm.minute,
-                    defaultIsAm = alarmViewModel.alarm.isAm,
-                    onTimeChange = {hour12, minute, isAm ->
-                        selectedHour = hour12
-                        selectedMinute = minute
-                        selectedIsAm = isAm
+                .fillMaxWidth()
+                .pointerInput(Unit) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            awaitPointerEvent()
+                            stopSignal++ // ✅ 외부 터치 발생 → 타임피커 멈춤 신호
+                        }
                     }
+                }
+        )
+        {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                OptionsSection(
+                    modifier = Modifier
+                        .fillMaxWidth(),
+
+                    // 링톤 설정
+                    onSoundClick = {
+                        showSoundSheet = true
+
+                        /* 원래 기본 알람음 설정 창. 링톤피커 액티비티 인텐트 설정
+                        val intent = Intent(RingtoneManager.ACTION_RINGTONE_PICKER)
+                            .apply {
+                                // 추가적으로 설정합니다
+                                putExtra(
+                                    RingtoneManager.EXTRA_RINGTONE_TYPE,
+                                    RingtoneManager.TYPE_ALARM
+                                )   // 링톤 타입 = 알람
+                                putExtra(
+                                    RingtoneManager.EXTRA_RINGTONE_TITLE,
+                                    "알람음 선택"
+                                )                // 링톤 설정창 제목
+                                putExtra(
+                                    RingtoneManager.EXTRA_RINGTONE_EXISTING_URI,    // 기존 선택 알람 설정
+                                    selectedRingtoneUri.toUri()
+                                )
+                            }
+                        ringtonePickerLauncher.launch(intent)
+
+                         */
+                    },
+
+                    // 진동 토글
+                    onVibrationClick = { selectedVibrationEnabled = !selectedVibrationEnabled },
+                    checked = selectedVibrationEnabled,
+                    onCheckedChange = { selectedVibrationEnabled = it },
+                    alarmName = alarmName
                 )
-            }
-
-            Divider(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 30.dp)
-            )
-
-            OptionsSection(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 35.dp),
-
-                // 링톤 설정
-                onSoundClick = {
-                    val intent = Intent(RingtoneManager.ACTION_RINGTONE_PICKER)
-                    .apply{
-                        // 추가적으로 설정합니다
-                        putExtra(RingtoneManager.EXTRA_RINGTONE_TYPE, RingtoneManager.TYPE_ALARM)   // 링톤 타입 = 알람
-                        putExtra(RingtoneManager.EXTRA_RINGTONE_TITLE, "알람음 선택")                // 링톤 설정창 제목
-                        putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI,                               // 기존 선택 알람 설정
-                            selectedRingtoneUri.toUri()
-                        )
-                    }
-                    ringtonePickerLauncher.launch(intent)},
-
-                // 진동 토글
-                onVibrationClick = { selectedVibrationEnabled = !selectedVibrationEnabled },
-                checked = selectedVibrationEnabled,
-                onCheckedChange = {selectedVibrationEnabled = it},
-                alarmName = alarmName
-            )
-
-            Spacer(modifier = Modifier.height(64.dp))
-
-            ConfirmButton(
-                modifier = Modifier
-                    .fillMaxWidth(193f/350f),
-                onClick = {
-                    onClickSetting() // 기존 화면 전환 등
-
-                    // 1. 알람 저장 및 스케줄링 (기존 로직)
-                    alarmViewModel.saveAlarm(selectedHour, selectedMinute, selectedIsAm, selectedRingtoneUri, selectedVibrationEnabled)
-                    scheduler.schedule(alarmViewModel.alarm)
-
-                    // 2. 워치 깨우기 (전선 연결!)
-                    val triggerTime = scheduler.getTriggerTime()
-                    alarmViewModel.startSleepTracking(triggerTime) // ✅ 주석 해제됨!
-
-                    // 알람뷰모델에 triggerTime 보내기
-                    alarmViewModel.startSleepTracking(triggerTime)
-
-                    // 3. 눈으로 확인하기 위한 토스트 메시지 (추가)
-                    android.widget.Toast.makeText(context, "워치 연결 시도 중...", android.widget.Toast.LENGTH_SHORT).show()
 
 
-                    // 4. 설정 저장 (기존 로직)
-                    val alarmPrefs = AlarmPreferences(context)
-                    alarmPrefs.saveAlarm(alarmViewModel.alarm)
+                Spacer(modifier = Modifier.height(24.dp))
+
+                ConfirmButton(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp),
+                    onClick = { showSituationModal = true }
+                )
+
+                /*
+                Button(
+                    onClick = goToAlarmRingScreen
+                ){
+                    Text("디버깅용 알람 울림화면")
                 }
 
-            )
+                Button(
+                    onClick = goToFeedbackScreen
+                ){
+                    Text("디버깅용 피드백 화면")
+                }
 
-        }
-    }
-}
+                 */
 
-@Preview
-@Composable
-fun HomeScreenPreview() {
+                /***사운드 선택 모달***/
+                if (showSoundSheet) {
+                    val soundSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    var bool = true
-    var h = 6
-    var m = 25
-    var i = true
-
-    Scaffold(
-        bottomBar = {
-            AlarmBottomNavBar(
-                onHomeClick = {},
-                onScheduleClick = {},
-                onSettingsClick = {}
-            )
-        }
-    ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .padding(horizontal = 16.dp, vertical = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Spacer(
-                modifier = Modifier.height(92.dp)
-            )
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 36.dp)
-            ) {
-                CustomTimePicker(
-                    onTimeChange = { hour12, minute, isAm ->
-                        h = hour12
-                        m = minute
-                        i = isAm
+                    ModalBottomSheet(
+                        onDismissRequest = { showSoundSheet = false },
+                        sheetState = soundSheetState,
+                        containerColor = DarkBackground,
+                        scrimColor = Color.Black.copy(alpha = 0.55f),
+                        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+                        contentWindowInsets = { WindowInsets(0, 0, 0, 0) }, // 여백 없애기
+                        dragHandle = null, // 드래그핸들 없앰.
+                        sheetGesturesEnabled = false
+                    ) {
+                        // ✅ 여기 안에 AlarmSoundSettingScreen의 "내용"을 넣는다
+                        AlarmSoundSettingContent(
+                            currentAlarm = alarmViewModel.alarm.copy(volume = selectedVolume),
+                            onVolumeChange = { selectedVolume = it },
+                            currentUriString = alarmViewModel.alarm.ringtoneUri,
+                            onClose = { showSoundSheet = false },
+                            onSelectUriString = { uriStr ->
+                                // ViewModel에 저장 (그리고 prefs 저장)
+                                alarmViewModel.saveAlarm(
+                                    hour = alarmViewModel.alarm.hour,
+                                    minute = alarmViewModel.alarm.minute,
+                                    isAm = alarmViewModel.alarm.isAm,
+                                    ringtoneUri = uriStr,
+                                    vibrationEnabled = alarmViewModel.alarm.vibrationEnabled,
+                                    volume = selectedVolume
+                                )
+                            }
+                        )
                     }
-                )
+                }
+
+                /*** 상황 설정 모달 ***/
+                if (showSituationModal) {
+
+                    val sheetState = rememberModalBottomSheetState(
+                        skipPartiallyExpanded = true
+                    )
+
+                    val allOptions = situationOptions + customOptions
+
+
+                    ModalBottomSheet(
+                        onDismissRequest = { showSituationModal = false },
+                        sheetState = sheetState,
+                        containerColor = Color(0xFF1B2432),
+                        // 밖 영역은 어두워지고 클릭 막힘(scrim)
+                        scrimColor = Color.Black.copy(alpha = 0.55f),
+                        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+                    ) {
+                        // 내용
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp)
+                                .padding(bottom = 20.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "특별한 상황이 있나요?",
+                                    color = Color.White,
+                                    style = MaterialTheme.typography.titleMedium
+                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+
+                                    // ✅ 커스텀 옵션이 있을 때만 보이게 (+ 직접추가 입력모드 아닐 때만)
+                                    if (customOptions.isNotEmpty() && !isCustomMode) {
+
+                                        Text(
+                                            text = if (!isEditMode) "편집" else "삭제",
+                                            color = if (!isEditMode) Color.White.copy(alpha = 0.7f) else Color(0xFFFF5A5A),
+                                            modifier = Modifier
+                                                .padding(end = 8.dp)
+                                                .clickable {
+                                                    if (!isEditMode) {
+                                                        // 편집 시작
+                                                        isEditMode = true
+                                                        selectedCustomForDelete = emptySet()
+                                                    } else {
+                                                        // ✅ 삭제 실행
+                                                        if (selectedCustomForDelete.isNotEmpty()) {
+                                                            val updated = customOptions.filterNot { it.id in selectedCustomForDelete }
+
+                                                            customOptions = updated
+                                                            selectedSituation = selectedSituation - selectedCustomForDelete
+
+                                                            customSituationPrefs.save(
+                                                                updated.map { option ->
+                                                                    CustomSituationItem(id = option.id, label = option.label)
+                                                                }
+                                                            )
+                                                        }
+
+                                                        // 편집 종료 + 원래 선택창으로
+                                                        isEditMode = false
+                                                        selectedCustomForDelete = emptySet()
+                                                    }
+                                                }
+                                        )
+                                    }
+
+                                    IconButton(onClick = {
+                                        // 닫을 때 편집모드도 같이 종료
+                                        isEditMode = false
+                                        selectedCustomForDelete = emptySet()
+                                        isCustomMode = false
+                                        showSituationModal = false
+                                    }) {
+                                        Text("✕", color = Color.White)
+                                    }
+                                }
+                            }
+
+                            Spacer(Modifier.height(16.dp))
+
+                            // 커스텀 메모 모드인지 아닌지에 따른 UI 분기
+                            if (!isCustomMode) {
+                                LazyVerticalGrid(
+                                    columns = GridCells.Fixed(2),
+                                    modifier = Modifier.height(gridHeight),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    items(allOptions) { option ->
+                                        val isCustom = option.id in customIdSet
+
+                                        // 일반 선택 상태(기존)
+                                        val isSelected = selectedSituation.contains(option.id)
+
+                                        // 편집(삭제선택) 상태
+                                        val isMarkedForDelete = selectedCustomForDelete.contains(option.id)
+
+                                        // ✅ 편집모드면 커스텀만 클릭 가능
+                                        val enabledClick = !isEditMode || isCustom
+
+                                        Surface(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(88.dp)
+                                                .clickable(enabled = enabledClick) {
+                                                    when {
+                                                        // 편집 모드: 커스텀만 삭제 선택 토글
+                                                        isEditMode && isCustom -> {
+                                                            selectedCustomForDelete =
+                                                                if (isMarkedForDelete) selectedCustomForDelete - option.id
+                                                                else selectedCustomForDelete + option.id
+                                                        }
+
+                                                        // 일반 모드: 직접추가면 입력 모드로
+                                                        !isEditMode && option.id == "custom" -> {
+                                                            isCustomMode = true
+                                                            customText = ""
+                                                            customChecked = false
+                                                        }
+
+                                                        // 일반 모드: 선택 토글(기본+커스텀 모두 가능)
+                                                        else -> {
+                                                            selectedSituation =
+                                                                if (isSelected) selectedSituation - option.id
+                                                                else selectedSituation + option.id
+                                                        }
+                                                    }
+                                                },
+                                            shape = RoundedCornerShape(20.dp),
+
+                                            // ✅ 편집모드에서 기본 옵션은 흐리게 보여주기
+                                            color = when {
+                                                isEditMode && !isCustom -> Color(0xFF121A26).copy(alpha = 0.35f)
+                                                isEditMode && isCustom -> Color(0xFF121A26)
+                                                // isSelected -> Color(0xFF2D3B52)
+                                                else -> Color(0xFF121A26)
+                                            },
+
+                                            // ✅ 테두리: 편집모드에서 삭제 선택되면 빨간 border, 일반 선택은 흰 border(원하면)
+                                            border = when {
+                                                isEditMode && isCustom && isMarkedForDelete -> BorderStroke(1.dp, Color(0xFFFF5A5A))
+                                                (!isEditMode && isSelected) -> BorderStroke(1.dp, Color.White) // 네가 원한 선택 테두리
+                                                else -> null
+                                            }
+                                        ) {
+                                            Column(
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .padding(vertical = 14.dp),
+                                                horizontalAlignment = Alignment.CenterHorizontally,
+                                                verticalArrangement = Arrangement.Center
+                                            ) {
+                                                if(option.iconRes != null){
+                                                    Icon(
+                                                        painter = painterResource(option.iconRes),
+                                                        contentDescription = option.label,
+                                                        modifier = Modifier.size(24.dp)
+                                                    )
+
+                                                    Spacer(Modifier.height(8.dp))
+                                                }
+
+                                                Text(
+                                                    text = option.label,
+                                                    color = Color.White,
+                                                    style = MaterialTheme.typography.bodyMedium
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Spacer(Modifier.height(18.dp))
+
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ){
+                                    Button(
+                                        onClick = {
+                                            showSituationModal = false
+
+                                            // 알람정보 뷰모델로 저장하고 스케쥴러에 등록하고 다음 화면으로
+                                            alarmViewModel.saveAlarm(
+                                                selectedHour,
+                                                selectedMinute,
+                                                selectedIsAm,
+                                                selectedRingtoneUri,
+                                                selectedVibrationEnabled,
+                                                selectedVolume
+                                            )
+                                            scheduler.schedule(alarmViewModel.alarm)
+
+                                            val triggerTime = scheduler.getTriggerTime()
+
+                                            // 2. 워치 깨우기 (전선 연결!)
+                                            alarmViewModel.startSleepTracking(triggerTime) // ✅ 주석 해제됨!
+                                            // 3. 눈으로 확인하기 위한 토스트 메시지 (추가)
+                                            android.widget.Toast.makeText(context, "워치 연결 시도 중...", android.widget.Toast.LENGTH_SHORT).show()
+
+                                            // 여기서 알람 정보를 디스크에 저장
+                                            alarmPrefs.saveAlarm(alarmViewModel.alarm)
+
+                                            onClickConfirm()
+                                        },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(48.dp)
+                                            .border(width = 1.dp, color = Color(0xFF2A2D32), shape = RoundedCornerShape(size = 100.dp)),
+                                        shape = RoundedCornerShape(100.dp),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = MaterialTheme.colorScheme.onPrimary.copy(
+                                                alpha = 0.05f
+                                            ),
+                                            contentColor = MaterialTheme.colorScheme.onPrimary.copy(
+                                                alpha = 0.5f
+                                            )
+                                        )
+                                    ) {
+                                        Text("건너뛰기")
+                                    }
+                                    Button(
+                                        onClick = {
+                                            showSituationModal = false
+
+                                            // 알람정보 뷰모델로 저장하고 스케쥴러에 등록하고 다음 화면으로
+
+                                            alarmViewModel.saveAlarm(
+                                                selectedHour,
+                                                selectedMinute,
+                                                selectedIsAm,
+                                                selectedRingtoneUri,
+                                                selectedVibrationEnabled,
+                                                selectedVolume
+                                            )
+                                            scheduler.schedule(alarmViewModel.alarm)
+
+                                            val triggerTime = scheduler.getTriggerTime()
+                                            
+                                            // 2. 워치 깨우기 (전선 연결!)
+                                            alarmViewModel.startSleepTracking(triggerTime) // ✅ 주석 해제됨!
+                                            // 3. 눈으로 확인하기 위한 토스트 메시지 (추가)
+                                            android.widget.Toast.makeText(context, "워치 연결 시도 중...", android.widget.Toast.LENGTH_SHORT).show()
+
+                                            // 여기서 알람 정보를 디스크에 저장
+                                            val alarmPrefs = AlarmPreferences(context)
+                                            alarmPrefs.saveAlarm(alarmViewModel.alarm)
+                                            
+                                            onClickConfirm()
+                                        },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(48.dp),
+                                        shape = RoundedCornerShape(100.dp),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = MaterialTheme.colorScheme.primary,
+                                            contentColor = MaterialTheme.colorScheme.onPrimary
+                                        )
+                                    ) {
+                                        Text("완료")
+                                    }
+                                }
+                            }
+
+                            // 직접 추가시 모달
+                            else {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .imePadding()              // ✅ 키보드 올라오면 자동으로 위로 밀림
+                                        .navigationBarsPadding()   // ✅ 하단 제스처바/네비바 고려
+                                ) {
+                                    Spacer(Modifier.height(10.dp))
+
+                                    OutlinedTextField(
+                                        value = customText,
+                                        onValueChange = { customText = it },
+                                        modifier = Modifier
+                                            .fillMaxWidth(),
+                                        placeholder = { Text("어떤 상황인지 작성해주세요.", color = Color.White.copy(alpha = 0.35f)) },
+                                        singleLine = false,
+                                        minLines = 4,
+                                        maxLines = 6
+                                    )
+
+                                    Spacer(Modifier.height(14.dp))
+
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.End
+                                    ) {
+                                        Checkbox(
+                                            checked = customChecked,
+                                            onCheckedChange = { customChecked = it },
+                                            colors = CheckboxDefaults.colors(
+                                                checkedColor = Color.White,
+                                                uncheckedColor = Color.White.copy(alpha = 0.6f),
+                                                checkmarkColor = Color(0xFF050C16)
+                                            )
+                                        )
+                                        Text("추가", color = Color.White.copy(alpha = 0.85f))
+                                    }
+
+                                    Spacer(Modifier.height(12.dp))
+
+                                    Button(
+                                        onClick = {
+                                            // ✅ "추가"가 체크되어 있고, 텍스트가 비어있지 않으면 그리드 아이템으로 추가
+                                            val trimmed = customText.trim()
+                                            if (customChecked && trimmed.isNotEmpty()) {
+                                                val saved = customSituationPrefs.add(trimmed) // ✅ prefs에 저장 + 새 item 반환
+
+                                                customOptions = customOptions + SituationOption(
+                                                    id = saved.id,
+                                                    label = saved.label,
+                                                    iconRes = null
+                                                )
+                                                selectedSituation = selectedSituation + saved.id
+
+                                                // 모드 종료 -> 원래 그리드로 복귀
+                                                isCustomMode = false
+                                                customChecked = false
+                                            }
+
+                                            if(!customChecked){
+                                                // 알람정보 뷰모델로 저장하고 스케쥴러에 등록하고 다음 화면으로
+
+                                                alarmViewModel.saveAlarm(
+                                                    selectedHour,
+                                                    selectedMinute,
+                                                    selectedIsAm,
+                                                    selectedRingtoneUri,
+                                                    selectedVibrationEnabled,
+                                                    selectedVolume
+                                                )
+                                                scheduler.schedule(alarmViewModel.alarm)
+
+                                                val triggerTime = scheduler.getTriggerTime()
+                                                // 2. 워치 깨우기 (전선 연결!)
+                                                alarmViewModel.startSleepTracking(triggerTime) // ✅ 주석 해제됨!
+                                                // 3. 눈으로 확인하기 위한 토스트 메시지 (추가)
+                                                android.widget.Toast.makeText(context, "워치 연결 시도 중...", android.widget.Toast.LENGTH_SHORT).show()
+
+                                                // 여기서 알람 정보를 디스크에 저장
+                                                val alarmPrefs = AlarmPreferences(context)
+                                                alarmPrefs.saveAlarm(alarmViewModel.alarm)
+
+                                                onClickConfirm()
+                                            }
+
+
+                                        },
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(48.dp),
+                                        shape = RoundedCornerShape(100.dp),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = MaterialTheme.colorScheme.primary,
+                                            contentColor = MaterialTheme.colorScheme.onPrimary
+                                        )
+                                    ) {
+                                        Text("완료")
+                                    }
+                                }
+                            }
+                        }
+
+                    }
+                }
             }
-
-            Divider(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 30.dp)
-            )
-
-            OptionsSection(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 35.dp),
-
-                // 링톤 설정
-                onSoundClick = {},
-
-                // 진동 토글
-                onVibrationClick = { },
-                checked = bool,
-                onCheckedChange = { bool = it },
-                alarmName = "alarmName"
-            )
-
-            Spacer(modifier = Modifier.height(64.dp))
-
-            ConfirmButton(
-                modifier = Modifier
-                    .fillMaxWidth(193f / 350f),
-                onClick = {}
-            )
-
         }
     }
 }
@@ -371,4 +826,16 @@ Surface(modifier = Modifier
         }
     }
 }
+*/
+
+/**** 기존 front에 있던 워치 통신 함수들 ****/
+/*
+
+                    // 2. 워치 깨우기 (전선 연결!)
+                    val triggerTime = scheduler.getTriggerTime()
+                    alarmViewModel.startSleepTracking(triggerTime) // ✅ 주석 해제됨!
+                    
+                    // 3. 눈으로 확인하기 위한 토스트 메시지 (추가)
+                    android.widget.Toast.makeText(context, "워치 연결 시도 중...", android.widget.Toast.LENGTH_SHORT).show()
+
 */

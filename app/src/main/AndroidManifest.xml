@@ -23,7 +23,8 @@
             android:name=".MainActivity"
             android:exported="true"
             android:label="@string/app_name"
-            android:theme="@style/Theme.Sleeptandard_MVP_Demo">
+            android:theme="@style/Theme.Sleeptandard_MVP_Demo.Splash">
+            <!-- 바로 위에 있는 .Splash만 없애면 원래대로 -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 

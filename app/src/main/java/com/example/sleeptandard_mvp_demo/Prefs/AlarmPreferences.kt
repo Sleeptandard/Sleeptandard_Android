@@ -14,6 +14,7 @@ class AlarmPreferences(private val context: Context) {
             .putInt("minute", alarm.minute)
             .putBoolean("isAm", alarm.isAm)
             .putString("ringtoneUri", alarm.ringtoneUri)
+            .putInt("volume", alarm.volume) // ✅ 저장 추가
             .putBoolean("vibrationEnabled", alarm.vibrationEnabled)
             .apply()
     }
@@ -27,6 +28,7 @@ class AlarmPreferences(private val context: Context) {
             minute = prefs.getInt("minute", 30),
             isAm = prefs.getBoolean("isAm", true),
             ringtoneUri = prefs.getString("ringtoneUri", "") ?: "",
+            volume = prefs.getInt("volume", 10), // ✅ 불러오기 추가
             vibrationEnabled = prefs.getBoolean("vibrationEnabled", true)
         )
     }

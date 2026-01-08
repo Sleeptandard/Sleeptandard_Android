@@ -34,6 +34,7 @@ class AlarmScheduler(private val context: Context) {
             putExtra("alarmId", alarm.id)
             putExtra("label", "알람 #${alarm.id}")
             putExtra("ringtoneUri", alarm.ringtoneUri)
+            putExtra("volume", alarm.volume) // ✅ 볼륨 값 추가 전달
             putExtra("vibrationEnabled", alarm.vibrationEnabled)
         }
 
