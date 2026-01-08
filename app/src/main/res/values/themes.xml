@@ -1,5 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <style name="Theme.Sleeptandard_MVP_Demo" parent="android:Theme.Material.Light.NoActionBar" />
+    <style name="Theme.Sleeptandard_MVP_Demo" parent="android:Theme.Material.Light.NoActionBar">
+
+    </style>
+
+    <!-- 2) 런처(MainActivity) 시작 순간에만 쓰는 "스플래시 테마" -->
+    <style name="Theme.Sleeptandard_MVP_Demo.Splash" parent="Theme.SplashScreen">
+        <!-- 스플래시 배경 -->
+        <item name="windowSplashScreenBackground">@color/black</item>
+
+        <!-- 가운데 로고(벡터/PNG 아무거나 가능) -->
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_system_logo</item>
+
+        <!-- 로고 배경 원(circle) 없애고 싶으면 -->
+        <item name="windowSplashScreenIconBackgroundColor">@android:color/transparent</item>
+
+        <!-- 스플래시 종료 후 적용될 테마 -->
+        <item name="postSplashScreenTheme">@style/Theme.Sleeptandard_MVP_Demo</item>
+    </style>
+
 </resources>

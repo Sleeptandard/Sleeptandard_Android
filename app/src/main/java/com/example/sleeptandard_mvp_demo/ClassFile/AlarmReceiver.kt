@@ -1,6 +1,7 @@
 package com.example.sleeptandard_mvp_demo.ClassFile
 
 
+import android.annotation.SuppressLint
 import android.content.BroadcastReceiver
 import android.app.Notification
 import android.app.NotificationChannel
@@ -8,6 +9,9 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
+import android.media.AudioManager
+import android.media.MediaPlayer
 import android.media.Ringtone
 import android.media.RingtoneManager
 import android.net.Uri
@@ -19,18 +23,21 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.example.sleeptandard_mvp_demo.AlarmRingActivity
 import com.example.sleeptandard_mvp_demo.R
+import androidx.core.net.toUri
 
 private const val ALARM_CHANNEL_ID = "alarm_channel"
 
 // 소리/진동을 Activity에서도 끌 수 있도록 전역으로 관리하는 객체
 object AlarmPlayer {
-    private var ringtone: Ringtone? = null
+    private var mediaPlayer: MediaPlayer? = null
     private var vibrator: Vibrator? = null
 
-    fun start(context: Context, ringtoneUriString: String?, vibrationEnabled: Boolean) {
-        // 🔔 소리
+    fun start(context: Context, ringtoneUriString: String?, vibrationEnabled: Boolean, volume: Int) {
+        stop() // ✅ 기존에 울리고 있다면 중지하고 새로 시작
+
+        // 1. 🔔 소리 재생 (MediaPlayer - 앱 내부 전용 볼륨)
         val uri = try {
-            if (ringtoneUriString != null) {
+            if (!ringtoneUriString.isNullOrEmpty()) {
                 Uri.parse(ringtoneUriString)
             } else {
                 RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
@@ -39,10 +46,26 @@ object AlarmPlayer {
             RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
         }
 
-        ringtone = RingtoneManager.getRingtone(context, uri)
-        ringtone?.play()
+        mediaPlayer = MediaPlayer().apply {
+            setDataSource(context, uri)
+            setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ALARM)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build()
+            )
+            isLooping = true
+            prepare()
 
-        // 📳 진동
+            // ✅ 핵심: 시스템 볼륨은 건드리지 않고 재생기 내부 볼륨만 설정 (0.0f ~ 1.0f)
+            // 15단계 기준이라면 아래와 같이 계산합니다.
+            val volumeRatio = volume.toFloat() / 15f
+            setVolume(volumeRatio, volumeRatio)
+
+            start()
+        }
+
+        // 2. 📳 진동 (기존 로직 유지)
         if (vibrationEnabled) {
             vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 val vm = context.getSystemService(VibratorManager::class.java)
@@ -57,12 +80,7 @@ object AlarmPlayer {
                     longArrayOf(0, 600, 400), // 0ms 대기, 600ms 진동, 400ms 쉼
                     0 // 반복
                 )
-                try{
                 vibrator?.vibrate(effect)
-                    Log.d("vibration","성공")
-                }catch (e: Exception){
-                    Log.d("vibration","실패: ${e}")
-                }
             } else {
                 @Suppress("DEPRECATION")
                 vibrator?.vibrate(longArrayOf(0, 600, 400), 0)
@@ -71,8 +89,12 @@ object AlarmPlayer {
     }
 
     fun stop() {
-        ringtone?.stop()
-        ringtone = null
+        // ✅ 소리 정지 및 메모리 해제
+        mediaPlayer?.stop()
+        mediaPlayer?.release()
+        mediaPlayer = null
+
+        // ✅ 진동 정지 및 초기화
         vibrator?.cancel()
         vibrator = null
     }
@@ -85,9 +107,10 @@ class AlarmReceiver : BroadcastReceiver() {
         val ringtoneUriString = intent.getStringExtra("ringtoneUri")
         val vibrationEnabled = intent.getBooleanExtra("vibrationEnabled", true)
         val alarmId = intent.getIntExtra("alarmId", 0)
+        val volume = intent.getIntExtra("volume", 10)
 
         // 1) 소리/진동 시작 (Activity가 안 떠도 최소한 울리게)
-        AlarmPlayer.start(context, ringtoneUriString, vibrationEnabled)
+        AlarmPlayer.start(context, ringtoneUriString, vibrationEnabled, volume)
 
         // 2) 알람 채널 생성
         createAlarmChannel(context)
@@ -142,3 +165,59 @@ class AlarmReceiver : BroadcastReceiver() {
         }
     }
 }
+
+
+/** 전에 쓰던 로직 **/
+/*
+@SuppressLint("ServiceCast")
+fun start(context: Context, ringtoneUriString: String?, vibrationEnabled: Boolean, volume: Int) {
+    // 🔔 소리
+    val uri = try {
+        if (ringtoneUriString != null) {
+            Uri.parse(ringtoneUriString)
+        } else {
+            RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+        }
+    } catch (e: Exception) {
+        RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+    }
+
+    ringtone = RingtoneManager.getRingtone(context, uri)
+    ringtone?.play()
+
+    // ✅ 링톤 볼륨 설정 (API 28 이상 권장)
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM)
+        // 비율로 계산 (0.0f ~ 1.0f)
+        ringtone?.volume = volume.toFloat() / maxVol.toFloat()
+    }
+
+    // 📳 진동
+    if (vibrationEnabled) {
+        vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val vm = context.getSystemService(VibratorManager::class.java)
+            vm.defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val effect = VibrationEffect.createWaveform(
+                longArrayOf(0, 600, 400), // 0ms 대기, 600ms 진동, 400ms 쉼
+                0 // 반복
+            )
+            try{
+                vibrator?.vibrate(effect)
+                Log.d("vibration","성공")
+            }catch (e: Exception){
+                Log.d("vibration","실패: ${e}")
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            vibrator?.vibrate(longArrayOf(0, 600, 400), 0)
+        }
+    }
+}
+*/

@@ -9,24 +9,28 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.platform.LocalContext
-import com.example.sleeptandard_mvp_demo.ui.theme.LightBackground
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
 
 private val DarkColorScheme = darkColorScheme(
-    primary = LightPrimary,
-    secondary = LightSecondary,
-    tertiary = Pink80,
-    surface = LightSurface,
-    onSurface = BlackFont,
+    primary = DarkPrimary,
+    onPrimary = WhiteFont,
+    secondary = DarkSecondary,
+    tertiary = DarkTertiary,
+    surface = DarkSurface,
+    onSurface = WhiteFont,
+    background = DarkBackground
 )
 
 private val LightColorScheme = lightColorScheme(
-    primary = LightPrimary,
-    secondary = LightSecondary,
-    tertiary = Pink40,
-    surface = LightSurface,
-    onSurface = BlackFont,
-    surfaceDim = DeactivateSurface
+    primary = DarkPrimary,
+    onPrimary = WhiteFont,
+    secondary = DarkSecondary,
+    tertiary = DarkTertiary,
+    surface = DarkSurface,
+    onSurface = WhiteFont,
 
 
     /* Other default colors to override
@@ -42,23 +46,20 @@ private val LightColorScheme = lightColorScheme(
 
 @Composable
 fun Sleeptandard_MVP_DemoTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
-    // 안드로이드12 부터 자동으로 사용자 환경에 자연스러운 색으로 맞춰주는 DynamicColor시스템. 일단 false로 두겠음.
-    dynamicColor: Boolean = false,
-    content: @Composable () -> Unit
+    content: @Composable () -> Unit,
 ) {
-    val colorScheme = when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            val context = LocalContext.current
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+    val view = LocalView.current
+    if (!view.isInEditMode) {
+        SideEffect {
+            val window = (view.context as Activity).window
+            // 배경이 어두우므로 아이콘은 밝게(Light) 유지해야 합니다.
+            // 아래 함수는 '아이콘을 어둡게 할 것인가'를 묻는 것이므로 false를 줍니다.
+            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = false
         }
-
-        darkTheme -> DarkColorScheme
-        else -> LightColorScheme
     }
 
     MaterialTheme(
-        colorScheme = colorScheme,
+        colorScheme = DarkColorScheme,
         typography = Typography,
         content = content
     )
