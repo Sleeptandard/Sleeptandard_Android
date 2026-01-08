@@ -389,7 +389,7 @@ class SmartAlarmService : Service(), SensorEventListener {
         sensorManager.unregisterListener(this)
         
         // 2. Stop logging and flush remaining data
-    //    dataRepository.stopLogging()
+        dataRepository.stopLogging()
         
         // 3. Release inference model resources
         if (::inferenceManager.isInitialized) {
