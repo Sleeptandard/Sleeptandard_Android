@@ -211,7 +211,8 @@ fun AlarmRingScreen(
             Text(
                 text = "${sleepStage} 단계에서 깨워드렸어요.",
                 style = MaterialTheme.typography.bodyMedium.copy(
-                    fontSize = 16.sp
+                    fontSize = 16.sp,
+                    color = MaterialTheme.colorScheme.onPrimary
                 )
             )
         }

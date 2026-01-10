@@ -303,7 +303,7 @@ fun HomeScreen(
                     onClick = { showSituationModal = true }
                 )
 
-                /*
+
                 Button(
                     onClick = goToAlarmRingScreen
                 ){
@@ -316,7 +316,7 @@ fun HomeScreen(
                     Text("디버깅용 피드백 화면")
                 }
 
-                 */
+
 
                 /***사운드 선택 모달***/
                 if (showSoundSheet) {
@@ -618,7 +618,9 @@ fun HomeScreen(
                                         colors = ButtonDefaults.buttonColors(
                                             containerColor = MaterialTheme.colorScheme.primary,
                                             contentColor = MaterialTheme.colorScheme.onPrimary
-                                        )
+                                        ),
+                                        // 선택한 아이템이 없다면 비활성화.
+                                        enabled = selectedSituation.isNotEmpty()
                                     ) {
                                         Text("완료")
                                     }
@@ -681,9 +683,6 @@ fun HomeScreen(
                                                 )
                                                 selectedSituation = selectedSituation + saved.id
 
-                                                // 모드 종료 -> 원래 그리드로 복귀
-                                                isCustomMode = false
-                                                customChecked = false
                                             }
 
                                             if(!customChecked){
@@ -711,6 +710,9 @@ fun HomeScreen(
 
                                                 onClickConfirm()
                                             }
+                                            // 모드 종료
+                                            isCustomMode = false
+                                            customChecked = false
 
 
                                         },

@@ -1,6 +1,8 @@
 package com.example.sleeptandard_mvp_demo.Screen
 
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -253,6 +255,7 @@ fun DifficultySelectorCustomDraggable(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .padding(start = 2.dp)
                     .height(2.dp)
                     // .align(Alignment.Center)
                     .background(Color.White.copy(alpha = 0.4f))
@@ -283,7 +286,7 @@ fun DifficultySelectorCustomDraggable(
                 Box(
                     modifier = Modifier
                         .offset { IntOffset((animatedX - thumbRadiusPx).roundToInt(), 0) }
-                        .size(18.dp)
+                        .size(26.dp)
                         .shadow(12.dp, CircleShape)
                         .background(Color.White, CircleShape),
                     contentAlignment = Alignment.Center
