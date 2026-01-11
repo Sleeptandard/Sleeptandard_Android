@@ -33,6 +33,13 @@ object AlarmPlayer {
     private var vibrator: Vibrator? = null
 
     fun start(context: Context, ringtoneUriString: String?, vibrationEnabled: Boolean, volume: Int) {
+
+        // AlarmReceiver.kt 의 AlarmPlayer.start 내부
+        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        // 시스템의 알람 볼륨을 적절한 수준(예: 최대의 70%)으로 먼저 맞춘 뒤 재생
+        val systemMax = audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM)
+        audioManager.setStreamVolume(AudioManager.STREAM_ALARM, (systemMax * 0.7).toInt(), 0)
+
         stop() // ✅ 기존에 울리고 있다면 중지하고 새로 시작
 
         // 1. 🔔 소리 재생 (MediaPlayer - 앱 내부 전용 볼륨)

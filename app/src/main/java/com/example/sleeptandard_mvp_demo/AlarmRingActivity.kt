@@ -80,11 +80,6 @@ class AlarmRingActivity : ComponentActivity() {
         // ViewModel 초기화
         alarmViewModel = ViewModelProvider(this)[AlarmViewModel::class.java]
 
-        try{
-
-        } catch(e:Exception){
-            Log.d("WTF", "WTF: ${e}")
-        }
         val alarmPrefs = AlarmPreferences(this)
         alarmId = intent.getIntExtra("alarmId", 0)
         label = intent.getStringExtra("label") ?: "알람"
@@ -133,6 +128,8 @@ class AlarmRingActivity : ComponentActivity() {
         // 3) 워치에 수면 추적 중지 명령 전송
         alarmViewModel.stopSleepTracking()
         Log.i(TAG, "Stop command sent to Watch")
+
+
 
         // 4) MainActivity로 넘어가면서 알람 리뷰 화면에서 부터 시작하도록 요청
         val intent = Intent(this, MainActivity::class.java).apply {
@@ -211,7 +208,8 @@ fun AlarmRingScreen(
             Text(
                 text = "${sleepStage} 단계에서 깨워드렸어요.",
                 style = MaterialTheme.typography.bodyMedium.copy(
-                    fontSize = 16.sp
+                    fontSize = 16.sp,
+                    color = MaterialTheme.colorScheme.onPrimary
                 )
             )
         }
@@ -222,7 +220,6 @@ fun AlarmRingScreen(
         SwipeToStopButton(
             text = "피드백",
             onComplete = {
-                Log.d("Swipe", "COMPLETED!")
                 onStop() },
             modifier = Modifier
                 .fillMaxWidth(0.6f)
