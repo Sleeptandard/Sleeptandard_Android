@@ -1,6 +1,17 @@
 package com.example.sleeptandard_mvp_demo.Screen
 
 import android.R
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -57,15 +68,15 @@ fun TutorialScreen(
             Color(0x1AF1F1F1)
         )
     )
-    val transparentBrush = Brush.radialGradient(
-        colors = listOf(
-            Color.Transparent
-        )
-    )
 
     var currentPage by remember { mutableIntStateOf(0) }
     val maxPage = 3 // 0: 시작, 1: 알람설정, 2: 취침, 3: 피드백
 
+    // ✅ 뒤로가기 제어 로직 추가
+    // currentPage가 0보다 클 때만 이 핸들러가 동작합니다.
+    BackHandler(enabled = currentPage > 0) {
+        currentPage -= 1
+    }
 
     Column(
         modifier = Modifier
@@ -115,13 +126,45 @@ fun TutorialScreen(
         }
         Spacer(Modifier.height(40.dp))
 
-        // 2. 페이지 내용 (currentPage에 따라 다른 컴포저블 호출)
+        // 2. 페이지 내용 (애니메이션 적용 영역)
         Box(modifier = Modifier.weight(1f)) {
-            when (currentPage) {
-                0 -> StartPage()
-                1 -> AlarmSettingPart()
-                2 -> AlarmSettedPart()
-                3 -> FeedbackPart()
+            AnimatedContent(
+                targetState = currentPage,
+                transitionSpec = {
+                    if (targetState > initialState) {
+                        if (initialState == 2 && targetState == 3) {
+                            // ✅ 2 -> 3: 2번이 위에 떠서 대각선 위로 사라지게 함
+                            (slideInVertically { it } + fadeIn(tween(600))).togetherWith(
+                                slideOutVertically { -it } + slideOutHorizontally { it } + fadeOut(tween(600))
+                            ).apply {
+                                // 나가는 화면(2)이 들어오는 화면(3)보다 위에 있도록 zIndex 설정
+                                targetContentZIndex = 0f
+                            }.using(SizeTransform(clip = false)) // 경계 밖으로 나가도 안 잘리게 설정
+                        } else {
+                            fadeIn(tween(500)).togetherWith(fadeOut(tween(500)))
+                        }
+                    } else {
+                        if (initialState == 3 && targetState == 2) {
+                            // ✅ 3 -> 2: 2번이 대각선 위에서 내려오면서 들어옴
+                            (slideInVertically { -it } + slideInHorizontally { it } + fadeIn(tween(600))).togetherWith(
+                                slideOutVertically { it } + fadeOut(tween(600))
+                            ).apply {
+                                targetContentZIndex = 1f // 들어오는 화면(2)이 위에 보이게 함
+                            }.using(SizeTransform(clip = false))
+                        } else {
+                            fadeIn(tween(500)).togetherWith(fadeOut(tween(500)))
+                        }
+                    }
+                },
+                label = "TutorialPageTransition"
+            ) { targetPage ->
+                // targetPage 상태에 따라 화면을 그립니다.
+                when (targetPage) {
+                    0 -> StartPage()
+                    1 -> AlarmSettingPart()
+                    2 -> AlarmSettedPart()
+                    3 -> FeedbackPart()
+                }
             }
         }
 
@@ -270,7 +313,9 @@ fun AlarmSettedPart(){
             verticalArrangement = Arrangement.spacedBy(7.dp ),
             horizontalAlignment = Alignment.CenterHorizontally
         ){
-            Row {
+            Row(
+                verticalAlignment = Alignment.Bottom
+            ) {
                 Text(
                     text = "설정 시간내 ",
                     style = MaterialTheme.typography.bodyMedium.copy(
@@ -291,7 +336,9 @@ fun AlarmSettedPart(){
                     )
                 )
             }
-            Row{
+            Row(
+                verticalAlignment = Alignment.Bottom
+            ){
                 Text(
                     text = "수면 측정을 위해, ",
                     style = MaterialTheme.typography.bodyMedium.copy(
@@ -343,7 +390,9 @@ fun FeedbackPart(){
              modifier = Modifier.fillMaxWidth(),
              horizontalAlignment = Alignment.CenterHorizontally
          ){
-             Row{
+             Row(
+                 verticalAlignment = Alignment.Bottom
+             ){
                  Text(
                      text = "당신의 ",
                      style = MaterialTheme.typography.bodyMedium.copy(
@@ -364,7 +413,12 @@ fun FeedbackPart(){
                      )
                  )
              }
-             Text("맞춤형 알고리즘이 생성돼요.")
+             Text(
+                 text = "맞춤형 알고리즘이 생성돼요.",
+                     style = MaterialTheme.typography.bodyMedium.copy(
+                     fontSize = 16.sp
+                     )
+             )
          }
          
          Spacer(Modifier.weight(40f))
