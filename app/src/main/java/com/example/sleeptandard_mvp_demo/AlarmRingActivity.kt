@@ -80,11 +80,6 @@ class AlarmRingActivity : ComponentActivity() {
         // ViewModel 초기화
         alarmViewModel = ViewModelProvider(this)[AlarmViewModel::class.java]
 
-        try{
-
-        } catch(e:Exception){
-            Log.d("WTF", "WTF: ${e}")
-        }
         val alarmPrefs = AlarmPreferences(this)
         alarmId = intent.getIntExtra("alarmId", 0)
         label = intent.getStringExtra("label") ?: "알람"

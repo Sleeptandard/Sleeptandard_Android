@@ -128,14 +128,15 @@ fun AlarmSoundSettingContent(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(top = 54.dp)
-            .background(DarkBackground),  // ✅ 이거 추가 (핵심)
+            .background(DarkBackground),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        Spacer(Modifier.weight(54f))
+
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 6.dp, bottom = 10.dp, start = 16.dp),
+                .padding(horizontal = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(
@@ -152,7 +153,7 @@ fun AlarmSoundSettingContent(
             }
         }
 
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.weight(24f))
 
         // 상단 토글 바
         Surface(
@@ -202,13 +203,13 @@ fun AlarmSoundSettingContent(
             }
         }
 
-        Spacer(Modifier.height(26.dp))
+        Spacer(Modifier.weight(26f))
 
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding( top= 16.dp)
-                .weight(1f) // ✅ 남은 공간을 전부 차지하게
+                .padding(top = 16.dp)
+                .weight(620f) // ✅ 남은 공간을 전부 차지하게
         ) {
 
 
