@@ -134,6 +134,8 @@ class AlarmRingActivity : ComponentActivity() {
         alarmViewModel.stopSleepTracking()
         Log.i(TAG, "Stop command sent to Watch")
 
+
+
         // 4) MainActivity로 넘어가면서 알람 리뷰 화면에서 부터 시작하도록 요청
         val intent = Intent(this, MainActivity::class.java).apply {
             putExtra("startDestination", "reviewAlarm") // Screen.AfterAlarm.route 값
@@ -223,7 +225,6 @@ fun AlarmRingScreen(
         SwipeToStopButton(
             text = "피드백",
             onComplete = {
-                Log.d("Swipe", "COMPLETED!")
                 onStop() },
             modifier = Modifier
                 .fillMaxWidth(0.6f)
