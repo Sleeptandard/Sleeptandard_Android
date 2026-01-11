@@ -266,7 +266,7 @@ fun AlarmSoundSettingContent(
             ) {
                 Column(
                     modifier = Modifier
-                        .fillMaxWidth()
+                        .fillMaxSize()
                         .navigationBarsPadding() // 시스템 하단바 여백 대응
                 ) {
                     // 슬라이더 Row 그대로(지금 네 코드)
