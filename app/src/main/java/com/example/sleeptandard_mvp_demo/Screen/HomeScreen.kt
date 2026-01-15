@@ -303,7 +303,7 @@ fun HomeScreen(
                     onClick = { showSituationModal = true }
                 )
 
-
+/*
                 Button(
                     onClick = goToAlarmRingScreen
                 ){
@@ -315,6 +315,8 @@ fun HomeScreen(
                 ){
                     Text("디버깅용 피드백 화면")
                 }
+
+ */
 
 
 

@@ -233,7 +233,6 @@ fun AlarmSoundSettingContent(
                         contentPadding = PaddingValues(
                             top = 10.dp,
                             bottom = sliderHeight + sliderPaddingBottom + 10.dp
-                            // ✅ 맨 아래 슬라이더가 덮어쓰는 만큼 "리스트가 가려지지 않게" 패딩 확보
                         ),
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
