@@ -5,6 +5,7 @@ import android.media.AudioManager
 import android.media.Ringtone
 import android.media.RingtoneManager
 import android.net.Uri
+import android.os.Build
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -55,6 +56,18 @@ fun AlarmSoundSettingScreen(
     val audioManager = remember(context) { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
     val maxVol = remember { audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM) }
     var vol by remember { mutableIntStateOf(audioManager.getStreamVolume(AudioManager.STREAM_ALARM)) }
+
+    // AlarmSoundSettingContent 컴포저블 내부에 추가
+    LaunchedEffect(vol) {
+        // API 28(Android P) 이상에서만 실시간 볼륨 조절 가능
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            playingRingtone?.let { ringtone ->
+                if (ringtone.isPlaying) {
+                    ringtone.volume = vol.toFloat() / 15f
+                }
+            }
+        }
+    }
 
     // 화면 나갈 때 미리듣기 정지
     DisposableEffect(Unit) {
