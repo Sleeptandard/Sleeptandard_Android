@@ -38,7 +38,7 @@ object AlarmPlayer {
         val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         // 시스템의 알람 볼륨을 적절한 수준(예: 최대의 70%)으로 먼저 맞춘 뒤 재생
         val systemMax = audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM)
-        audioManager.setStreamVolume(AudioManager.STREAM_ALARM, (systemMax * 0.7).toInt(), 0)
+        audioManager.setStreamVolume(AudioManager.STREAM_ALARM, systemMax, 0)
 
         stop() // ✅ 기존에 울리고 있다면 중지하고 새로 시작
 
@@ -73,6 +73,7 @@ object AlarmPlayer {
         }
 
         // 2. 📳 진동 (기존 로직 유지)
+        // AlarmPlayer.start 내부의 진동 로직 수정
         if (vibrationEnabled) {
             vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 val vm = context.getSystemService(VibratorManager::class.java)
@@ -82,12 +83,19 @@ object AlarmPlayer {
                 context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
             }
 
+            // 알람 전용 속성 설정
+            val alarmAttributes = AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_ALARM) // 알람 용도로 명시
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .build()
+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 val effect = VibrationEffect.createWaveform(
-                    longArrayOf(0, 600, 400), // 0ms 대기, 600ms 진동, 400ms 쉼
+                    longArrayOf(0, 600, 400),
                     0 // 반복
                 )
-                vibrator?.vibrate(effect)
+                // attributes를 함께 전달하여 시스템 설정을 우회
+                vibrator?.vibrate(effect, alarmAttributes)
             } else {
                 @Suppress("DEPRECATION")
                 vibrator?.vibrate(longArrayOf(0, 600, 400), 0)
