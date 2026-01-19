@@ -175,6 +175,13 @@ class AlarmReceiver : BroadcastReceiver() {
             ).apply {
                 description = "알람이 울릴 때 사용하는 채널입니다."
                 lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+
+                // ✅ 채널 자체에 진동 활성화 및 패턴 설정
+                enableVibration(true)
+                vibrationPattern = longArrayOf(0, 600, 400) // 진동 패턴 명시
+
+                // ✅ 방해 금지 모드 우회 설정
+                setBypassDnd(true)
             }
             nm.createNotificationChannel(channel)
         }
