@@ -141,7 +141,6 @@ class AlarmRingActivity : ComponentActivity() {
         Log.i(TAG, "Stop command sent to Watch")
 
         // 5) MainActivity로 넘어가면서 알람 리뷰 화면에서 부터 시작하도록 요청
-
         val intent = Intent(this, MainActivity::class.java).apply {
             putExtra("startDestination", "reviewAlarm") // Screen.AfterAlarm.route 값
             addFlags(
