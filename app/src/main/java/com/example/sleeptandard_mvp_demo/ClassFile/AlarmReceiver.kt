@@ -91,7 +91,8 @@ object AlarmPlayer {
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 val effect = VibrationEffect.createWaveform(
-                    longArrayOf(0, 600, 400),
+                    longArrayOf(0, 1000, 500, 1000),
+                    intArrayOf(0, 255, 0, 255),
                     0 // 반복
                 )
                 // attributes를 함께 전달하여 시스템 설정을 우회
@@ -187,59 +188,3 @@ class AlarmReceiver : BroadcastReceiver() {
         }
     }
 }
-
-
-/** 전에 쓰던 로직 **/
-/*
-@SuppressLint("ServiceCast")
-fun start(context: Context, ringtoneUriString: String?, vibrationEnabled: Boolean, volume: Int) {
-    // 🔔 소리
-    val uri = try {
-        if (ringtoneUriString != null) {
-            Uri.parse(ringtoneUriString)
-        } else {
-            RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-        }
-    } catch (e: Exception) {
-        RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-    }
-
-    ringtone = RingtoneManager.getRingtone(context, uri)
-    ringtone?.play()
-
-    // ✅ 링톤 볼륨 설정 (API 28 이상 권장)
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM)
-        // 비율로 계산 (0.0f ~ 1.0f)
-        ringtone?.volume = volume.toFloat() / maxVol.toFloat()
-    }
-
-    // 📳 진동
-    if (vibrationEnabled) {
-        vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val vm = context.getSystemService(VibratorManager::class.java)
-            vm.defaultVibrator
-        } else {
-            @Suppress("DEPRECATION")
-            context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
-        }
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val effect = VibrationEffect.createWaveform(
-                longArrayOf(0, 600, 400), // 0ms 대기, 600ms 진동, 400ms 쉼
-                0 // 반복
-            )
-            try{
-                vibrator?.vibrate(effect)
-                Log.d("vibration","성공")
-            }catch (e: Exception){
-                Log.d("vibration","실패: ${e}")
-            }
-        } else {
-            @Suppress("DEPRECATION")
-            vibrator?.vibrate(longArrayOf(0, 600, 400), 0)
-        }
-    }
-}
-*/
