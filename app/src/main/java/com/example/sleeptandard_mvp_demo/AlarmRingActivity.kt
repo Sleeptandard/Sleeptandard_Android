@@ -83,29 +83,9 @@ class AlarmRingActivity : ComponentActivity() {
         // ViewModel 초기화
         alarmViewModel = ViewModelProvider(this)[AlarmViewModel::class.java]
 
-        try{
-
-        } catch(e:Exception){
-            Log.d("WTF", "WTF: ${e}")
-        }
         val alarmPrefs = AlarmPreferences(this)
         alarmId = intent.getIntExtra("alarmId", 0)
         label = intent.getStringExtra("label") ?: "알람"
-
-        /* Not using : 잠금화면 위에 안띄울거임
-        // 🔥 잠금 화면 위에 띄우고, 화면 켜기
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-            setShowWhenLocked(true)
-            setTurnScreenOn(true)
-        } else {
-            @Suppress("DEPRECATION")
-            window.addFlags(
-                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-                        WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
-                        WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
-            )
-        }
-        */
 
         setContent {
             Sleeptandard_MVP_DemoTheme {
@@ -161,6 +141,7 @@ class AlarmRingActivity : ComponentActivity() {
         Log.i(TAG, "Stop command sent to Watch")
 
         // 5) MainActivity로 넘어가면서 알람 리뷰 화면에서 부터 시작하도록 요청
+
         val intent = Intent(this, MainActivity::class.java).apply {
             putExtra("startDestination", "reviewAlarm") // Screen.AfterAlarm.route 값
             addFlags(
@@ -237,7 +218,8 @@ fun AlarmRingScreen(
             Text(
                 text = "${sleepStage} 단계에서 깨워드렸어요.",
                 style = MaterialTheme.typography.bodyMedium.copy(
-                    fontSize = 16.sp
+                    fontSize = 16.sp,
+                    color = MaterialTheme.colorScheme.onPrimary
                 )
             )
         }
@@ -248,7 +230,6 @@ fun AlarmRingScreen(
         SwipeToStopButton(
             text = "피드백",
             onComplete = {
-                Log.d("Swipe", "COMPLETED!")
                 onStop() },
             modifier = Modifier
                 .fillMaxWidth(0.6f)
