@@ -86,6 +86,17 @@ fun AlarmSoundSettingContent(
     val maxVol = 15
     var vol by remember { mutableIntStateOf(currentAlarm?.volume ?: 10) }
 
+    LaunchedEffect(vol) {
+        // API 28(Android P) 이상에서만 실시간 볼륨 조절 가능
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            playingRingtone?.let { ringtone ->
+                if (ringtone.isPlaying) {
+                    ringtone.volume = vol.toFloat() / 15f
+                }
+            }
+        }
+    }
+
     fun stopPreview() {
         try {
             playingRingtone?.stop()

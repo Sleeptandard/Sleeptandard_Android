@@ -23,7 +23,6 @@ import com.example.sleeptandard_mvp_demo.ClassFile.Alarm
 import com.example.sleeptandard_mvp_demo.ClassFile.AlarmScheduler
 import com.example.sleeptandard_mvp_demo.ClassFile.QnARepository
 import com.example.sleeptandard_mvp_demo.Prefs.AlarmPreferences
-import com.example.sleeptandard_mvp_demo.Screen.AlarmSoundSettingScreen
 import com.example.sleeptandard_mvp_demo.Screen.ExperimentScreen
 import com.example.sleeptandard_mvp_demo.Screen.InquireScreen
 import com.example.sleeptandard_mvp_demo.Screen.JournalScreen

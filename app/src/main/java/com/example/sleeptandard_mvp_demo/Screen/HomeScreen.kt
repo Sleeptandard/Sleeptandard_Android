@@ -157,10 +157,8 @@ fun HomeScreen(
     val spacing = 12.dp
     val gridHeight = itemHeight * visibleRows + spacing * (visibleRows - 1)
 
-    /*** sound모달창 ***/
+    // sound설정 모달창
     var showSoundSheet by remember { mutableStateOf(false) }
-
-
 
     // CustomSituationPrefs 불러오기
     LaunchedEffect(Unit) {
@@ -219,7 +217,7 @@ fun HomeScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 28.dp)
+                // .padding(horizontal = 28.dp)
                 .height(186.dp)
                 .width(255.dp)
         ) {
@@ -263,27 +261,6 @@ fun HomeScreen(
                     // 링톤 설정
                     onSoundClick = {
                         showSoundSheet = true
-
-                        /* 원래 기본 알람음 설정 창. 링톤피커 액티비티 인텐트 설정
-                        val intent = Intent(RingtoneManager.ACTION_RINGTONE_PICKER)
-                            .apply {
-                                // 추가적으로 설정합니다
-                                putExtra(
-                                    RingtoneManager.EXTRA_RINGTONE_TYPE,
-                                    RingtoneManager.TYPE_ALARM
-                                )   // 링톤 타입 = 알람
-                                putExtra(
-                                    RingtoneManager.EXTRA_RINGTONE_TITLE,
-                                    "알람음 선택"
-                                )                // 링톤 설정창 제목
-                                putExtra(
-                                    RingtoneManager.EXTRA_RINGTONE_EXISTING_URI,    // 기존 선택 알람 설정
-                                    selectedRingtoneUri.toUri()
-                                )
-                            }
-                        ringtonePickerLauncher.launch(intent)
-
-                         */
                     },
 
                     // 진동 토글
@@ -292,7 +269,6 @@ fun HomeScreen(
                     onCheckedChange = { selectedVibrationEnabled = it },
                     alarmName = alarmName
                 )
-
 
                 Spacer(modifier = Modifier.height(24.dp))
 
@@ -303,7 +279,7 @@ fun HomeScreen(
                     onClick = { showSituationModal = true }
                 )
 
-/*
+                /** 디버깅용 **/
                 Button(
                     onClick = goToAlarmRingScreen
                 ){
@@ -316,7 +292,6 @@ fun HomeScreen(
                     Text("디버깅용 피드백 화면")
                 }
 
- */
 
 
 
@@ -739,107 +714,3 @@ fun HomeScreen(
         }
     }
 }
-
-
-/********************** UI 변경 전 **********************/
-
-/*
-Surface(modifier = Modifier
-    .fillMaxSize()
-    .padding(top = 40.dp)) {
-    Column(modifier = Modifier.fillMaxWidth()
-        .padding(10.dp)
-    )
-    {
-        TimeAmPmPicker(
-            defaultHour12 = alarmViewModel.alarm.hour,
-            defaultMinute = alarmViewModel.alarm.minute,
-            defaultDay =
-                if(alarmViewModel.alarm.isAm)
-                    AMPMHours.DayTime.AM
-                else AMPMHours.DayTime.PM,
-            onTimeChange = {hour12, minute, isAm ->
-            selectedHour = hour12
-            selectedMinute = minute
-            selectedIsAm = isAm
-            }
-        )
-        // 알람음 설정
-        // Activity Result 결과 받았을 때 로직
-        val ringtonePickerLauncher = rememberLauncherForActivityResult(
-            contract = ActivityResultContracts.StartActivityForResult()
-        ) { result ->
-            if (result.resultCode == Activity.RESULT_OK) {
-                val uri = result.data?.getParcelableExtra<Uri>(RingtoneManager.EXTRA_RINGTONE_PICKED_URI)
-                if (uri != null) {
-                    selectedRingtoneUri = uri.toString()   // state에 저장
-                }
-
-            ) {
-                Text("GTS")
-
-            }
-        }
-
-        // 알람음 선택 버튼
-        Button(onClick = {
-            // 링톤 픽커 열기
-            val intent = Intent(RingtoneManager.ACTION_RINGTONE_PICKER)
-                .apply{
-                    // 추가적으로 설정합니다
-                    putExtra(RingtoneManager.EXTRA_RINGTONE_TYPE, RingtoneManager.TYPE_ALARM)   // 링톤 타입 = 알람
-                    putExtra(RingtoneManager.EXTRA_RINGTONE_TITLE, "알람음 선택")                // 링톤 설정창 제목
-                    putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI,                               // 기존 선택 알람 설정
-                        selectedRingtoneUri.toUri()
-                    )
-                }
-            ringtonePickerLauncher.launch(intent)
-        }) {
-            Text("알람음 선택")
-        }
-
-        // 진동 선택
-        Row(
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("진동")
-            Switch(
-                checked = selectedVibrationEnabled,
-                onCheckedChange = { selectedVibrationEnabled = it }
-            )
-        }
-
-        Button(
-            onClick = {
-                onClickSetting()
-                alarmViewModel.saveAlarm(
-                    selectedHour, selectedMinute, selectedIsAm, selectedRingtoneUri, selectedVibrationEnabled)
-                scheduler.schedule(alarmViewModel.alarm)
-
-                val triggerTime = scheduler.getTriggerTime()
-
-                // TODO: 알람뷰모델에 triggerTime 보내기
-                alarmViewModel.startSleepTracking(triggerTime)
-
-                // 여기서 알람 정보를 디스크에 저장
-                val alarmPrefs = AlarmPreferences(context)
-                alarmPrefs.saveAlarm(alarmViewModel.alarm)
-            } )
-        {
-            Text("GTS")
-        }
-    }
-}
-*/
-
-/**** 기존 front에 있던 워치 통신 함수들 ****/
-/*
-
-                    // 2. 워치 깨우기 (전선 연결!)
-                    val triggerTime = scheduler.getTriggerTime()
-                    alarmViewModel.startSleepTracking(triggerTime) // ✅ 주석 해제됨!
-                    
-                    // 3. 눈으로 확인하기 위한 토스트 메시지 (추가)
-                    android.widget.Toast.makeText(context, "워치 연결 시도 중...", android.widget.Toast.LENGTH_SHORT).show()
-
-*/
