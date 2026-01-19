@@ -131,31 +131,7 @@ fun TutorialScreen(
             AnimatedContent(
                 targetState = currentPage,
                 transitionSpec = {
-                    if (targetState > initialState) {
-                        if (initialState == 2 && targetState == 3) {
-                            // ✅ 2 -> 3: 2번이 위에 떠서 대각선 위로 사라지게 함
-                            (slideInVertically { it } + fadeIn(tween(600))).togetherWith(
-                                slideOutVertically { -it } + slideOutHorizontally { it } + fadeOut(tween(600))
-                            ).apply {
-                                // 나가는 화면(2)이 들어오는 화면(3)보다 위에 있도록 zIndex 설정
-                                targetContentZIndex = 0f
-                            }.using(SizeTransform(clip = false)) // 경계 밖으로 나가도 안 잘리게 설정
-                        } else {
-                            fadeIn(tween(500)).togetherWith(fadeOut(tween(500)))
-                        }
-                    } else {
-                        if (initialState == 3 && targetState == 2) {
-                            // ✅ 3 -> 2: 2번이 대각선 위에서 내려오면서 들어옴
-                            (slideInVertically { -it } + slideInHorizontally { it } + fadeIn(tween(600))).togetherWith(
-                                slideOutVertically { it } + fadeOut(tween(600))
-                            ).apply {
-                                targetContentZIndex = 1f // 들어오는 화면(2)이 위에 보이게 함
-                            }.using(SizeTransform(clip = false))
-                        } else {
-                            fadeIn(tween(500)).togetherWith(fadeOut(tween(500)))
-                        }
-                    }
-                },
+                    fadeIn(tween(500)).togetherWith(fadeOut(tween(500))) },
                 label = "TutorialPageTransition"
             ) { targetPage ->
                 // targetPage 상태에 따라 화면을 그립니다.
