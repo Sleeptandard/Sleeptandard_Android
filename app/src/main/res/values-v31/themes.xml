@@ -11,12 +11,12 @@
         <item name="windowSplashScreenBackground">#050C16</item>
 
         <!-- 가운데 로고(벡터/PNG 아무거나 가능) -->
-        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_system_logo2 </item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_splash_logo2</item>
 
         <!-- 로고 배경 원(circle) 없애고 싶으면 -->
         <item name="windowSplashScreenIconBackgroundColor">@android:color/transparent</item>
 
-        <item name="android:windowSplashScreenBrandingImage">@drawable/splash_branding2</item>
+        <item name="android:windowSplashScreenBrandingImage">@drawable/ic_splash_branding</item>
 
         <!-- 스플래시 종료 후 적용될 테마 -->
         <item name="postSplashScreenTheme">@style/Theme.Sleeptandard_MVP_Demo</item>

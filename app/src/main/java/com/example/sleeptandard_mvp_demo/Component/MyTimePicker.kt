@@ -64,6 +64,7 @@ fun WheelPicker(
         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f),
         fontSize = 43.sp
     ),
+    scrollEnable: Boolean = true
 ) {
     require(visibleCount % 2 == 1)
 
@@ -176,7 +177,8 @@ fun WheelPicker(
             state = state,
             flingBehavior = slowFling,
             horizontalAlignment = Alignment.CenterHorizontally,
-            contentPadding = PaddingValues(vertical = itemHeight * centerOffset)
+            contentPadding = PaddingValues(vertical = itemHeight * centerOffset),
+            userScrollEnabled = scrollEnable
         ) {
             items(virtualCount) { virtualIndex ->
                 val realIndex =
@@ -221,6 +223,9 @@ fun CustomTimePicker(
     defaultIsAm: Boolean = true,
     onTimeChange: (hour12: Int, minute: Int, isAm: Boolean) -> Unit,
     stopSignal: Int = 0, // ✅ 추가
+    scrollEnable: Boolean = true,
+    itemHeight: Dp = 62.dp,
+    itemHeightAmPm: Dp = 42.dp
 ) {
     val ampmItems = listOf("AM", "PM")
     val hourItems = (1..12).map { it.toString() }
@@ -254,7 +259,7 @@ fun CustomTimePicker(
         WheelPicker(
             modifier = Modifier.width(90.dp),
             items = ampmItems,
-            itemHeight = 42.dp,
+            itemHeight = itemHeightAmPm,
             selectedIndex = ampmIndex,
             onSelectedIndexChange = { ampmIndex = it },
             textStyle = MaterialTheme.typography.bodyLarge.copy(
@@ -265,6 +270,7 @@ fun CustomTimePicker(
                 fontSize = 25.sp
             ),
             state = ampmState,
+            scrollEnable = scrollEnable
         )
 
         Spacer(Modifier.width(12.dp))
@@ -275,7 +281,9 @@ fun CustomTimePicker(
             selectedIndex = hourIndex,
             onSelectedIndexChange = { hourIndex = it },
             isCyclic = true,
-            state = hourState
+            state = hourState,
+            scrollEnable = scrollEnable,
+            itemHeight = itemHeight
         )
 
         Text(
@@ -292,7 +300,9 @@ fun CustomTimePicker(
             selectedIndex = minuteIndex,
             onSelectedIndexChange = { minuteIndex = it },
             isCyclic = true,
-            state = minuteState
+            state = minuteState,
+            scrollEnable = scrollEnable,
+            itemHeight = itemHeight
         )
     }
 
