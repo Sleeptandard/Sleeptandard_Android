@@ -86,6 +86,17 @@ fun AlarmSoundSettingContent(
     val maxVol = 15
     var vol by remember { mutableIntStateOf(currentAlarm?.volume ?: 10) }
 
+    LaunchedEffect(vol) {
+        // API 28(Android P) 이상에서만 실시간 볼륨 조절 가능
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            playingRingtone?.let { ringtone ->
+                if (ringtone.isPlaying) {
+                    ringtone.volume = vol.toFloat() / 15f
+                }
+            }
+        }
+    }
+
     fun stopPreview() {
         try {
             playingRingtone?.stop()
@@ -94,11 +105,21 @@ fun AlarmSoundSettingContent(
         playingRingtone = null
     }
 
+    // AlarmSoundSettingContent 컴포저블 내부 상단
+    val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
+    // 초기 볼륨 값을 기억 (최초 1회만 저장하도록 설정)
+    var originalSystemVolume by remember { mutableIntStateOf(audioManager.getStreamVolume(AudioManager.STREAM_ALARM)) }
+
     fun playPreview(uri: Uri) {
         stopPreview()
+
+        // 실제 알람과 동일한 환경을 위해 시스템 볼륨을 최대치로 설정
+        val systemMax = audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM)
+        audioManager.setStreamVolume(AudioManager.STREAM_ALARM, systemMax, 0)
+
         val r = RingtoneManager.getRingtone(context, uri) ?: return
 
-        // ✅ API 28 이상에서 미리보기 링톤 볼륨 조절
+        // 앱 내 설정된 볼륨 비율 적용 (API 28 이상)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             r.volume = vol.toFloat() / 15f
         }
@@ -107,24 +128,17 @@ fun AlarmSoundSettingContent(
         playingRingtone = r
         try {
             r.play()
-        } catch (_: Throwable) {
-        }
+        } catch (_: Throwable) { }
         previewToken++
     }
 
-    /*
-    // 2초 자동 정지
-    LaunchedEffect(previewToken) {
-        if (previewToken == 0) return@LaunchedEffect
-        delay(2000)
-        stopPreview()
-    }
-
-    */
-
     // 시트 닫힐 때 미리듣기 정지
     DisposableEffect(Unit) {
-        onDispose { stopPreview() }
+        onDispose {
+            stopPreview()
+            // 화면을 나갈 때 시스템 알람 볼륨을 원래대로 복구
+            audioManager.setStreamVolume(AudioManager.STREAM_ALARM, originalSystemVolume, 0)
+        }
     }
 
     val card = Color(0x26F1F1F1)
@@ -233,7 +247,6 @@ fun AlarmSoundSettingContent(
                         contentPadding = PaddingValues(
                             top = 10.dp,
                             bottom = sliderHeight + sliderPaddingBottom + 10.dp
-                            // ✅ 맨 아래 슬라이더가 덮어쓰는 만큼 "리스트가 가려지지 않게" 패딩 확보
                         ),
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
