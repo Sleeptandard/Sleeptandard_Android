@@ -1,6 +1,8 @@
 package com.example.sleeptandard_mvp_demo.Screen
 
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -81,80 +83,130 @@ fun ReviewAlarmScreen(
             .background(linearGradation),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Spacer(modifier = Modifier.height(112.dp))
+        Spacer(modifier = Modifier.weight(112f))
 
-        Text(
-            text = "1. 지금 정신이 얼마나 또렷한가요?",
-            style = MaterialTheme.typography.bodyMedium.copy(
-                fontSize = 20.sp,
-                color = Color.White
-            ),
-            modifier = Modifier.padding(bottom = 20.dp)
-        )
-
-        Spacer(modifier = Modifier.height(26.dp))
-
-
-
-        DifficultySelectorCustomDraggable(
-            value = feedback1,
-            onValueChange = { feedback1 = it },
-            answerList = answerList1
-        )
-
-        Spacer(modifier = Modifier.height(65.dp))
-
-        if(feedback1 != -1) {
-
-            Text("2. 지금 몸 상태는 어떤가요?", color = Color.White)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(140f)
+                .background(Color.Transparent),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = "1. 지금 정신이 얼마나 또렷한가요?",
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontSize = 18.sp,
+                    color = Color.White
+                ),
+            )
 
             Spacer(modifier = Modifier.height(26.dp))
 
 
 
             DifficultySelectorCustomDraggable(
-                value = feedback2,
-                onValueChange = { feedback2 = it },
-                answerList = answerList2
+                value = feedback1,
+                onValueChange = { feedback1 = it },
+                answerList = answerList1
             )
 
-            Spacer(modifier = Modifier.height(65.dp))
         }
+        Spacer(modifier = Modifier.weight(65f))
 
-        if(feedback2 != -1) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(140f)
+                .background(Color.Transparent),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            if (feedback1 != -1) {
 
-            Text("3. 지금 졸린 정도는 어떤가요?", color = Color.White)
-
-            Spacer(modifier = Modifier.height(26.dp))
-
-
-            DifficultySelectorCustomDraggable(
-                value = feedback3,
-                onValueChange = { feedback3 = it },
-                answerList = answerList3
-            )
-
-            Spacer(Modifier.height(67.dp))
-        }
-
-        if(feedback3 != -1) {
-
-            // 제출 버튼
-            Button(
-                onClick = onSubmit,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp)
-                    .padding(horizontal = 25.dp),
-                shape = RoundedCornerShape(100.dp),
-                colors = ButtonDefaults.buttonColors().copy(
-                    containerColor = Color(0x0DFFFFFF),
-                    contentColor = Color(0xFFF2F6FA)
+                Text("2. 지금 몸 상태는 어떤가요?",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 18.sp,
+                        color = Color.White)
                 )
-            ) {
-                Text("제출")
+
+                Spacer(modifier = Modifier.height(26.dp))
+
+
+
+                DifficultySelectorCustomDraggable(
+                    value = feedback2,
+                    onValueChange = { feedback2 = it },
+                    answerList = answerList2
+                )
+
+
             }
         }
+
+        Spacer(modifier = Modifier.weight(65f))
+
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(140f)
+                .background(Color.Transparent),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            if (feedback2 != -1) {
+
+                Text("3. 지금 졸린 정도는 어떤가요?",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 18.sp,
+                        color = Color.White)
+                )
+
+                Spacer(modifier = Modifier.height(26.dp))
+
+
+                DifficultySelectorCustomDraggable(
+                    value = feedback3,
+                    onValueChange = { feedback3 = it },
+                    answerList = answerList3
+                )
+
+
+            }
+        }
+        Spacer(modifier = Modifier.weight(65f))
+
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(50f)
+                .background(Color.Transparent),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            if (feedback3 != -1) {
+
+
+                // 제출 버튼
+                Button(
+                    onClick = onSubmit,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .padding(horizontal = 25.dp),
+                    shape = RoundedCornerShape(100.dp),
+                    colors = ButtonDefaults.buttonColors().copy(
+                        containerColor = Color(0x0DFFFFFF),
+                        contentColor = Color(0xFFF2F6FA)
+                    )
+                ) {
+                    Text("제출")
+                }
+            }
+
+        }
+
+
+
+        Spacer(Modifier.weight(74f))
     }
 
 }
@@ -253,6 +305,7 @@ fun DifficultySelectorCustomDraggable(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .padding(start = 2.dp)
                     .height(2.dp)
                     // .align(Alignment.Center)
                     .background(Color.White.copy(alpha = 0.4f))
@@ -283,7 +336,7 @@ fun DifficultySelectorCustomDraggable(
                 Box(
                     modifier = Modifier
                         .offset { IntOffset((animatedX - thumbRadiusPx).roundToInt(), 0) }
-                        .size(18.dp)
+                        .size(26.dp)
                         .shadow(12.dp, CircleShape)
                         .background(Color.White, CircleShape),
                     contentAlignment = Alignment.Center

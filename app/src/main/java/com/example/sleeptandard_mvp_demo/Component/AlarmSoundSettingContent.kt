@@ -6,6 +6,7 @@ import android.media.AudioManager
 import android.media.Ringtone
 import android.media.RingtoneManager
 import android.net.Uri
+import android.os.Build
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -85,6 +86,17 @@ fun AlarmSoundSettingContent(
     val maxVol = 15
     var vol by remember { mutableIntStateOf(currentAlarm?.volume ?: 10) }
 
+    LaunchedEffect(vol) {
+        // API 28(Android P) 이상에서만 실시간 볼륨 조절 가능
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            playingRingtone?.let { ringtone ->
+                if (ringtone.isPlaying) {
+                    ringtone.volume = vol.toFloat() / 15f
+                }
+            }
+        }
+    }
+
     fun stopPreview() {
         try {
             playingRingtone?.stop()
@@ -93,31 +105,40 @@ fun AlarmSoundSettingContent(
         playingRingtone = null
     }
 
+    // AlarmSoundSettingContent 컴포저블 내부 상단
+    val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
+    // 초기 볼륨 값을 기억 (최초 1회만 저장하도록 설정)
+    var originalSystemVolume by remember { mutableIntStateOf(audioManager.getStreamVolume(AudioManager.STREAM_ALARM)) }
+
     fun playPreview(uri: Uri) {
         stopPreview()
+
+        // 실제 알람과 동일한 환경을 위해 시스템 볼륨을 최대치로 설정
+        val systemMax = audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM)
+        audioManager.setStreamVolume(AudioManager.STREAM_ALARM, systemMax, 0)
+
         val r = RingtoneManager.getRingtone(context, uri) ?: return
+
+        // 앱 내 설정된 볼륨 비율 적용 (API 28 이상)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            r.volume = vol.toFloat() / 15f
+        }
+
         r.streamType = AudioManager.STREAM_ALARM
         playingRingtone = r
         try {
             r.play()
-        } catch (_: Throwable) {
-        }
+        } catch (_: Throwable) { }
         previewToken++
     }
 
-    /*
-    // 2초 자동 정지
-    LaunchedEffect(previewToken) {
-        if (previewToken == 0) return@LaunchedEffect
-        delay(2000)
-        stopPreview()
-    }
-
-    */
-
     // 시트 닫힐 때 미리듣기 정지
     DisposableEffect(Unit) {
-        onDispose { stopPreview() }
+        onDispose {
+            stopPreview()
+            // 화면을 나갈 때 시스템 알람 볼륨을 원래대로 복구
+            audioManager.setStreamVolume(AudioManager.STREAM_ALARM, originalSystemVolume, 0)
+        }
     }
 
     val card = Color(0x26F1F1F1)
@@ -128,14 +149,15 @@ fun AlarmSoundSettingContent(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(top = 54.dp)
-            .background(DarkBackground),  // ✅ 이거 추가 (핵심)
+            .background(DarkBackground),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        Spacer(Modifier.weight(54f))
+
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 6.dp, bottom = 10.dp, start = 16.dp),
+                .padding(horizontal = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(
@@ -152,7 +174,7 @@ fun AlarmSoundSettingContent(
             }
         }
 
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.weight(24f))
 
         // 상단 토글 바
         Surface(
@@ -202,13 +224,13 @@ fun AlarmSoundSettingContent(
             }
         }
 
-        Spacer(Modifier.height(26.dp))
+        Spacer(Modifier.weight(26f))
 
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding( top= 16.dp)
-                .weight(1f) // ✅ 남은 공간을 전부 차지하게
+                .padding(top = 16.dp)
+                .weight(620f) // ✅ 남은 공간을 전부 차지하게
         ) {
 
 
@@ -225,7 +247,6 @@ fun AlarmSoundSettingContent(
                         contentPadding = PaddingValues(
                             top = 10.dp,
                             bottom = sliderHeight + sliderPaddingBottom + 10.dp
-                            // ✅ 맨 아래 슬라이더가 덮어쓰는 만큼 "리스트가 가려지지 않게" 패딩 확보
                         ),
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
@@ -255,24 +276,25 @@ fun AlarmSoundSettingContent(
             }
 
 
-            // ✅ 슬라이더를 맨 밑에 고정 + 리스트 위에 덮어쓰기
+            // ✅ 슬라이더를 맨 밑에 고정
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(sliderHeight)
-                    .align(Alignment.BottomCenter),
-                color = Color(0xFF060D17) // 배경 깔고 싶으면 card.copy(alpha=0.9f) 같은걸로
+                    .align(Alignment.BottomCenter), // 바닥에 붙임
+                color = Color(0xFF060D17)
             ) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .navigationBarsPadding() // 시스템 하단바 여백 대응
+                        // ✅ 2. 내비게이션 바 패딩을 Column에 적용하여 배경색은 바닥까지 채워지게 합니다.
+                        .navigationBarsPadding()
                 ) {
-                    // 슬라이더 Row 그대로(지금 네 코드)
+                    // ✅ 3. 고정 높이 대신 내부 Row의 수직 패딩(vertical)으로 높이를 조절합니다.
+                    // 이렇게 하면 기기에 상관없이 슬라이더의 물리적 크기가 일정하게 유지됩니다.
                     Row(
                         modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = 30.dp, vertical = 20.dp),
+                            .fillMaxWidth()
+                            .padding(horizontal = 30.dp, vertical = 28.dp), // 충분한 터치 영역 확보
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
@@ -281,12 +303,14 @@ fun AlarmSoundSettingContent(
                             tint = if (soundEnabled) Color.White else Color(0x66FFFFFF),
                             modifier = Modifier.size(24.dp)
                         )
-                        Spacer(Modifier.width(6.dp))
+                        Spacer(Modifier.width(12.dp))
 
                         CustomVolumeSlider(
                             value = vol.toFloat(),
                             onValueChange = { v ->
-                                vol = v.toInt().coerceIn(0, maxVol)
+                                val newVol = v.toInt().coerceIn(0, maxVol)
+                                vol = newVol
+                                onVolumeChange(newVol) // 실제 볼륨 변경 적용
                             },
                             enabled = soundEnabled,
                             valueRange = 0f..maxVol.toFloat(),

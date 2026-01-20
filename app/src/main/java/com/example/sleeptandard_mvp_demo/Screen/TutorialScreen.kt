@@ -1,8 +1,21 @@
 package com.example.sleeptandard_mvp_demo.Screen
 
+import android.R
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,6 +25,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -32,6 +46,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.sleeptandard_mvp_demo.Component.CustomTimePicker
 import com.example.sleeptandard_mvp_demo.ui.theme.AppIcons
 import com.example.sleeptandard_mvp_demo.ui.theme.Pretandard
 
@@ -53,15 +68,15 @@ fun TutorialScreen(
             Color(0x1AF1F1F1)
         )
     )
-    val transparentBrush = Brush.radialGradient(
-        colors = listOf(
-            Color.Transparent
-        )
-    )
 
     var currentPage by remember { mutableIntStateOf(0) }
     val maxPage = 3 // 0: 시작, 1: 알람설정, 2: 취침, 3: 피드백
 
+    // ✅ 뒤로가기 제어 로직 추가
+    // currentPage가 0보다 클 때만 이 핸들러가 동작합니다.
+    BackHandler(enabled = currentPage > 0) {
+        currentPage -= 1
+    }
 
     Column(
         modifier = Modifier
@@ -69,6 +84,7 @@ fun TutorialScreen(
             .background(linearGradation),
         horizontalAlignment = Alignment.CenterHorizontally
     ){
+
         Spacer(Modifier.height(60.dp))
 
         if(currentPage != 0){
@@ -88,7 +104,11 @@ fun TutorialScreen(
                                 .fillMaxHeight()
                                 .clip(RoundedCornerShape(50.dp))
                                 // 현재 페이지일 때만 배경 브러시 적용
-                                .background(if (currentPage == pageNum) circleGradation else Brush.linearGradient(listOf(Color.Transparent, Color.Transparent)))
+                                .background(
+                                    if (currentPage == pageNum) circleGradation else Brush.linearGradient(
+                                        listOf(Color.Transparent, Color.Transparent)
+                                    )
+                                )
                                 .clickable { currentPage = pageNum },
                             contentAlignment = Alignment.Center
                         ) {
@@ -106,13 +126,21 @@ fun TutorialScreen(
         }
         Spacer(Modifier.height(40.dp))
 
-        // 2. 페이지 내용 (currentPage에 따라 다른 컴포저블 호출)
+        // 2. 페이지 내용 (애니메이션 적용 영역)
         Box(modifier = Modifier.weight(1f)) {
-            when (currentPage) {
-                0 -> StartPage()
-                1 -> AlarmSettingPart()
-                2 -> AlarmSettedPart()
-                3 -> FeedbackPart()
+            AnimatedContent(
+                targetState = currentPage,
+                transitionSpec = {
+                    fadeIn(tween(500)).togetherWith(fadeOut(tween(500))) },
+                label = "TutorialPageTransition"
+            ) { targetPage ->
+                // targetPage 상태에 따라 화면을 그립니다.
+                when (targetPage) {
+                    0 -> StartPage()
+                    1 -> AlarmSettingPart()
+                    2 -> AlarmSettedPart()
+                    3 -> FeedbackPart()
+                }
             }
         }
 
@@ -143,7 +171,7 @@ fun TutorialScreen(
             )
         }
 
-        Spacer(Modifier.height(40.dp))
+        Spacer(Modifier.height(118.dp))
     }
 }
 
@@ -156,7 +184,7 @@ fun StartPage(){
     ) {
         Column(modifier = Modifier
             .padding(start = 32.dp)
-            .weight(197f)
+            .weight(170f)
         ) {
             Row(
                 verticalAlignment = Alignment.Bottom
@@ -194,7 +222,7 @@ fun StartPage(){
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .weight(207f)
+                .weight(150f)
         ) {
             Spacer(Modifier.height(110.dp))
             Text(
@@ -220,13 +248,172 @@ fun StartPage(){
 }
 @Composable
 fun AlarmSettingPart(){
-    Text("1번 페이지")
+    Column(
+        modifier = Modifier.fillMaxSize(),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ){
+        Spacer(Modifier.weight(3f))
+
+        Text("몇 시 이전에는 꼭 일어나야 하나요?",
+            style = MaterialTheme.typography.bodyMedium.copy(
+                color = MaterialTheme.colorScheme.onPrimary,
+                fontSize = 16.sp
+            ))
+
+        Spacer(Modifier.weight(8f))
+
+        CustomTimePicker(
+            onTimeChange = {h,m,ampm->{}},
+            scrollEnable = false,
+            itemHeight = 68.dp,
+            itemHeightAmPm = 52.dp,
+            defaultHour12 = 6,
+            defaultIsAm = true,
+            defaultMinute = 0,
+        )
+        
+        Spacer(Modifier.weight(14f))
+
+    }
 }
 @Composable
 fun AlarmSettedPart(){
-    Text("2번 페이지")
+    Column(
+        modifier = Modifier.fillMaxSize(),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ){
+        Spacer(Modifier.weight(60f))
+
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(7.dp ),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ){
+            Row(
+                verticalAlignment = Alignment.Bottom
+            ) {
+                Text(
+                    text = "설정 시간내 ",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        fontSize = 16.sp
+                    ))
+                Text(
+                    text ="가장 얕은 수면",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        color = Color(0xFF8DF1E2),
+                        fontSize = 18.sp
+                    ))
+                Text(
+                    text = "에서 깨워드려요.",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        fontSize = 16.sp
+                    )
+                )
+            }
+            Row(
+                verticalAlignment = Alignment.Bottom
+            ){
+                Text(
+                    text = "수면 측정을 위해, ",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        fontSize = 16.sp
+                    )
+                )
+                Text(
+                    text = "워치",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        fontSize = 18.sp
+                    )
+                )
+                Text(
+                    text = "를 착용해주세요.",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        fontSize = 16.sp
+                    )
+                )
+
+            }
+
+        }
+        
+        Spacer(Modifier.weight(75f))
+
+        Image(
+            modifier = Modifier.padding(horizontal = 78.dp),
+            painter = painterResource(AppIcons.Tutorial30Min),
+            contentDescription = "30분 전부터 깨워준다는 그림",
+            contentScale = ContentScale.Fit
+        )
+
+        Spacer(Modifier.weight(190f))
+    }
 }
 @Composable
 fun FeedbackPart(){
-    Text("3번 페이지")
+     Column(
+         modifier = Modifier.fillMaxSize(),
+         horizontalAlignment = Alignment.CenterHorizontally
+     ) {
+
+         Spacer(Modifier.weight(20f))
+         
+         Column(
+             modifier = Modifier.fillMaxWidth(),
+             horizontalAlignment = Alignment.CenterHorizontally
+         ){
+             Row(
+                 verticalAlignment = Alignment.Bottom
+             ){
+                 Text(
+                     text = "당신의 ",
+                     style = MaterialTheme.typography.bodyMedium.copy(
+                         fontSize = 16.sp
+                     )
+                 )
+                 Text(
+                     text = "피드백",
+                     style = MaterialTheme.typography.bodyMedium.copy(
+                         fontSize = 18.sp,
+                         color = Color(0xFF8DF1E2)
+                     )
+                 )
+                 Text(
+                     text = "으로",
+                     style = MaterialTheme.typography.bodyMedium.copy(
+                         fontSize = 16.sp
+                     )
+                 )
+             }
+             Text(
+                 text = "맞춤형 알고리즘이 생성돼요.",
+                     style = MaterialTheme.typography.bodyMedium.copy(
+                     fontSize = 16.sp
+                     )
+             )
+         }
+         
+         Spacer(Modifier.weight(40f))
+         
+         Row(
+             modifier = Modifier.fillMaxWidth()
+         ) {
+             Spacer(Modifier.weight(75f))
+             Image(
+                 modifier = Modifier.weight(210f),
+                 painter = painterResource(AppIcons.TutorialFeedback),
+                 contentDescription = "피드백 이미지",
+                 contentScale = ContentScale.Fit
+             )
+             Spacer(Modifier.weight(75f))
+         }
+         
+         
+         
+         Spacer(Modifier.weight(60f))
+     }
 }
