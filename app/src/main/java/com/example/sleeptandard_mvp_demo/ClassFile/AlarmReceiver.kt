@@ -156,6 +156,11 @@ class AlarmReceiver : BroadcastReceiver() {
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setOngoing(true) // 스와이프로 안 없애지게
+
+            // ✅ 알림음 무음 및 기본 설정(소리) 제거
+            .setSound(null)
+            .setDefaults(NotificationCompat.DEFAULT_VIBRATE) // 진동만 기본값 사용 혹은 0으로 설정
+
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setContentIntent(contentPendingIntent)
             // 🔥 여기서 full-screen 요청 (USE_FULL_SCREEN_INTENT + 사용자 설정 ON일 때 동작)
@@ -177,9 +182,12 @@ class AlarmReceiver : BroadcastReceiver() {
                 description = "알람이 울릴 때 사용하는 채널입니다."
                 lockscreenVisibility = Notification.VISIBILITY_PUBLIC
 
+                // ✅ 알림음 무음 처리
+                setSound(null, null)
+
                 // ✅ 채널 자체에 진동 활성화 및 패턴 설정
                 enableVibration(true)
-                vibrationPattern = longArrayOf(0, 600, 400) // 진동 패턴 명시
+                vibrationPattern = longArrayOf(0, 600, 400)
 
                 // ✅ 방해 금지 모드 우회 설정
                 setBypassDnd(true)
