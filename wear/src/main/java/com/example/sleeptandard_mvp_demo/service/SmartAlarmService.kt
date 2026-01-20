@@ -38,6 +38,7 @@ import java.nio.ByteBuffer
 import java.util.ArrayDeque
 import java.util.Collections
 import java.util.concurrent.ConcurrentLinkedDeque
+import java.util.concurrent.atomic.AtomicInteger
 import android.os.IBinder
 
 class SmartAlarmService : Service(), SensorEventListener {
@@ -60,6 +61,7 @@ class SmartAlarmService : Service(), SensorEventListener {
 
     private val hrWindow = ArrayDeque<Float>(HR_WINDOW_SIZE)
     private val accWindow = ConcurrentLinkedDeque<Triple<Float, Float, Float>>()
+    private val accWindowCount = AtomicInteger(0)
     private var lastFeatureExtractionTime = 0L
 
     private val ACC_SAMPLE_RATE_US = 40000
@@ -201,8 +203,11 @@ class SmartAlarmService : Service(), SensorEventListener {
 
             dataRepository.enqueueSensorData(timestamp, SensorType.ACC, x, y, z)
             accWindow.add(Triple(x, y, z))
-            if (accWindow.size > ACC_WINDOW_SIZE) {
-                accWindow.poll()
+            accWindowCount.incrementAndGet()
+            if (accWindowCount.get() > ACC_WINDOW_SIZE) {
+                if (accWindow.poll() != null) {
+                    accWindowCount.decrementAndGet()
+                }
             }
 
         } else if (event.sensor.type == Sensor.TYPE_HEART_RATE) {
@@ -218,7 +223,7 @@ class SmartAlarmService : Service(), SensorEventListener {
             hrWindow.addLast(hrValue)
 
             if (timestamp - lastFeatureExtractionTime >= FEATURE_INTERVAL_MS) {
-                if (hrWindow.size >= HR_WINDOW_SIZE && accWindow.size >= ACC_WINDOW_SIZE) {
+                if (hrWindow.size >= HR_WINDOW_SIZE && accWindowCount.get() >= ACC_WINDOW_SIZE) {
                     runInferencePipeline(timestamp)
                     lastFeatureExtractionTime = timestamp
                 }
