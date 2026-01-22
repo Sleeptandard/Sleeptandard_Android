@@ -84,7 +84,7 @@ fun AlarmSoundSettingContent(
     var previewToken by remember { mutableIntStateOf(0) }
 
     val maxVol = 15
-    var vol by remember { mutableIntStateOf(currentAlarm?.volume ?: 10) }
+    var vol by remember { mutableIntStateOf((currentAlarm?.volume ?: 10).coerceAtLeast(1)) } // 최소 1부터 시작함
 
     LaunchedEffect(vol) {
         // API 28(Android P) 이상에서만 실시간 볼륨 조절 가능
@@ -308,12 +308,12 @@ fun AlarmSoundSettingContent(
                         CustomVolumeSlider(
                             value = vol.toFloat(),
                             onValueChange = { v ->
-                                val newVol = v.toInt().coerceIn(0, maxVol)
+                                val newVol = v.toInt().coerceIn(1, maxVol)
                                 vol = newVol
                                 onVolumeChange(newVol) // 실제 볼륨 변경 적용
                             },
                             enabled = soundEnabled,
-                            valueRange = 0f..maxVol.toFloat(),
+                            valueRange = 1f..maxVol.toFloat(),
                             modifier = Modifier.weight(1f)
                         )
                     }
