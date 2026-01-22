@@ -1,5 +1,9 @@
 package com.example.sleeptandard_mvp_demo.Screen
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -12,7 +16,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -30,24 +33,38 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
 import com.example.sleeptandard_mvp_demo.ui.theme.AppIcons
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun InquireScreen(
     onBack: () -> Unit = {},
-    onPickImage: () -> Unit = {},   // ✅ 사진 첨부 클릭 시(기능은 보류)
-    onSubmit: (title: String, body: String) -> Unit = { _, _ -> } // ✅ 제출 클릭 시(기능은 보류)
+    // onSubmit에 이미지 Uri를 전달할 수 있도록 파라미터 추가
+    onSubmit: (title: String, body: String, imageUri: Uri?) -> Unit = { _, _, _ -> }
 ) {
     var title by remember { mutableStateOf("") }
     var body by remember { mutableStateOf("") }
 
     val fieldBg = Color(0x40F1F1F1)     // 아주 옅은 회색(알파)
+
+    // 1. 선택된 이미지의 URI를 저장할 상태
+    var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
+
+    // 2. 사진 앱을 열기 위한 Launcher 설정
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        // 사진 선택 결과(URI)를 상태에 저장
+        selectedImageUri = uri
+    }
 
     Scaffold(
         topBar = {
@@ -169,18 +186,36 @@ fun InquireScreen(
             )
             Spacer(Modifier.height(10.dp))
 
+            // 3. 사진 첨부 영역 클릭 시 갤러리 실행
             Box(
                 modifier = Modifier
                     .size(100.dp)
                     .background(fieldBg, RoundedCornerShape(12.dp))
-                    .clickable { onPickImage() }, // ✅ 기능은 콜백만
+                    .clip(RoundedCornerShape(12.dp)) // 이미지가 영역을 벗어나지 않게 절단
+                    .clickable {
+                        // 이미지만 선택하도록 설정하여 갤러리 호출
+                        photoPickerLauncher.launch(
+                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                        )
+                    },
                 contentAlignment = Alignment.Center
             ) {
-                Text(
-                    "+",
-                    color = Color.White,
-                    style = MaterialTheme.typography.headlineMedium
-                )
+                if (selectedImageUri != null) {
+                    // 4. 선택된 이미지가 있으면 화면에 표시
+                    AsyncImage(
+                        model = selectedImageUri,
+                        contentDescription = "선택된 이미지",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    // 이미지가 없으면 "+" 아이콘 표시
+                    Text(
+                        "+",
+                        color = Color.White,
+                        style = MaterialTheme.typography.headlineMedium
+                    )
+                }
             }
 
             Spacer(Modifier.height(60.dp))
@@ -188,19 +223,17 @@ fun InquireScreen(
             // ---- 제출 버튼 (하단 고정 느낌) ----
             Button(
                 onClick = {
-                    // TODO: 서버/이메일/관리자에게 전송 기능 연결 예정
-                    onSubmit(title, body)
+                    // 5. 제출 시 제목, 내용과 함께 이미지 URI 전달
+                    onSubmit(title, body, selectedImageUri)
                 },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(56.dp)
                     .padding(bottom = 16.dp),
                 shape = RoundedCornerShape(100.dp),
-
-                enabled = title.isNotBlank() && body.isNotBlank() // ✅ 입력 없으면 비활성
+                enabled = title.isNotBlank() && body.isNotBlank()
             ) {
-                Text("제출",
-                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 18.sp))
+                Text("제출", style = MaterialTheme.typography.bodyMedium.copy(fontSize = 18.sp))
             }
         }
     }
