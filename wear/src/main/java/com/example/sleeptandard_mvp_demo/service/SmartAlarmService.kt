@@ -71,6 +71,7 @@ class SmartAlarmService : Service(), SensorEventListener {
 
     private var targetAlarmTime: Long = 0L
     private var sessionStartTime: Long = 0L
+    private var situationLabel: String = "normal" // [추가] 특별 상황 라벨
     private val inferenceHistory = Collections.synchronizedList(mutableListOf<StageEntry>())
     private var consecutiveLightCount = 0
     private var lastStage: SleepStage = SleepStage.UNKNOWN
@@ -85,8 +86,9 @@ class SmartAlarmService : Service(), SensorEventListener {
         when (intent?.action) {
             ACTION_START_TRACKING -> {
                 targetAlarmTime = intent.getLongExtra(EXTRA_TARGET_TIME, 0L)
+                situationLabel = intent.getStringExtra(EXTRA_SITUATION_LABEL) ?: "normal" // [추가] 라벨 받기
                 sessionStartTime = System.currentTimeMillis()
-                Log.i(TAG, "Service Started. Target Time: $targetAlarmTime")
+                Log.i(TAG, "Service Started. Target Time: $targetAlarmTime, Label: $situationLabel")
                 
                 // [핵심] Foreground Service는 가능한 빨리 startForeground 호출 필요
                 createNotificationChannel()
@@ -126,7 +128,7 @@ class SmartAlarmService : Service(), SensorEventListener {
             }
 
             sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
-            dataRepository = DataRepository(this)
+            dataRepository = DataRepository(this, situationLabel) // [수정] 라벨 전달
             userStatsManager = UserStatsManager(this)
             messageClient = Wearable.getMessageClient(this)
             inferenceManager = InferenceManager(this)
@@ -470,6 +472,7 @@ class SmartAlarmService : Service(), SensorEventListener {
         const val ACTION_START_TRACKING = "com.example.sleeptandard_mvp_demo.START_TRACKING"
         const val ACTION_STOP_AND_SEND_RESULT = "com.example.sleeptandard_mvp_demo.STOP_AND_SEND_RESULT"
         const val EXTRA_TARGET_TIME = "EXTRA_TARGET_TIME"
+        const val EXTRA_SITUATION_LABEL = "EXTRA_SITUATION_LABEL" // [추가] 라벨 Extra 키
 
         private const val PATH_TRIGGER_ALARM = "/TRIGGER_ALARM"
         private const val PATH_SLEEP_DATA_RESULT = "/SLEEP_DATA_RESULT"
