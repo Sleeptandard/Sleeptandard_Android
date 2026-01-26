@@ -47,7 +47,6 @@ import androidx.compose.ui.unit.sp
 
 import com.example.sleeptandard_mvp_demo.ClassFile.Alarm
 import com.example.sleeptandard_mvp_demo.ClassFile.AlarmScheduler
-import com.example.sleeptandard_mvp_demo.Component.AlarmBottomNavBar
 import com.example.sleeptandard_mvp_demo.Prefs.AlarmPreferences
 import com.example.sleeptandard_mvp_demo.ViewModel.AlarmViewModel
 import com.example.sleeptandard_mvp_demo.ui.theme.AppIcons

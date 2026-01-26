@@ -91,7 +91,7 @@ fun InquireScreen(
                 .padding(inner)
                 .padding(horizontal = 26.dp)
         ) {
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.weight(16f))
 
             // ---- 제목 ----
             Text(
@@ -100,7 +100,7 @@ fun InquireScreen(
                 color = Color(0xCCF1F1F1),
                 style = MaterialTheme.typography.bodyMedium.copy(fontSize = 16.sp)
             )
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.weight(10f))
 
             OutlinedTextField(
                 value = title,
@@ -136,7 +136,7 @@ fun InquireScreen(
                 )
             )
 
-            Spacer(Modifier.height(22.dp))
+            Spacer(Modifier.weight(22f))
 
             // ---- 내용 ----
             Text(
@@ -144,7 +144,7 @@ fun InquireScreen(
                 color = Color(0xCCF1F1F1),
                 style = MaterialTheme.typography.bodyMedium.copy(fontSize = 16.sp)
             )
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.weight(10f))
 
             OutlinedTextField(
                 value = body,
@@ -178,7 +178,7 @@ fun InquireScreen(
                 )
             )
 
-            Spacer(Modifier.height(22.dp))
+            Spacer(Modifier.weight(22f))
 
             // ---- 사진 첨부 ----
             Text(
@@ -186,7 +186,7 @@ fun InquireScreen(
                 color = Color(0xCCF1F1F1),
                 style = MaterialTheme.typography.bodyMedium.copy(fontSize = 16.sp)
             )
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.weight(10f))
 
             // 3. 사진 미리보기 및 추가 영역 (가로 스크롤 가능)
             LazyRow(
@@ -230,7 +230,7 @@ fun InquireScreen(
                 }
             }
 
-            Spacer(Modifier.height(60.dp))
+            Spacer(Modifier.weight(60f))
 
             // ---- 제출 버튼
             Button(

@@ -63,8 +63,8 @@ fun AlarmSoundSettingContent(
     currentUriString: String,
     onClose: () -> Unit,
     onSelectUriString: (String) -> Unit,
-    currentAlarm: Alarm, // ✅ 알람 객체를 직접 받거나 volume 값을 받도록 수정
     onVolumeChange: (Int) -> Unit, // ✅ 볼륨 변경 콜백 추가
+    defaultVolume: Int = 10
 ) {
     val context = LocalContext.current
 
@@ -84,7 +84,7 @@ fun AlarmSoundSettingContent(
     var previewToken by remember { mutableIntStateOf(0) }
 
     val maxVol = 15
-    var vol by remember { mutableIntStateOf((currentAlarm?.volume ?: 10).coerceAtLeast(1)) } // 최소 1부터 시작함
+    var vol by remember { mutableIntStateOf((defaultVolume).coerceAtLeast(1)) } // 최소 1부터 시작함
 
     LaunchedEffect(vol) {
         // API 28(Android P) 이상에서만 실시간 볼륨 조절 가능
