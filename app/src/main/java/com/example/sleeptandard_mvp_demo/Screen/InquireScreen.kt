@@ -1,7 +1,12 @@
 package com.example.sleeptandard_mvp_demo.Screen
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -10,9 +15,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -30,24 +36,37 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
 import com.example.sleeptandard_mvp_demo.ui.theme.AppIcons
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun InquireScreen(
     onBack: () -> Unit = {},
-    onPickImage: () -> Unit = {},   // ✅ 사진 첨부 클릭 시(기능은 보류)
-    onSubmit: (title: String, body: String) -> Unit = { _, _ -> } // ✅ 제출 클릭 시(기능은 보류)
+    onSubmit: (title: String, body: String, imageUris: List<Uri>) -> Unit = { _, _, _ -> }
 ) {
     var title by remember { mutableStateOf("") }
     var body by remember { mutableStateOf("") }
 
     val fieldBg = Color(0x40F1F1F1)     // 아주 옅은 회색(알파)
+
+    // 1. 선택된 이미지들의 URI 리스트를 저장할 상태로 변경
+    var selectedImageUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
+
+    // 2. 여러 장을 가져올 수 있는 GetMultipleContents 계약 사용
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetMultipleContents()
+    ) { uris: List<Uri> ->
+        // 새로 선택한 사진들을 기존 리스트에 추가 (교체를 원하면 selectedImageUris = uris)
+        selectedImageUris = selectedImageUris + uris
+    }
 
     Scaffold(
         topBar = {
@@ -72,7 +91,7 @@ fun InquireScreen(
                 .padding(inner)
                 .padding(horizontal = 26.dp)
         ) {
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.weight(16f))
 
             // ---- 제목 ----
             Text(
@@ -81,7 +100,7 @@ fun InquireScreen(
                 color = Color(0xCCF1F1F1),
                 style = MaterialTheme.typography.bodyMedium.copy(fontSize = 16.sp)
             )
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.weight(10f))
 
             OutlinedTextField(
                 value = title,
@@ -117,7 +136,7 @@ fun InquireScreen(
                 )
             )
 
-            Spacer(Modifier.height(22.dp))
+            Spacer(Modifier.weight(22f))
 
             // ---- 내용 ----
             Text(
@@ -125,7 +144,7 @@ fun InquireScreen(
                 color = Color(0xCCF1F1F1),
                 style = MaterialTheme.typography.bodyMedium.copy(fontSize = 16.sp)
             )
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.weight(10f))
 
             OutlinedTextField(
                 value = body,
@@ -159,7 +178,7 @@ fun InquireScreen(
                 )
             )
 
-            Spacer(Modifier.height(22.dp))
+            Spacer(Modifier.weight(22f))
 
             // ---- 사진 첨부 ----
             Text(
@@ -167,40 +186,66 @@ fun InquireScreen(
                 color = Color(0xCCF1F1F1),
                 style = MaterialTheme.typography.bodyMedium.copy(fontSize = 16.sp)
             )
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.weight(10f))
 
-            Box(
-                modifier = Modifier
-                    .size(100.dp)
-                    .background(fieldBg, RoundedCornerShape(12.dp))
-                    .clickable { onPickImage() }, // ✅ 기능은 콜백만
-                contentAlignment = Alignment.Center
+            // 3. 사진 미리보기 및 추가 영역 (가로 스크롤 가능)
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Text(
-                    "+",
-                    color = Color.White,
-                    style = MaterialTheme.typography.headlineMedium
-                )
+                // 선택된 이미지들 표시
+                items(selectedImageUris) { uri ->
+                    Box(
+                        modifier = Modifier
+                            .size(100.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                    ) {
+                        AsyncImage(
+                            model = uri,
+                            contentDescription = "선택된 이미지",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
+                        // (옵션) 여기에 삭제 버튼 'X'를 추가하면 더 좋습니다.
+                    }
+                }
+
+                // 4. 사진 추가 버튼 (항상 마지막에 위치)
+                item {
+                    Box(
+                        modifier = Modifier
+                            .size(100.dp)
+                            .background(fieldBg, RoundedCornerShape(12.dp))
+                            .clickable {
+                                // 이미지 타입을 처리할 수 있는 앱 선택창을 띄웁니다.
+                                photoPickerLauncher.launch("image/*")
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            "+",
+                            color = Color.White,
+                            style = MaterialTheme.typography.headlineMedium
+                        )
+                    }
+                }
             }
 
-            Spacer(Modifier.height(60.dp))
+            Spacer(Modifier.weight(60f))
 
-            // ---- 제출 버튼 (하단 고정 느낌) ----
+            // ---- 제출 버튼
             Button(
                 onClick = {
-                    // TODO: 서버/이메일/관리자에게 전송 기능 연결 예정
-                    onSubmit(title, body)
+                    // 5. 제출 시 리스트 전체를 전달
+                    onSubmit(title, body, selectedImageUris)
                 },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(56.dp)
                     .padding(bottom = 16.dp),
                 shape = RoundedCornerShape(100.dp),
-
-                enabled = title.isNotBlank() && body.isNotBlank() // ✅ 입력 없으면 비활성
+                enabled = title.isNotBlank() && body.isNotBlank()
             ) {
-                Text("제출",
-                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 18.sp))
+                Text("제출", style = MaterialTheme.typography.bodyMedium.copy(fontSize = 18.sp))
             }
         }
     }

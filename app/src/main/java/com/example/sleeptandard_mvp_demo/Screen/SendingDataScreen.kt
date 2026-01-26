@@ -23,7 +23,9 @@ import androidx.compose.ui.unit.dp
 import com.example.sleeptandard_mvp_demo.ui.theme.AppIcons
 
 @Composable
-fun SendingDataScreen(){
+fun SendingDataScreen(
+    onBack: ()-> Unit
+){
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -53,7 +55,9 @@ fun SendingDataScreen(){
                 modifier = Modifier
                     .size(68.dp)
                     .background(color = Color(0xFF465467), shape = CircleShape)
-                    .clickable{},
+                    .clickable{
+                        onBack()
+                    },
                 contentAlignment = Alignment.Center
             ){
                 Icon(

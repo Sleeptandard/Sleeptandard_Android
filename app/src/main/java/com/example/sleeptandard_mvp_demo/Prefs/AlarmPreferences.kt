@@ -19,9 +19,7 @@ class AlarmPreferences(private val context: Context) {
             .apply()
     }
 
-    fun loadAlarm(): Alarm? {
-        if (!prefs.getBoolean("hasAlarm", false)) return null
-
+    fun loadAlarm(): Alarm {
         return Alarm(
             id = 1,
             hour = prefs.getInt("hour", 8),
@@ -33,11 +31,23 @@ class AlarmPreferences(private val context: Context) {
         )
     }
 
+    fun clearAlarm(){
+        prefs.edit()
+            .putBoolean("hasAlarm", false)
+            .putInt("hour", 8)
+            .putInt("minute", 30)
+            .putBoolean("isAm", true)
+            .apply()
+    }
+
+    /** 알람 설정 기억해놓기 위해서 위에거로 바꿈  10.23 **/
+    /*
     fun clearAlarm() {
         prefs.edit()
             .clear()
             .apply()
     }
+     */
 
     fun isAlarmSet(): Boolean {
         return prefs.getBoolean("hasAlarm", false)

@@ -42,34 +42,32 @@ object AlarmPlayer {
 
         stop() // ✅ 기존에 울리고 있다면 중지하고 새로 시작
 
-        // 1. 🔔 소리 재생 (MediaPlayer - 앱 내부 전용 볼륨)
-        val uri = try {
-            if (!ringtoneUriString.isNullOrEmpty()) {
-                Uri.parse(ringtoneUriString)
-            } else {
-                RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+        // 1. 🔔 소리 재생 로직 수정
+        // ringtoneUriString이 비어있지 않을 때만 MediaPlayer를 초기화하고 재생합니다.
+        if (!ringtoneUriString.isNullOrEmpty()) {
+            try {
+                val uri = Uri.parse(ringtoneUriString)
+                mediaPlayer = MediaPlayer().apply {
+                    setDataSource(context, uri)
+                    setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_ALARM)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                            .build()
+                    )
+                    isLooping = true
+                    prepare()
+
+                    val volumeRatio = volume.toFloat() / 15f
+                    setVolume(volumeRatio, volumeRatio)
+                    start()
+                }
+            } catch (e: Exception) {
+                Log.e("AlarmPlayer", "알람음 재생 실패: ${e.message}")
+                // 예외 발생 시에도 기본음을 울리지 않으려면 여기서 아무것도 하지 않습니다.
             }
-        } catch (e: Exception) {
-            RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-        }
-
-        mediaPlayer = MediaPlayer().apply {
-            setDataSource(context, uri)
-            setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_ALARM)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                    .build()
-            )
-            isLooping = true
-            prepare()
-
-            // ✅ 핵심: 시스템 볼륨은 건드리지 않고 재생기 내부 볼륨만 설정 (0.0f ~ 1.0f)
-            // 15단계 기준이라면 아래와 같이 계산합니다.
-            val volumeRatio = volume.toFloat() / 15f
-            setVolume(volumeRatio, volumeRatio)
-
-            start()
+        } else {
+            Log.d("AlarmPlayer", "무음 설정됨: 소리 재생을 건너뜁니다.")
         }
 
         // 2. 📳 진동 (기존 로직 유지)
@@ -156,6 +154,11 @@ class AlarmReceiver : BroadcastReceiver() {
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setOngoing(true) // 스와이프로 안 없애지게
+
+            // ✅ 알림음 무음 및 기본 설정(소리) 제거
+            .setSound(null)
+            .setDefaults(NotificationCompat.DEFAULT_VIBRATE) // 진동만 기본값 사용 혹은 0으로 설정
+
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setContentIntent(contentPendingIntent)
             // 🔥 여기서 full-screen 요청 (USE_FULL_SCREEN_INTENT + 사용자 설정 ON일 때 동작)
@@ -177,9 +180,12 @@ class AlarmReceiver : BroadcastReceiver() {
                 description = "알람이 울릴 때 사용하는 채널입니다."
                 lockscreenVisibility = Notification.VISIBILITY_PUBLIC
 
+                // ✅ 알림음 무음 처리
+                setSound(null, null)
+
                 // ✅ 채널 자체에 진동 활성화 및 패턴 설정
                 enableVibration(true)
-                vibrationPattern = longArrayOf(0, 600, 400) // 진동 패턴 명시
+                vibrationPattern = longArrayOf(0, 600, 400)
 
                 // ✅ 방해 금지 모드 우회 설정
                 setBypassDnd(true)

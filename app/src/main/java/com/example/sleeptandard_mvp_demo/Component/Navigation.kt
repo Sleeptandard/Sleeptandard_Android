@@ -1,15 +1,38 @@
 package com.example.sleeptandard_mvp_demo.Component
 
+import android.content.Intent
 import android.net.Uri
+import android.provider.Settings
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
 import com.example.sleeptandard_mvp_demo.Screen.HomeScreen
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
@@ -35,6 +58,7 @@ import com.example.sleeptandard_mvp_demo.Screen.SettingsScreen
 import com.example.sleeptandard_mvp_demo.Screen.SplashScreen
 import com.example.sleeptandard_mvp_demo.Screen.TutorialScreen
 import com.example.sleeptandard_mvp_demo.ViewModel.AlarmViewModel
+import com.example.sleeptandard_mvp_demo.ui.theme.AppIcons
 import kotlinx.coroutines.delay
 
 sealed class Screen(val route: String, val showBottomBar: Boolean = true) {
@@ -140,36 +164,22 @@ fun AppNav(
         }
 
         composable(Screen.Journal.route) {
-            /* 뒤로가기 하면 화면 스택 전부 날아가고 홈으로 돌아가는건데 앞으로 구현할것 생각하면 못쓸거 같긴 함.
-            BackHandler {
-                rememberNavController.navigate(Screen.Home.route) {
-                    popUpTo(rememberNavController.graph.startDestinationId) {
-                        inclusive = true
-                    }
-                    launchSingleTop = true
-                }
-            }
-            */
+
             JournalScreen()
         }
 
         composable(Screen.Settings.route) {
-            /*
-            BackHandler {
-                rememberNavController.navigate(Screen.Home.route) {
-                    popUpTo(rememberNavController.graph.startDestinationId) {
-                        inclusive = true
-                    }
-                    launchSingleTop = true
-                }
-            }
-             */
+
             SettingsScreen(
                 onClickQnA = {
                     rememberNavController.navigate(Screen.QnA.route)
                 },
                 onClickTutorial = {rememberNavController.navigate(Screen.Tutorial.route)},
-                onClickPermission = {},
+                onClickPermission = {val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    // 이 앱의 패키지명을 Uri 데이터로 설정하여 해당 앱 설정 페이지로 바로 이동하게 함
+                    data = Uri.fromParts("package", context.packageName, null)
+                }
+                    context.startActivity(intent)},
                 onClickSendingData = {rememberNavController.navigate(Screen.SendingData.route)}
             )
         }
@@ -196,7 +206,9 @@ fun AppNav(
             )
         }
         composable(Screen.SendingData.route) {
-            SendingDataScreen()
+            SendingDataScreen(
+                onBack = { rememberNavController.popBackStack() }
+            )
         }
 
         composable("qna_detail/{id}") { backStackEntry ->
@@ -278,8 +290,86 @@ fun AppNav(
         )
     }
 
+}
 
+@Composable
+fun AlarmBottomNavBar(
+    selectedIndex: Int,
+    onSelect: (Int) -> Unit,
+) {
+    NavigationBar(
+        containerColor = MaterialTheme.colorScheme.background
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceAround
+        ) {
+            StandaloneBottomItem(
+                selected = selectedIndex == 0,
+                iconRes = AppIcons.NavAlarm,
+                label = "알람",
+                onClick = { onSelect(0) }
+            )
+            StandaloneBottomItem(
+                selected = selectedIndex == 1,
+                iconRes = AppIcons.NavJournal,
+                label = "일지",
+                onClick = { onSelect(1) }
+            )
+            StandaloneBottomItem(
+                selected = selectedIndex == 2,
+                iconRes = AppIcons.NavSettings,
+                label = "설정",
+                onClick = { onSelect(2) }
+            )
+        }
+    }
+}
 
+@Composable
+fun StandaloneBottomItem(
+    selected: Boolean,
+    iconRes: Int,
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .selectable(
+                selected = selected,
+                onClick = onClick,
+                role = Role.Tab
+            )
+            .padding(0.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(
+            painter = painterResource(iconRes),
+            contentDescription = label,
+            // ✅ 선택: 원본색 유지 / 비선택: 회색 틴트
+            tint = if (selected) Color(0xFFE0F5FD)
+            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+        )
 
-
+        if (selected) {
+            Spacer(Modifier.height(7.dp))
+            // ✅ 점 표시
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .background(
+                        color = Color(0xFFE0F5FD),
+                        shape = CircleShape
+                    )
+            )
+        } else {
+            // ✅ 텍스트 표시
+            Text(
+                text = label,
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+            )
+        }
+    }
 }

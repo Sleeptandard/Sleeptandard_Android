@@ -12,7 +12,7 @@
         <item name="windowSplashScreenBackground">@color/black</item>
 
         <!-- 가운데 로고(벡터/PNG 아무거나 가능) -->
-        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_splash_logo2</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_splash_logo</item>
 
         <!-- 로고 배경 원(circle) 없애고 싶으면 -->
         <item name="windowSplashScreenIconBackgroundColor">@android:color/transparent</item>
