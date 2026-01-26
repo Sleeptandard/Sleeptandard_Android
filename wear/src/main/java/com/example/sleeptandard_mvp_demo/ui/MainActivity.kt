@@ -1,4 +1,4 @@
-package com.example.sleeptandard_mvp_demo.ui
+package com.example.sleeptandard_mvp_demo.wear.ui
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
