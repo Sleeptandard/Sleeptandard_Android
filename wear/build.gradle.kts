@@ -2,6 +2,8 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     kotlin("plugin.serialization") version "2.0.21"
+    // 아래 줄을 추가하세요 (Kotlin 버전과 동일하게 설정)
+    id("org.jetbrains.kotlin.plugin.compose") version "2.0.21"
 }
 
 android {
@@ -26,6 +28,10 @@ android {
                 "proguard-rules.pro"
             )
         }
+    }
+
+    buildFeatures {
+        compose = true
     }
     
     compileOptions {
@@ -72,6 +78,24 @@ dependencies {
     // (혹시 UI 관련 오류가 남는다면 이것도 추가)
     implementation("androidx.appcompat:appcompat:1.6.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3")
+
+    // Wear OS Compose 라이브러리
+    implementation("androidx.wear.compose:compose-material:1.2.1")
+    implementation("androidx.wear.compose:compose-foundation:1.2.1")
+    implementation("androidx.wear.compose:compose-navigation:1.2.1")
+
+    // Preview를 위한 도구
+    implementation("androidx.compose.ui:ui-tooling-preview")
+    implementation(libs.androidx.wear.tooling.preview)
+    debugImplementation("androidx.compose.ui:ui-tooling")
+
+    // 1. Compose 핵심 라이브러리 (버전 관리를 위해 BOM 사용 권장)
+    implementation(platform("androidx.compose:compose-bom:2024.01.00"))
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.ui:ui-graphics")
+
+    // 2. setContent 에러 해결을 위한 핵심 라이브러리 (가장 중요!)
+    implementation("androidx.activity:activity-compose:1.8.0")
 }
 
 

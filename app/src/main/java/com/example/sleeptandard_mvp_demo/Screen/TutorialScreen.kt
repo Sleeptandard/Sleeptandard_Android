@@ -70,7 +70,7 @@ fun TutorialScreen(
     )
 
     var currentPage by remember { mutableIntStateOf(0) }
-    val maxPage = 3 // 0: 시작, 1: 알람설정, 2: 취침, 3: 피드백
+    val maxPage = 3 // 0: 시작, 1: 알람설정, 2: 취침, 3: 피드백, 4: 절전 상태 해제
 
     // ✅ 뒤로가기 제어 로직 추가
     // currentPage가 0보다 클 때만 이 핸들러가 동작합니다.
@@ -87,7 +87,7 @@ fun TutorialScreen(
 
         Spacer(Modifier.height(60.dp))
 
-        if(currentPage != 0){
+        if(currentPage in 1..3){
             Box(
                 modifier = Modifier
                     .fillMaxWidth(0.9f)
@@ -416,4 +416,9 @@ fun FeedbackPart(){
          
          Spacer(Modifier.weight(60f))
      }
+}
+
+@Composable
+fun WatchPowerSavingPage(){
+
 }
