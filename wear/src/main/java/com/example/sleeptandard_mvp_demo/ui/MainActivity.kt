@@ -52,19 +52,16 @@ fun WearHomeScreen() {
         ) {
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
             ) {
-                // 상단: 아이콘 + 앱 이름
-                Row(
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        painter = painterResource(id = R.drawable.branding_watch), // 실제 아이콘 사용 시 주석 해제
-                        contentDescription = "앱 아이콘",
-                    )
-                }
+                Spacer(Modifier.weight(130f))
 
-                Spacer(modifier = Modifier.height(54.dp))
+                Icon(
+                    painter = painterResource(id = R.drawable.branding_watch), // 실제 아이콘 사용 시 주석 해제
+                    contentDescription = "앱 아이콘",
+                    tint = Color.Unspecified
+                )
+
+                Spacer(modifier = Modifier.weight(54f))
 
                 // 하단: 안내 메시지
                 Text(
@@ -72,6 +69,8 @@ fun WearHomeScreen() {
                     color = Color.White,
                     fontSize = 16.sp
                 )
+
+                Spacer(Modifier.weight(98f))
             }
         }
     }
