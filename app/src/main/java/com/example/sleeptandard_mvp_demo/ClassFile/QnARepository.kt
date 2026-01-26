@@ -30,13 +30,19 @@ object QnARepository {
                     "알람모델은 한 번의 피드백이 아니라 지속적으로 누적되는 여러 피드백을 바탕으로 학습해요.\n" +
                     "간혹 잘못 체크하거나 피드백을 건너뛰더라도, 전체 학습 결과에 큰 오차를 만들지는 않아요. 이후에 남겨주시는 피드백들이 점점 더 정확한 기상 패턴을 만들어줍니다."
         ),
+
+    )
+
+    fun findById(id: String): QnAItem? = items.firstOrNull { it.id == id }
+}
+
+
+/**  QnA 아이템 템플릿  **/
+/*
         QnAItem(
             id = "alarm_not_ringing3 ",
             title = "알람이 안 울려요.",
             question = "이러쿵저러쿵해서 알람이 안 울려요.\n어떻게하죠\n영영영",
             answer = "이러쿵저러쿵했군요.\n이렇게 저렇게 하시면 됩니다.\n죄송합니다."
         ),
-    )
-
-    fun findById(id: String): QnAItem? = items.firstOrNull { it.id == id }
-}
+*/

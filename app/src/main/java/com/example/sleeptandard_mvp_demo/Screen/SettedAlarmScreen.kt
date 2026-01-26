@@ -47,7 +47,6 @@ import androidx.compose.ui.unit.sp
 
 import com.example.sleeptandard_mvp_demo.ClassFile.Alarm
 import com.example.sleeptandard_mvp_demo.ClassFile.AlarmScheduler
-import com.example.sleeptandard_mvp_demo.Component.AlarmBottomNavBar
 import com.example.sleeptandard_mvp_demo.Prefs.AlarmPreferences
 import com.example.sleeptandard_mvp_demo.ViewModel.AlarmViewModel
 import com.example.sleeptandard_mvp_demo.ui.theme.AppIcons
@@ -191,14 +190,17 @@ fun SettedAlarmScreen(
                 .fillMaxWidth(193f / 350f)
                 .height(67.dp),
             onClick = {
-                onTurnAlarmOff()
+                // 1) 알람 스케줄 취소
                 scheduler.cancel(alarmViewModel.alarm)
 
-                // 2) SharedPreferences 플래그/값 삭제
+                // 2) 워치에 수면 추적 중지 명령 전송
+                alarmViewModel.stopSleepTracking()
+
+                // 3) SharedPreferences 플래그/값 삭제
                 val alarmPrefs = AlarmPreferences(context)
                 alarmPrefs.clearAlarm()
 
-                // 3) 네비게이션 처리
+                // 4) 네비게이션 처리
                 onTurnAlarmOff()
             }
         ) { Text("알람중지") }

@@ -89,11 +89,12 @@ fun HomeScreen(
     val context = LocalContext.current
 
     // 알람뷰모델에 넣을 값들임.
-    var selectedHour by remember { mutableIntStateOf(8) }
-    var selectedMinute by remember { mutableIntStateOf(30) }
-    var selectedIsAm by remember { mutableStateOf(true) }
-    var selectedRingtoneUri by remember { mutableStateOf("") }
-    var selectedVibrationEnabled by remember { mutableStateOf(true) }
+    var selectedHour by remember { mutableIntStateOf(alarmViewModel.alarm.hour) }
+    var selectedMinute by remember { mutableIntStateOf(alarmViewModel.alarm.minute) }
+    var selectedIsAm by remember { mutableStateOf(alarmViewModel.alarm.isAm) }
+    /** 알람음 기억해놓기 **/
+    var selectedRingtoneUri by remember { mutableStateOf(alarmViewModel.alarm.ringtoneUri) }
+    var selectedVibrationEnabled by remember { mutableStateOf(alarmViewModel.alarm.vibrationEnabled) }
     var selectedVolume by remember { mutableIntStateOf(alarmViewModel.alarm.volume) }
 
     // 알람 SharedPreference 가져오기
@@ -172,36 +173,19 @@ fun HomeScreen(
         }
     }
 
-    // 알람뷰모델에 저장되어 있는 알람음 이름 가져오기
-    LaunchedEffect(alarmViewModel.alarm.ringtoneUri) {
-        val uriStr = alarmViewModel.alarm.ringtoneUri
-        if (uriStr.isNotBlank()) {
-            val uri = uriStr.toUri()
+    // 알람뷰모델에 저장되어 있는 알람 설정값들과 화면 상태 동기화
+    LaunchedEffect(alarmViewModel.alarm) { // alarm 객체 전체를 관찰
+        val alarm = alarmViewModel.alarm
+        selectedRingtoneUri = alarm.ringtoneUri
+        selectedVibrationEnabled = alarm.vibrationEnabled // ✅ 진동 상태 동기화
+        selectedVolume = alarm.volume                     // ✅ 볼륨 상태 동기화
+
+        if (alarm.ringtoneUri.isNotBlank()) {
+            val uri = alarm.ringtoneUri.toUri()
             val ringtone = RingtoneManager.getRingtone(context, uri)
             alarmName = ringtone?.getTitle(context) ?: "소리 없음"
-            selectedRingtoneUri = uriStr
         } else {
             alarmName = "소리 없음"
-        }
-    }
-
-    // 알림음 설정 화면 Activity의 Result 받았을 때 로직
-    val ringtonePickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            val uri =
-                result.data?.getParcelableExtra<Uri>(RingtoneManager.EXTRA_RINGTONE_PICKED_URI)
-            if (uri != null) {
-                selectedRingtoneUri = uri.toString()   // state에 저장
-                // 표시할 이름 업데이트
-                val ringtone = RingtoneManager.getRingtone(context, uri)
-                alarmName = ringtone?.getTitle(context) ?: "소리 없음"
-            } else {
-                // 사용자가 '없음' 선택했거나 취소 케이스 대응
-                selectedRingtoneUri = ""
-                alarmName = "소리 없음"
-            }
         }
     }
 
@@ -222,9 +206,9 @@ fun HomeScreen(
                 .width(255.dp)
         ) {
             CustomTimePicker(
-                defaultHour12 = alarmViewModel.alarm.hour,
-                defaultMinute = alarmViewModel.alarm.minute,
-                defaultIsAm = alarmViewModel.alarm.isAm,
+                defaultHour12 = selectedHour,
+                defaultMinute = selectedMinute,
+                defaultIsAm = selectedIsAm,
                 stopSignal = stopSignal,
                 onTimeChange = { hour12, minute, isAm ->
                     selectedHour = hour12
@@ -279,22 +263,6 @@ fun HomeScreen(
                     onClick = { showSituationModal = true }
                 )
 
-                /** 디버깅용 **/
-                Button(
-                    onClick = goToAlarmRingScreen
-                ){
-                    Text("디버깅용 알람 울림화면")
-                }
-
-                Button(
-                    onClick = goToFeedbackScreen
-                ){
-                    Text("디버깅용 피드백 화면")
-                }
-
-
-
-
                 /***사운드 선택 모달***/
                 if (showSoundSheet) {
                     val soundSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -311,21 +279,21 @@ fun HomeScreen(
                     ) {
                         // ✅ 여기 안에 AlarmSoundSettingScreen의 "내용"을 넣는다
                         AlarmSoundSettingContent(
-                            currentAlarm = alarmViewModel.alarm.copy(volume = selectedVolume),
                             onVolumeChange = { selectedVolume = it },
                             currentUriString = alarmViewModel.alarm.ringtoneUri,
                             onClose = { showSoundSheet = false },
                             onSelectUriString = { uriStr ->
                                 // ViewModel에 저장 (그리고 prefs 저장)
                                 alarmViewModel.saveAlarm(
-                                    hour = alarmViewModel.alarm.hour,
-                                    minute = alarmViewModel.alarm.minute,
-                                    isAm = alarmViewModel.alarm.isAm,
+                                    hour = selectedHour,
+                                    minute = selectedMinute,
+                                    isAm = selectedIsAm,
                                     ringtoneUri = uriStr,
-                                    vibrationEnabled = alarmViewModel.alarm.vibrationEnabled,
+                                    vibrationEnabled = selectedVibrationEnabled,
                                     volume = selectedVolume
                                 )
-                            }
+                            },
+                            defaultVolume = alarmViewModel.alarm.volume
                         )
                     }
                 }
@@ -583,7 +551,6 @@ fun HomeScreen(
                                             android.widget.Toast.makeText(context, "워치 연결 시도 중...", android.widget.Toast.LENGTH_SHORT).show()
 
                                             // 여기서 알람 정보를 디스크에 저장
-                                            val alarmPrefs = AlarmPreferences(context)
                                             alarmPrefs.saveAlarm(alarmViewModel.alarm)
                                             
                                             onClickConfirm()
@@ -682,7 +649,6 @@ fun HomeScreen(
                                                 android.widget.Toast.makeText(context, "워치 연결 시도 중...", android.widget.Toast.LENGTH_SHORT).show()
 
                                                 // 여기서 알람 정보를 디스크에 저장
-                                                val alarmPrefs = AlarmPreferences(context)
                                                 alarmPrefs.saveAlarm(alarmViewModel.alarm)
 
                                                 onClickConfirm()
