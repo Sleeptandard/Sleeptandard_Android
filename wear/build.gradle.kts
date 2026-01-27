@@ -16,8 +16,8 @@ android {
         applicationId = "com.example.sleeptandard_mvp_demo"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = libs.versions.project.versionCode.get().toInt()
+        versionName = libs.versions.project.versionName.get()
     }
 
     buildTypes {

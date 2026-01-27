@@ -36,8 +36,16 @@ class WatchListenerService : WearableListenerService() {
     private fun handleStartTracking(data: ByteArray) {
         try {
             if (data.size < 8) return
+            
+            // [수정] targetAlarmTime (첫 8바이트) + situationLabel (나머지 바이트, optional)
             val targetAlarmTime = ByteBuffer.wrap(data).long
-            Log.i(TAG, "START_TRACKING received. Target: $targetAlarmTime")
+            val situationLabel = if (data.size > 8) {
+                String(data, 8, data.size - 8, Charsets.UTF_8)
+            } else {
+                "normal" // 기본값
+            }
+            
+            Log.i(TAG, "START_TRACKING received. Target: $targetAlarmTime, Label: $situationLabel")
 
             // 1. 필수 권한 목록 확인
             val permissions = arrayOf(
@@ -56,6 +64,7 @@ class WatchListenerService : WearableListenerService() {
                 // 3-A. 권한이 다 있으면 -> 바로 서비스 시작
                 val intent = Intent(this, SmartAlarmService::class.java).apply {
                     putExtra(SmartAlarmService.EXTRA_TARGET_TIME, targetAlarmTime)
+                    putExtra(SmartAlarmService.EXTRA_SITUATION_LABEL, situationLabel) // [추가] 라벨 전달
                     action = SmartAlarmService.ACTION_START_TRACKING
                 }
                 startForegroundService(intent)
@@ -66,6 +75,7 @@ class WatchListenerService : WearableListenerService() {
                 // (PermissionActivity import가 없으면 여기서 빨간줄이 뜹니다)
                 val intent = Intent(this, PermissionActivity::class.java).apply {
                     putExtra(SmartAlarmService.EXTRA_TARGET_TIME, targetAlarmTime)
+                    putExtra(SmartAlarmService.EXTRA_SITUATION_LABEL, situationLabel) // [추가] 라벨 전달
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) // 서비스에서 액티비티 켤 때 필수
                 }
                 startActivity(intent)

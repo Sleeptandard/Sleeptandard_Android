@@ -17,7 +17,7 @@ object AppIcons {
 
 
     @DrawableRes val SettedActivity = R.drawable.ic_setted_activity
-    @DrawableRes val JournalSmile = R.drawable.ic_journal_smile
+
     @DrawableRes val RingBar = R.drawable.ic_ring_bar
     @DrawableRes val ArrowRight = R.drawable.ic_ring_arrowright
 
@@ -31,6 +31,9 @@ object AppIcons {
 
     // 알람 설정 완료 화면
     @DrawableRes val SettedActivityDark = R.drawable.ic_setted_activity_dark
+
+    // 일지 화면
+    @DrawableRes val JournalSmile = R.drawable.ic_journal_smile
 
     // 설정화면
     @DrawableRes val SettingsMail = R.drawable.ic_settings_mail

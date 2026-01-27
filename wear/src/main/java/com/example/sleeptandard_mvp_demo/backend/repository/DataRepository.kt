@@ -28,7 +28,10 @@ private sealed class LogEvent {
     object Stop : LogEvent()
 }
 
-class DataRepository(private val context: Context) {
+class DataRepository(
+    private val context: Context,
+    private val situationLabel: String = "normal" // [추가] 특별 상황 라벨 (optional)
+) {
 
     private val QUEUE_CAPACITY = 2048
     private val dataQueue = LinkedBlockingQueue<LogEvent>(QUEUE_CAPACITY)
@@ -40,11 +43,16 @@ class DataRepository(private val context: Context) {
     private val sessionTimestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault())
         .format(Date(System.currentTimeMillis()))
 
-    private val sensorFileName = "sensor_log_${sessionTimestamp}.csv"
-    private val inferenceFileName = "inference_log_${sessionTimestamp}.csv"
+    // [추가] 라벨을 파일명에 포함 (특수문자 제거하여 파일 시스템 안전성 확보)
+    private val sanitizedLabel = situationLabel
+        .replace(Regex("[^a-zA-Z0-9가-힣_]"), "")
+        .take(30) // 파일명 길이 제한
+
+    private val sensorFileName = "sensor_log_${sanitizedLabel}_${sessionTimestamp}.csv"
+    private val inferenceFileName = "inference_log_${sanitizedLabel}_${sessionTimestamp}.csv"
 
     init {
-        Log.i(TAG, "DataRepository initialized with session: $sessionTimestamp")
+        Log.i(TAG, "DataRepository initialized. Session: $sessionTimestamp, Label: $situationLabel")
         startConsumer()
     }
 
