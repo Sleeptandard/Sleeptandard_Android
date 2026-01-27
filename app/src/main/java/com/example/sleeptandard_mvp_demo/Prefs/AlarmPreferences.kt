@@ -26,7 +26,7 @@ class AlarmPreferences(private val context: Context) {
             minute = prefs.getInt("minute", 30),
             isAm = prefs.getBoolean("isAm", true),
             ringtoneUri = prefs.getString("ringtoneUri", "") ?: "",
-            volume = prefs.getInt("volume", 10), // ✅ 불러오기 추가
+            volume = prefs.getInt("volume", 5), // ✅ 불러오기 추가
             vibrationEnabled = prefs.getBoolean("vibrationEnabled", true)
         )
     }

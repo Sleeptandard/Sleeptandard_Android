@@ -74,7 +74,7 @@ import kotlin.math.roundToInt
 class AlarmRingActivity : ComponentActivity() {
 
     private var alarmId: Int = 0
-    private var label: String = "알람"
+    // private var label: String = "알람"
     private lateinit var alarmViewModel: AlarmViewModel
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -85,12 +85,12 @@ class AlarmRingActivity : ComponentActivity() {
 
         val alarmPrefs = AlarmPreferences(this)
         alarmId = intent.getIntExtra("alarmId", 0)
-        label = intent.getStringExtra("label") ?: "알람"
+        // label = intent.getStringExtra("label") ?: "알람"
 
         setContent {
             Sleeptandard_MVP_DemoTheme {
                 AlarmRingScreen(
-                    label = label,
+                    // label = label,
                     onStop = {
                         stopAlarmAndFinish()
                         try {
@@ -167,7 +167,7 @@ class AlarmRingActivity : ComponentActivity() {
 
 @Composable
 fun AlarmRingScreen(
-    label: String,
+    // label: String,
     sleepStage: String = "N1",
     onStop: () -> Unit
 ) {
