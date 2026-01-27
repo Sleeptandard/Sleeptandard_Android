@@ -117,7 +117,7 @@ object AlarmPlayer {
 class AlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         // 알람 정보 (없으면 기본값 사용)
-        val label = intent.getStringExtra("label") ?: "알람"
+        // val label = intent.getStringExtra("label") ?: "알람"
         val ringtoneUriString = intent.getStringExtra("ringtoneUri")
         val vibrationEnabled = intent.getBooleanExtra("vibrationEnabled", true)
         val alarmId = intent.getIntExtra("alarmId", 0)
@@ -132,7 +132,7 @@ class AlarmReceiver : BroadcastReceiver() {
         // 3) 전체화면으로 띄울 Activity 인텐트
         val fullScreenIntent = Intent(context, AlarmRingActivity::class.java).apply {
             putExtra("alarmId", alarmId)
-            putExtra("label", label)
+            // putExtra("label", label)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         }
 
@@ -148,8 +148,8 @@ class AlarmReceiver : BroadcastReceiver() {
 
         // 5) Notification 빌드 (ALARM 카테고리 + HIGH / fullScreenIntent)
         val notification = NotificationCompat.Builder(context, ALARM_CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)  // 프로젝트 아이콘으로 바꿔도 됨
-            .setContentTitle(label)
+            .setSmallIcon(R.drawable.ic_stat_name)  // 프로젝트 아이콘으로 바꿔도 됨
+            .setContentTitle("알람의 정석")
             .setContentText("알람이 울리고 있어요")
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
