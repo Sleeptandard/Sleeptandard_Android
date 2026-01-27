@@ -194,7 +194,11 @@ fun AppNav(
             )
         }
         composable(Screen.Inquire.route){
-            InquireScreen()
+            InquireScreen(
+                onBack = {
+                    rememberNavController.popBackStack()
+                }
+            )
         }
         composable(Screen.Tutorial.route){
             TutorialScreen(
