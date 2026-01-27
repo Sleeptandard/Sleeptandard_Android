@@ -501,8 +501,13 @@ fun HomeScreen(
 
                                             val triggerTime = scheduler.getTriggerTime()
 
-                                            // 2. 워치 깨우기 (전선 연결!)
-                                            alarmViewModel.startSleepTracking(triggerTime) // ✅ 주석 해제됨!
+                                            // [추가] 선택된 상황을 라벨 문자열로 변환
+                                            val situationLabel = selectedSituation.mapNotNull { id ->
+                                                allOptions.find { it.id == id }?.label
+                                            }.joinToString("_").ifEmpty { "normal" }
+
+                                            // 2. 워치 깨우기 (전선 연결! + 상황 라벨 전달)
+                                            alarmViewModel.startSleepTracking(triggerTime, situationLabel)
                                             // 3. 눈으로 확인하기 위한 토스트 메시지 (추가)
                                             android.widget.Toast.makeText(context, "워치 연결 시도 중...", android.widget.Toast.LENGTH_SHORT).show()
 
@@ -545,8 +550,13 @@ fun HomeScreen(
 
                                             val triggerTime = scheduler.getTriggerTime()
                                             
-                                            // 2. 워치 깨우기 (전선 연결!)
-                                            alarmViewModel.startSleepTracking(triggerTime) // ✅ 주석 해제됨!
+                                            // [추가] 선택된 상황을 라벨 문자열로 변환
+                                            val situationLabel = selectedSituation.mapNotNull { id ->
+                                                allOptions.find { it.id == id }?.label
+                                            }.joinToString("_").ifEmpty { "normal" }
+
+                                            // 2. 워치 깨우기 (전선 연결! + 상황 라벨 전달)
+                                            alarmViewModel.startSleepTracking(triggerTime, situationLabel)
                                             // 3. 눈으로 확인하기 위한 토스트 메시지 (추가)
                                             android.widget.Toast.makeText(context, "워치 연결 시도 중...", android.widget.Toast.LENGTH_SHORT).show()
 
@@ -643,8 +653,14 @@ fun HomeScreen(
                                                 scheduler.schedule(alarmViewModel.alarm)
 
                                                 val triggerTime = scheduler.getTriggerTime()
-                                                // 2. 워치 깨우기 (전선 연결!)
-                                                alarmViewModel.startSleepTracking(triggerTime) // ✅ 주석 해제됨!
+                                                
+                                                // [추가] 선택된 상황을 라벨 문자열로 변환
+                                                val situationLabel = selectedSituation.mapNotNull { id ->
+                                                    allOptions.find { it.id == id }?.label
+                                                }.joinToString("_").ifEmpty { "normal" }
+
+                                                // 2. 워치 깨우기 (전선 연결! + 상황 라벨 전달)
+                                                alarmViewModel.startSleepTracking(triggerTime, situationLabel)
                                                 // 3. 눈으로 확인하기 위한 토스트 메시지 (추가)
                                                 android.widget.Toast.makeText(context, "워치 연결 시도 중...", android.widget.Toast.LENGTH_SHORT).show()
 
