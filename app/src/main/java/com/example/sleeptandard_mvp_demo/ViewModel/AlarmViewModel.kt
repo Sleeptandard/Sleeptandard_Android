@@ -55,8 +55,9 @@ class AlarmViewModel(application: Application): AndroidViewModel(application) {
      * Watch에게 수면 추적 시작 명령 전송
      * 
      * @param targetTime 목표 알람 시간 (milliseconds)
+     * @param situationLabel 특별 상황 라벨 (optional, 기본값: "normal")
      */
-    fun startSleepTracking(targetTime: Long) {
+    fun startSleepTracking(targetTime: Long, situationLabel: String = "normal") {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val messageClient = Wearable.getMessageClient(getApplication())
@@ -67,12 +68,16 @@ class AlarmViewModel(application: Application): AndroidViewModel(application) {
                     return@launch
                 }
                 
-                // Send to first connected Watch
+                // [수정] 메시지 구조: [8바이트 targetTime] + [나머지 바이트 label UTF-8]
                 val watchNodeId = connectedNodes.first().id
-                val payload = ByteBuffer.allocate(8).putLong(targetTime).array()
+                val labelBytes = situationLabel.toByteArray(Charsets.UTF_8)
+                val payload = ByteBuffer.allocate(8 + labelBytes.size)
+                    .putLong(targetTime)
+                    .put(labelBytes)
+                    .array()
                 
                 Tasks.await(messageClient.sendMessage(watchNodeId, PATH_START_TRACKING, payload))
-                Log.i(TAG, "START_TRACKING sent to Watch. Target time: $targetTime")
+                Log.i(TAG, "START_TRACKING sent to Watch. Target: $targetTime, Label: $situationLabel")
                 
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to start sleep tracking", e)
