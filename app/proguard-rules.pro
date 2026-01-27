@@ -19,3 +19,7 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# Keep backend model classes (sleep stage prediction)
+-keep class com.example.sleeptandard_mvp_demo.backend.model.** { *; }
+-keep class com.example.sleeptandard_mvp_demo.backend.processing.** { *; }
