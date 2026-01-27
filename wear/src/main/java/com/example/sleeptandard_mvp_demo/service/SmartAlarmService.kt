@@ -73,7 +73,7 @@ class SmartAlarmService : Service(), SensorEventListener {
     private var sessionStartTime: Long = 0L
     private var situationLabel: String = "normal" // [추가] 특별 상황 라벨
     private val inferenceHistory = Collections.synchronizedList(mutableListOf<StageEntry>())
-    private var consecutiveLightCount = 0
+    private var consecutiveShallowCount = 0  // Wake와 Light를 얕은 수면으로 통합 카운트
     private var lastStage: SleepStage = SleepStage.UNKNOWN
     private var hasTriggered = false
 
@@ -305,22 +305,21 @@ class SmartAlarmService : Service(), SensorEventListener {
         var shouldTrigger = false
         var triggerReason = ""
 
-        if (currentStage == SleepStage.WAKE) {
-            shouldTrigger = true
-            triggerReason = "WAKE detected"
-        } else if (currentStage == SleepStage.LIGHT) {
-            if (lastStage == SleepStage.LIGHT) {
-                consecutiveLightCount++
+        // Wake와 Light를 "얕은 수면(Shallow Sleep)"으로 통합하여 카운트
+        if (currentStage == SleepStage.WAKE || currentStage == SleepStage.LIGHT) {
+            if (lastStage == SleepStage.WAKE || lastStage == SleepStage.LIGHT) {
+                consecutiveShallowCount++
             } else {
-                consecutiveLightCount = 1
+                consecutiveShallowCount = 1
             }
 
-            if (consecutiveLightCount >= 3) {
+            if (consecutiveShallowCount >= 3) {
                 shouldTrigger = true
-                triggerReason = "3 consecutive LIGHT"
+                triggerReason = "3 consecutive Shallow Sleep (WAKE/LIGHT)"
             }
         } else {
-            consecutiveLightCount = 0
+            // DEEP, REM, UNKNOWN인 경우 카운트 초기화
+            consecutiveShallowCount = 0
         }
 
         // [핵심] 트리거 조건 충족 시 자동 종료 시퀀스 실행
