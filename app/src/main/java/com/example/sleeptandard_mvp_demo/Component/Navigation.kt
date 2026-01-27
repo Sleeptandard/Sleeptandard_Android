@@ -231,7 +231,7 @@ fun AppNav(
 
         composable(Screen.AlarmRing.route){
             AlarmRingScreen(
-                label = "시험용임",
+                // label = "시험용임",
                 onStop = {}
             )
         }
