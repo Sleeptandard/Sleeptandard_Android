@@ -82,6 +82,7 @@ class DataRepository(private val context: Context) {
             ensureHeader(inferenceFile, "Tag,Timestamp,Result,Details\n")
 
             try {
+
                 // [핵심 수정] FileWriter -> FileOutputStream으로 변경하여 bufferedWriter() 확장 함수 사용 가능하게 함
                 FileOutputStream(sensorFile, true).bufferedWriter().use { sensorWriter ->
                     FileOutputStream(inferenceFile, true).bufferedWriter().use { inferenceWriter ->
@@ -95,10 +96,12 @@ class DataRepository(private val context: Context) {
                                     is LogEvent.SensorData -> {
                                         sensorWriter.write("${event.timestamp},${event.type},${event.x},${event.y},${event.z}\n")
                                     }
+
                                     is LogEvent.InferenceLog -> {
                                         inferenceWriter.write("INFERENCE_LOG,${event.timestamp},${event.result}\n")
                                         inferenceWriter.flush()
                                     }
+
                                     is LogEvent.Stop -> {
                                         // 더 이상 새로운 데이터를 받지 않겠다고 플래그만 내림.
                                         // while 문의 !dataQueue.isEmpty() 조건에 의해 남은 데이터를 모두 처리하게 됨.
@@ -123,6 +126,8 @@ class DataRepository(private val context: Context) {
                 logThread = null
             }
         }
+
+
     }
 
     fun stopLogging() {
@@ -140,5 +145,6 @@ class DataRepository(private val context: Context) {
                 FileOutputStream(file).use { it.write(header.toByteArray()) }
             } catch (e: Exception) { e.printStackTrace() }
         }
+
     }
 }

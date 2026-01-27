@@ -4,6 +4,7 @@ import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.gestures.FlingBehavior
 import androidx.compose.foundation.gestures.ScrollScope
+import androidx.compose.foundation.gestures.stopScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -23,16 +25,20 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
 import kotlin.math.abs
 
 
@@ -43,6 +49,7 @@ fun WheelPicker(
     items: List<String>,
     visibleCount: Int = 3,
     itemHeight: Dp = 62.dp,
+    state: LazyListState,
 
     // 🔥 순환/리센터 옵션
     isCyclic: Boolean = false,
@@ -57,6 +64,7 @@ fun WheelPicker(
         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f),
         fontSize = 43.sp
     ),
+    scrollEnable: Boolean = true
 ) {
     require(visibleCount % 2 == 1)
 
@@ -64,7 +72,9 @@ fun WheelPicker(
     val centerOffset = visibleCount / 2
     val virtualCount = if (isCyclic) baseSize * cycles else baseSize
 
-    val state = rememberLazyListState()
+    // gpt가 지적한 초기 컴포지션 오류를 위한 억제기 생성
+    var didInitialPosition by remember { mutableStateOf(false) }
+    var suppressCallback by remember { mutableStateOf(false) }
 
 
     val snapFling = rememberSnapFlingBehavior(lazyListState = state)
@@ -112,12 +122,17 @@ fun WheelPicker(
     LaunchedEffect(selectedIndex, isCyclic) {
         if (baseSize == 0) return@LaunchedEffect
 
+        suppressCallback = true
+
         if (isCyclic) {
             val middle = (virtualCount / 2) - ((virtualCount / 2) % baseSize)
             state.scrollToItem(middle + selectedIndex)
         } else {
             state.scrollToItem(selectedIndex.coerceIn(0, baseSize - 1))
         }
+
+        didInitialPosition = true
+        suppressCallback = false
     }
 
     /* -----------------------------
@@ -125,10 +140,15 @@ fun WheelPicker(
      * ----------------------------- */
     LaunchedEffect(state.isScrollInProgress) {
         if (!state.isScrollInProgress) {
-            // 선택값 콜백
+
+            // ✅ 초기 위치 잡기 전엔 스킵
+            if (!didInitialPosition) return@LaunchedEffect
+
+            // ✅ 프로그램 스크롤(초기/외부 selectedIndex 반영) 중엔 스킵
+            if (suppressCallback) return@LaunchedEffect
+
             onSelectedIndexChange(centeredRealIndex)
 
-            // 🔥 리센터 조건 (끝 근처면 중앙으로)
             if (isCyclic) {
                 val threshold = baseSize * 2
                 val min = threshold
@@ -136,7 +156,11 @@ fun WheelPicker(
 
                 if (centeredVirtualIndex < min || centeredVirtualIndex > max) {
                     val middle = (virtualCount / 2) - ((virtualCount / 2) % baseSize)
+
+                    // 리센터도 프로그램 스크롤이므로 콜백 억제
+                    suppressCallback = true
                     state.scrollToItem(middle + centeredRealIndex)
+                    suppressCallback = false
                 }
             }
         }
@@ -153,7 +177,8 @@ fun WheelPicker(
             state = state,
             flingBehavior = slowFling,
             horizontalAlignment = Alignment.CenterHorizontally,
-            contentPadding = PaddingValues(vertical = itemHeight * centerOffset)
+            contentPadding = PaddingValues(vertical = itemHeight * centerOffset),
+            userScrollEnabled = scrollEnable
         ) {
             items(virtualCount) { virtualIndex ->
                 val realIndex =
@@ -196,7 +221,11 @@ fun CustomTimePicker(
     defaultHour12: Int = 6,
     defaultMinute: Int = 0,
     defaultIsAm: Boolean = true,
-    onTimeChange: (hour12: Int, minute: Int, isAm: Boolean) -> Unit
+    onTimeChange: (hour12: Int, minute: Int, isAm: Boolean) -> Unit,
+    stopSignal: Int = 0, // ✅ 추가
+    scrollEnable: Boolean = true,
+    itemHeight: Dp = 62.dp,
+    itemHeightAmPm: Dp = 42.dp
 ) {
     val ampmItems = listOf("AM", "PM")
     val hourItems = (1..12).map { it.toString() }
@@ -205,6 +234,16 @@ fun CustomTimePicker(
     var ampmIndex by remember { mutableIntStateOf(if (defaultIsAm) 0 else 1) }
     var hourIndex by remember { mutableIntStateOf((defaultHour12 - 1).coerceIn(0, 11)) }
     var minuteIndex by remember { mutableIntStateOf(defaultMinute.coerceIn(0, 59)) }
+
+    val ampmState = rememberLazyListState()
+    val hourState = rememberLazyListState()
+    val minuteState = rememberLazyListState()
+
+    LaunchedEffect(stopSignal) {
+        ampmState.stopScroll()
+        hourState.stopScroll()
+        minuteState.stopScroll()
+    }
 
 
     // 값 바뀔 때마다 콜백
@@ -220,7 +259,7 @@ fun CustomTimePicker(
         WheelPicker(
             modifier = Modifier.width(90.dp),
             items = ampmItems,
-            itemHeight = 42.dp,
+            itemHeight = itemHeightAmPm,
             selectedIndex = ampmIndex,
             onSelectedIndexChange = { ampmIndex = it },
             textStyle = MaterialTheme.typography.bodyLarge.copy(
@@ -230,6 +269,8 @@ fun CustomTimePicker(
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f),
                 fontSize = 25.sp
             ),
+            state = ampmState,
+            scrollEnable = scrollEnable
         )
 
         Spacer(Modifier.width(12.dp))
@@ -240,7 +281,9 @@ fun CustomTimePicker(
             selectedIndex = hourIndex,
             onSelectedIndexChange = { hourIndex = it },
             isCyclic = true,
-
+            state = hourState,
+            scrollEnable = scrollEnable,
+            itemHeight = itemHeight
         )
 
         Text(
@@ -257,8 +300,12 @@ fun CustomTimePicker(
             selectedIndex = minuteIndex,
             onSelectedIndexChange = { minuteIndex = it },
             isCyclic = true,
+            state = minuteState,
+            scrollEnable = scrollEnable,
+            itemHeight = itemHeight
         )
     }
+
 }
 
 private class VelocityScalingFlingBehavior(
@@ -268,18 +315,4 @@ private class VelocityScalingFlingBehavior(
     override suspend fun ScrollScope.performFling(initialVelocity: Float): Float {
         return with(base) { performFling(initialVelocity * velocityFactor) }
     }
-}
-
-@Preview
-@Composable
-fun CustomTimePickerPreview(){
-    var h = 3
-    var m = 30
-    var ampm = true
-
-    CustomTimePicker(onTimeChange = {hour12, minute, isAm ->
-        h = hour12
-        m = minute
-        ampm = isAm
-    })
 }

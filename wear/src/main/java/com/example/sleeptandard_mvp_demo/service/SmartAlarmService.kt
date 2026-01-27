@@ -85,6 +85,16 @@ class SmartAlarmService : Service(), SensorEventListener {
                 targetAlarmTime = intent.getLongExtra(EXTRA_TARGET_TIME, 0L)
                 sessionStartTime = System.currentTimeMillis()
                 Log.i(TAG, "Service Started. Target Time: $targetAlarmTime")
+                
+                // [핵심] Foreground Service는 가능한 빨리 startForeground 호출 필요
+                createNotificationChannel()
+                val notification = buildNotification()
+                if (Build.VERSION.SDK_INT >= 34) {
+                    startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH)
+                } else {
+                    startForeground(NOTIFICATION_ID, notification)
+                }
+                
                 initializeService()
             }
             ACTION_STOP_AND_SEND_RESULT -> {
@@ -120,18 +130,9 @@ class SmartAlarmService : Service(), SensorEventListener {
             inferenceManager = InferenceManager(this)
 
             registerSensors()
-            createNotificationChannel()
-
-            val notification = buildNotification()
-
-            if (Build.VERSION.SDK_INT >= 34) {
-                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH)
-            } else {
-                startForeground(NOTIFICATION_ID, notification)
-            }
 
             isServiceRunning = true
-            Log.i(TAG, "Foreground service started successfully")
+            Log.i(TAG, "Service initialized successfully")
 
         } catch (e: Exception) {
             Log.e(TAG, "Service initialization failed", e)
@@ -182,6 +183,13 @@ class SmartAlarmService : Service(), SensorEventListener {
 
     override fun onSensorChanged(event: SensorEvent?) {
         event ?: return
+        
+        // [안전성] 서비스 초기화 완료 전 센서 이벤트 무시
+        if (!isServiceRunning) return
+        if (!::dataRepository.isInitialized || !::userStatsManager.isInitialized || !::inferenceManager.isInitialized) {
+            return
+        }
+        
         val timestamp = System.currentTimeMillis()
 
         if (event.sensor.type == Sensor.TYPE_ACCELEROMETER) {
@@ -226,8 +234,21 @@ class SmartAlarmService : Service(), SensorEventListener {
             try {
                 val userMean = userStatsManager.getUserMean()
                 val userStd = userStatsManager.getUserStd()
+                
+                // RMSSD 계산 및 통계 업데이트
+                val rmssdRaw = featureExtractor.calculateApproxRmssd(hrSnapshot)
+                userStatsManager.updateRmssd(rmssdRaw)
+                
+                val userBaseRmssd = userStatsManager.getUserBaseRmssd()
+                val userStdRmssd = userStatsManager.getUserStdRmssd()
 
-                val hrFeatures = featureExtractor.getFeatures(hrSnapshot, userMean, userStd)
+                val hrFeatures = featureExtractor.getFeatures(
+                    hrSnapshot, 
+                    userMean, 
+                    userStd,
+                    userBaseRmssd,
+                    userStdRmssd
+                )
                 val featureString = hrFeatures.joinToString(",")
 
                 val currentStage = inferenceManager.predict(accSnapshot, hrFeatures)
@@ -324,6 +345,12 @@ class SmartAlarmService : Service(), SensorEventListener {
     // [리팩토링] Suspend 함수로 변경 - 순차 실행 가능
     private suspend fun sendTriggerSignalSuspend(triggerTime: Long) {
         try {
+            // [안전성] MessageClient 초기화 확인
+            if (!::messageClient.isInitialized) {
+                Log.w(TAG, "MessageClient not initialized, skipping trigger signal")
+                return
+            }
+            
             val nodeClient = Wearable.getNodeClient(this@SmartAlarmService)
             val connectedNodes = nodeClient.connectedNodes.await()
 
@@ -344,6 +371,12 @@ class SmartAlarmService : Service(), SensorEventListener {
     // [리팩토링] Suspend 함수로 변경 - 순차 실행 가능
     private suspend fun stopAndSendResultSuspend() {
         try {
+            // [안전성] MessageClient 초기화 확인 - 초기화되지 않았으면 전송 건너뛰기
+            if (!::messageClient.isInitialized) {
+                Log.w(TAG, "MessageClient not initialized, skipping result transmission")
+                return
+            }
+            
             val result = SleepSessionResult(
                 startTime = sessionStartTime,
                 endTime = System.currentTimeMillis(),
@@ -378,10 +411,35 @@ class SmartAlarmService : Service(), SensorEventListener {
     override fun onDestroy() {
         super.onDestroy()
         isServiceRunning = false
-        sensorManager.unregisterListener(this)
-        dataRepository.stopLogging()
+        
+        // [안전성] SensorManager 초기화 확인 후 리스너 해제
+        if (::sensorManager.isInitialized) {
+            try {
+                sensorManager.unregisterListener(this)
+                Log.d(TAG, "Sensor listeners unregistered")
+            } catch (e: Exception) {
+                Log.e(TAG, "Sensor unregister error", e)
+            }
+        } else {
+            Log.w(TAG, "SensorManager not initialized, skipping unregister")
+        }
+        
+        // [안전성] DataRepository 초기화 확인 후 로깅 중단
+        if (::dataRepository.isInitialized) {
+            try {
+                dataRepository.stopLogging()
+                Log.d(TAG, "DataRepository logging stopped")
+            } catch (e: Exception) {
+                Log.e(TAG, "DataRepository stop error", e)
+            }
+        } else {
+            Log.w(TAG, "DataRepository not initialized, skipping stop")
+        }
+        
+        // Coroutine Scope 취소
         serviceScope.cancel()
 
+        // [안전성] WakeLock 초기화 및 Held 상태 확인 후 해제
         try {
             if (::wakeLock.isInitialized && wakeLock.isHeld) {
                 wakeLock.release()

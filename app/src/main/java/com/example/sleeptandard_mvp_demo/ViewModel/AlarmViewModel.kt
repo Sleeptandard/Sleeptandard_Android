@@ -26,9 +26,8 @@ class AlarmViewModel(application: Application): AndroidViewModel(application) {
     private val _alarms = mutableStateListOf<Alarm>()
     val alarms: List<Alarm> get() = _alarms
 
-    fun saveAlarm(hour: Int, minute: Int, isAm: Boolean, ringtoneUri: String, vibrationEnabled: Boolean): Boolean {
-
-        _alarm = Alarm(1, hour, minute, isAm, ringtoneUri, vibrationEnabled)
+    fun saveAlarm(hour: Int, minute: Int, isAm: Boolean, ringtoneUri: String, vibrationEnabled: Boolean, volume: Int): Boolean {
+        _alarm = Alarm(1, hour, minute, isAm, ringtoneUri, vibrationEnabled, volume) // ✅ volume 추가
         return true
     }
 
@@ -44,15 +43,6 @@ class AlarmViewModel(application: Application): AndroidViewModel(application) {
         _alarms.add(newAlarm)
         return newAlarm
     }
-    /* Not using : 알람 설정완료 여부로 판단
-    // 알람 활성화/비활성화
-    fun toggleAlarm(id: Int) {
-        val index = _alarms.indexOfFirst { it.id == id }
-        if (index != -1) {
-            val alarm = _alarms[index]
-            _alarms[index] = alarm.copy(isOn = !alarm.isOn)
-        }
-    }*/
 
     // 알람 삭제
     fun deleteAlarm(id: Int) {
@@ -89,7 +79,7 @@ class AlarmViewModel(application: Application): AndroidViewModel(application) {
             }
         }
     }
-    
+
     /**
      * Watch에게 수면 추적 중지 명령 전송
      */

@@ -32,8 +32,9 @@ class AlarmScheduler(private val context: Context) {
         // BroadcastReceiver에게 전달할 Intent 정의
         val intent = Intent(context, AlarmReceiver::class.java).apply {
             putExtra("alarmId", alarm.id)
-            putExtra("label", "알람 #${alarm.id}")
+            // putExtra("label", "알람 #${alarm.id}")
             putExtra("ringtoneUri", alarm.ringtoneUri)
+            putExtra("volume", alarm.volume) // ✅ 볼륨 값 추가 전달
             putExtra("vibrationEnabled", alarm.vibrationEnabled)
         }
 
@@ -88,22 +89,5 @@ class AlarmScheduler(private val context: Context) {
         )
         alarmManager.cancel(pendingIntent)
     }
-
-    /* Not using: AlarmPermission으로 옮겼음
-    // 나중에 앱 시작시 사용할 사용권한 확인 함수
-    fun confirmSetExactAlarms(){
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S){
-            if (!alarmManager.canScheduleExactAlarms()) {
-                // 사용자가 "정확한 알람" 권한을 아직 안 줌 → 설정 화면으로 보냄
-                // TODO: SCHEDULE_EXACT_ALARM 대신 USE_EXACT_ALARM 고려
-                val settingsIntent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-                context.startActivity(settingsIntent)
-                return
-            }
-
-        }
-    }*/
 
 }

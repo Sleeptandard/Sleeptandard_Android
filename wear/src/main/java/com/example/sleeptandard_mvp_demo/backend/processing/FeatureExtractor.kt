@@ -27,17 +27,31 @@ class FeatureExtractor {
         return sqrt(meanSquaredDiff).toFloat()
     }
 
-    fun getFeatures(hrBuffer: List<Float>, userMean: Float, userStd: Float): FloatArray {
+    fun getFeatures(
+        hrBuffer: List<Float>, 
+        userMean: Float, 
+        userStd: Float,
+        userBaseRmssd: Float,
+        userStdRmssd: Float
+    ): FloatArray {
         if (hrBuffer.isEmpty()) return FloatArray(5) { 0f }
         if (!userMean.isFinite()) return FloatArray(5) { 0f }
 
         // [안정성] 표준편차가 0에 가까우면 EPSILON 사용 (Divide by Zero 방지)
         val safeStd = if (!userStd.isFinite() || abs(userStd) < STD_EPSILON) STD_EPSILON else userStd
+        val safeStdRmssd = if (!userStdRmssd.isFinite() || abs(userStdRmssd) < STD_EPSILON) STD_EPSILON else userStdRmssd
 
-        // RMSSD (Raw 값 사용)
-        val rmssd = calculateApproxRmssd(hrBuffer)
+        // RMSSD 계산 (Raw 값)
+        val rmssdRaw = calculateApproxRmssd(hrBuffer)
+        
+        // RMSSD Z-Score 정규화: (raw - mean) / std
+        val rmssd = if (rmssdRaw.isFinite() && userBaseRmssd.isFinite()) {
+            (rmssdRaw - userBaseRmssd) / safeStdRmssd
+        } else {
+            0f
+        }
 
-        // 정규화 및 통계 (Safe Std 사용)
+        // HR 정규화 및 통계 (Safe Std 사용)
         val normBuffer = hrBuffer.map { 
             if (it.isFinite()) (it - userMean) / safeStd else 0f 
         }
