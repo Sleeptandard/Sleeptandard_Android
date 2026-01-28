@@ -5,13 +5,13 @@ plugins {
 }
 
 android {
-    namespace = "com.example.sleeptandard_mvp_demo"
+    namespace = "com.leejang.sleeptandard_mvp"
     compileSdk {
         version = release(36)
     }
 
     defaultConfig {
-        applicationId = "com.example.sleeptandard_mvp_demo"
+        applicationId = "com.leejang.sleeptandard_mvp"
         minSdk = 26
         targetSdk = 36
         versionCode = libs.versions.project.versionCode.get().toInt()
@@ -85,6 +85,5 @@ dependencies {
 
     implementation(libs.coil.compose)
 
-    /** aab 빌드할때 풀어야 함 **/
-    //wearApp(project(":wear"))
+    wearApp(project(":wear"))
 }

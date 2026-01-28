@@ -7,13 +7,13 @@ plugins {
 }
 
 android {
-    namespace = "com.example.sleeptandard_mvp_demo.wear"
+    namespace = "com.leejang.sleeptandard_mvp.wear"
     compileSdk = 36
 
     defaultConfig {
         // CRITICAL: applicationId must match Phone app for Wearable Data Layer API communication
         // namespace remains ".wear" to preserve R class and internal code structure
-        applicationId = "com.example.sleeptandard_mvp_demo"
+        applicationId = "com.leejang.sleeptandard_mvp"
         minSdk = 26
         targetSdk = 36
         versionCode = libs.versions.project.versionCode.get().toInt()
