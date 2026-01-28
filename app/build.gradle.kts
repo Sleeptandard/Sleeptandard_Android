@@ -85,5 +85,6 @@ dependencies {
 
     implementation(libs.coil.compose)
 
-    wearApp(project(":wear"))
+    /** aab 빌드할때 풀어야 함 **/
+    //wearApp(project(":wear"))
 }
