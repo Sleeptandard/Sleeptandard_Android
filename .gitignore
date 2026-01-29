@@ -45,6 +45,9 @@ capture/
 # NDK
 .obj/
 
+# 센싱파일
+.csv
+
 # IntelliJ
 out/
 

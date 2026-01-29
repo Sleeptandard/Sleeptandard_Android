@@ -5,17 +5,17 @@ plugins {
 }
 
 android {
-    namespace = "com.example.sleeptandard_mvp_demo"
+    namespace = "com.leejang.sleeptandard_mvp"
     compileSdk {
         version = release(36)
     }
 
     defaultConfig {
-        applicationId = "com.example.sleeptandard_mvp_demo"
+        applicationId = "com.leejang.sleeptandard_mvp"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = libs.versions.project.versionCode.get().toInt()
+        versionName = libs.versions.project.versionName.get()
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -51,10 +51,16 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.material3)
+    implementation("com.google.android.gms:play-services-wearable:18.1.0") // [추가] 워치 통신용
 
     // icons를 import 할 수 없는 문제 때문에 추가
     implementation("androidx.compose.material:material-icons-core")
     implementation("androidx.compose.material:material-icons-extended")
+    implementation(libs.androidx.compose.foundation.layout)
+    implementation(libs.androidx.compose.foundation)
+    implementation(libs.androidx.compose.ui.unit)
+    implementation(libs.androidx.compose.ui.text)
+    implementation(libs.androidx.compose.animation.core)
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
@@ -70,4 +76,14 @@ dependencies {
 
     // numberpicker
     implementation("com.chargemap.compose:numberpicker:1.0.3")
+    
+    // Wearable API for Phone-Watch communication
+    implementation("com.google.android.gms:play-services-wearable:18.1.0")
+
+    // 앱 시작 화면
+    implementation("androidx.core:core-splashscreen:1.0.1")
+
+    implementation(libs.coil.compose)
+
+    wearApp(project(":wear"))
 }
