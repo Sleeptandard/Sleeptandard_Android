@@ -14,7 +14,7 @@ import java.io.IOException
 class InferenceManager(private val context: Context) {
 
     private var module: Module? = null
-    private val MODEL_NAME = "sleep_model_wear_final.ptl"
+    private val MODEL_NAME = "Sleeptandard_AI_v0.ptl"
 
     init {
         loadModel()
