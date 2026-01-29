@@ -23,7 +23,7 @@
             android:value="false" />
 
         <activity
-            android:name=".ui.MainActivity"
+            android:name="com.leejang.sleeptandard_mvp.ui.MainActivity"
             android:exported="true"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
             <intent-filter>
@@ -33,12 +33,12 @@
         </activity>
 
         <service
-            android:name="leejang.sleeptandard_mvp_demo.service.SmartAlarmService"
+            android:name="leejang.sleeptandard_mvp.service.SmartAlarmService"
             android:foregroundServiceType="health"
             android:exported="false" />
 
         <service
-            android:name="leejang.sleeptandard_mvp_demo.backend.service.WatchListenerService"
+            android:name="leejang.sleeptandard_mvp.backend.service.WatchListenerService"
             android:exported="true">
             <intent-filter>
                 <action android:name="com.google.android.gms.wearable.MESSAGE_RECEIVED" />
@@ -46,7 +46,7 @@
             </intent-filter>
         </service>
         <activity
-            android:name="leejang.sleeptandard_mvp_demo.PermissionActivity"
+            android:name="leejang.sleeptandard_mvp.PermissionActivity"
             android:exported="false"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
 

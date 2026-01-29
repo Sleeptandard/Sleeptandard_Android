@@ -1,4 +1,4 @@
-package com.leejang.sleeptandard_mvp.wear.ui
+package com.leejang.sleeptandard_mvp.ui
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -18,6 +18,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.sp
 import androidx.wear.compose.material.Icon
+import androidx.wear.tooling.preview.devices.WearDevices
 import com.leejang.sleeptandard_mvp.wear.R
 
 
@@ -70,7 +71,7 @@ fun WearHomeScreen() {
 }
 
 // 안드로이드 스튜디오 미리보기용
-@Preview(device = androidx.wear.tooling.preview.devices.WearDevices.LARGE_ROUND, showSystemUi = true)
+@Preview(device = WearDevices.LARGE_ROUND, showSystemUi = true)
 @Composable
 fun WearHomeScreenPreview() {
     WearHomeScreen()
