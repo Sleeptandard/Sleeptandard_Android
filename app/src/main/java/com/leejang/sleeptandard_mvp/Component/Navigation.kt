@@ -200,6 +200,8 @@ fun AppNav(
         composable(Screen.Tutorial.route){
             TutorialScreen(
                 onFinish = {
+                    alarmPrefs.setFirstRunCompleted()
+
                     rememberNavController.navigate(Screen.Home.route){
                         popUpTo(Screen.Home.route){inclusive = true}
                     }

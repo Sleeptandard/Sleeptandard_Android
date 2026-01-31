@@ -32,16 +32,17 @@ class MainActivity : ComponentActivity() {
         // SharedPreferences 불러오기
         val alarmPrefs = AlarmPreferences(this)
         val initialAlarm = alarmPrefs.loadAlarm()
+        val isFirstRun = alarmPrefs.isFirstRun() // 첫 실행 여부 확인
 
         // 인텐트에서 온 startDestination(알람 끈 후 reviewAlarm용)이 우선
         val startDestinationFromIntent =
             intent.getStringExtra("startDestination")
 
-        val startDestination =
-            startDestinationFromIntent
-                ?: if (alarmPrefs.isAlarmSet()) Screen.SettedAlarm.route
-                // else Screen.Splash.route // 컴포즈 스플래시 화면
-                else Screen.Home.route
+        val startDestination = when {
+            isFirstRun -> Screen.Tutorial.route           // 1순위: 처음 깔았다면 무조건 튜토리얼
+            alarmPrefs.isAlarmSet() -> Screen.SettedAlarm.route // 2순위: 알람이 설정되어 있다면 설정된 화면
+            else -> Screen.Home.route                     // 3순위: 일반적인 홈 화면
+        }
 
         enableEdgeToEdge()
 
