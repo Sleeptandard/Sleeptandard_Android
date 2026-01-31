@@ -64,7 +64,7 @@ object AppIcons {
     @DrawableRes val TutorialGraph = R.drawable.image_tutorial_graph
     @DrawableRes val Tutorial30Min = R.drawable.image_tutorial_30min
     @DrawableRes val TutorialFeedback = R.drawable.image_tutorial_feedback
-    @DrawableRes val TutorialPowerSaving1 = R.drawable.image_power_saving1
-    @DrawableRes val TutorialPowerSaving2 = R.drawable.image_power_saving2
+    @DrawableRes val TutorialPowerSaving1 = R.drawable.image_tutorial_power_saving1
+    @DrawableRes val TutorialPowerSaving2 = R.drawable.image_tutorial_power_saving2
 
 }

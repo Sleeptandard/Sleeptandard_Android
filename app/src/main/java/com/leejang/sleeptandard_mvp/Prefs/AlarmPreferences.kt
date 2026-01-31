@@ -7,6 +7,14 @@ class AlarmPreferences(private val context: Context) {
 
     private val prefs = context.getSharedPreferences("alarm_prefs", Context.MODE_PRIVATE)
 
+    // 앱이 처음 실행되었는지 확인 (기본값 true)
+    fun isFirstRun(): Boolean = prefs.getBoolean("is_first_run", true)
+
+    // 튜토리얼을 완료했을 때 호출하여 플래그를 false로 변경
+    fun setFirstRunCompleted() {
+        prefs.edit().putBoolean("is_first_run", false).apply()
+    }
+
     fun saveAlarm(alarm: Alarm) {
         prefs.edit()
             .putBoolean("hasAlarm", true)
