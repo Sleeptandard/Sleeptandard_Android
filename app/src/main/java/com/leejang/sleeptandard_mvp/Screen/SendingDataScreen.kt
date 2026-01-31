@@ -33,7 +33,9 @@ fun SendingDataScreen(
         IconButton(
             modifier = Modifier
                 .size(40.dp),
-            onClick = {}
+            onClick = {
+                onBack()
+            }
         ) {
             Icon(
                 painter = painterResource(AppIcons.QnAArrowBack),
