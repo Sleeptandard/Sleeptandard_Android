@@ -2,7 +2,6 @@ package com.leejang.sleeptandard_mvp.Screen
 
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -62,11 +61,10 @@ fun InquireScreen(
 
     // 2. 여러 장을 가져올 수 있는 GetMultipleContents 계약 사용
     val photoPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickMultipleVisualMedia(maxItems = 5) // 개수 제한 가능
+        contract = ActivityResultContracts.GetMultipleContents()
     ) { uris: List<Uri> ->
-        if (uris.isNotEmpty()) {
-            selectedImageUris = selectedImageUris + uris
-        }
+        // 새로 선택한 사진들을 기존 리스트에 추가 (교체를 원하면 selectedImageUris = uris)
+        selectedImageUris = selectedImageUris + uris
     }
 
     Scaffold(
@@ -218,7 +216,7 @@ fun InquireScreen(
                             .background(fieldBg, RoundedCornerShape(12.dp))
                             .clickable {
                                 // 이미지 타입을 처리할 수 있는 앱 선택창을 띄웁니다.
-                                photoPickerLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                                photoPickerLauncher.launch("image/*")
                             },
                         contentAlignment = Alignment.Center
                     ) {
