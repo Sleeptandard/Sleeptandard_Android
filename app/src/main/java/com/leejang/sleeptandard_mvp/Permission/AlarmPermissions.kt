@@ -106,3 +106,36 @@ fun checkSetExactAlarms(scheduler: AlarmScheduler, context: Context){
     }
 }
 
+// 모든 권한들이 허용되었는지 확인하는 함수
+fun isAllEssentialPermissionsGranted(context: Context): Boolean {
+    val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+
+    // 1. 정확한 알람 권한 (Android 12+)
+    val canScheduleExact = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager
+        alarmManager.canScheduleExactAlarms()
+    } else true
+
+    // 2. 알림 권한 (Android 13+)
+    val notificationEnabled = androidx.core.app.NotificationManagerCompat.from(context).areNotificationsEnabled()
+
+    // 3. 전체 화면 인텐트 권한 (Android 14+)
+    val canUseFSI = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+        nm.canUseFullScreenIntent()
+    } else true
+
+    return canScheduleExact && notificationEnabled && canUseFSI
+}
+
+/**
+ * 시스템의 '앱 상세 정보' 화면으로 이동합니다.
+ * 사용자가 권한을 영구 거부했을 때 직접 허용하도록 유도할 때 사용합니다.
+ */
+fun openAppSettings(context: Context) {
+    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+        // 현재 앱의 패키지명을 Uri 데이터로 설정하여 해당 앱 페이지로 바로 이동
+        data = Uri.fromParts("package", context.packageName, null)
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    context.startActivity(intent)
+}
