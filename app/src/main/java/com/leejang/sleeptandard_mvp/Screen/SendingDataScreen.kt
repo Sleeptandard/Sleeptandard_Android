@@ -2,6 +2,8 @@ package com.leejang.sleeptandard_mvp.Screen
 
 import android.content.Intent
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -50,6 +52,8 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.Date
+import java.util.Locale
 
 @Composable
 fun SendingDataScreen(
@@ -61,6 +65,48 @@ fun SendingDataScreen(
     var logFiles by remember { mutableStateOf<List<File>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
     var totalSizeMB by remember { mutableStateOf(0.0) }
+    var pendingFilesToDelete by remember { mutableStateOf<List<File>>(emptyList()) }
+
+    // 공유 완료 후 파일 삭제를 위한 ActivityResultLauncher
+    val shareLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { _ ->
+        // 공유 인텐트가 종료된 후 실행
+        if (pendingFilesToDelete.isNotEmpty()) {
+            scope.launch(Dispatchers.IO) {
+                var deletedCount = 0
+                pendingFilesToDelete.forEach { file ->
+                    if (file.exists() && file.delete()) {
+                        deletedCount++
+                    }
+                }
+                
+                withContext(Dispatchers.Main) {
+                    if (deletedCount > 0) {
+                        Toast.makeText(
+                            context,
+                            "✅ $deletedCount 개 파일 삭제 완료",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                        
+                        // 파일 목록 새로고침
+                        isLoading = true
+                    }
+                }
+                
+                // 파일 목록 다시 로드
+                logFiles = context.filesDir.listFiles { file ->
+                    file.name.startsWith("received_") && file.name.endsWith(".csv")
+                }?.sortedByDescending { it.lastModified() } ?: emptyList()
+                
+                totalSizeMB = logFiles.sumOf { it.length() } / (1024.0 * 1024.0)
+                withContext(Dispatchers.Main) {
+                    isLoading = false
+                }
+            }
+            pendingFilesToDelete = emptyList()
+        }
+    }
 
     // 파일 목록 로드
     LaunchedEffect(Unit) {
@@ -214,9 +260,10 @@ fun SendingDataScreen(
                                 .size(68.dp)
                                 .background(color = Color(0xFF465467), shape = CircleShape)
                                 .clickable {
-                                    scope.launch {
-                                        shareLogFiles(context, logFiles)
-                                    }
+                                    // 공유 전 삭제 대상 파일 저장
+                                    pendingFilesToDelete = logFiles
+                                    // 공유 인텐트 실행
+                                    shareLogFilesWithResult(context, logFiles, shareLauncher)
                                 },
                             contentAlignment = Alignment.Center
                         ) {
@@ -286,7 +333,11 @@ private fun formatFileInfo(file: File): String {
     return "수신: $date"
 }
 
-private fun shareLogFiles(context: android.content.Context, files: List<File>) {
+private fun shareLogFilesWithResult(
+    context: android.content.Context, 
+    files: List<File>,
+    launcher: androidx.activity.result.ActivityResultLauncher<Intent>
+) {
     try {
         if (files.isEmpty()) {
             Toast.makeText(context, "공유할 파일이 없습니다", Toast.LENGTH_SHORT).show()
@@ -314,7 +365,8 @@ private fun shareLogFiles(context: android.content.Context, files: List<File>) {
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
 
-        context.startActivity(Intent.createChooser(intent, "로그 파일 공유"))
+        val chooser = Intent.createChooser(intent, "로그 파일 공유 (공유 후 자동 삭제됨)")
+        launcher.launch(chooser)
         
     } catch (e: Exception) {
         Toast.makeText(context, "공유 실패: ${e.message}", Toast.LENGTH_LONG).show()
