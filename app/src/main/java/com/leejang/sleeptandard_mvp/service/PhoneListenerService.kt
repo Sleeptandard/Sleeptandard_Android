@@ -1,28 +1,49 @@
 package com.leejang.sleeptandard_mvp.service
 
 import android.app.AlarmManager
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.widget.Toast
+import androidx.core.app.NotificationCompat
 import com.leejang.sleeptandard_mvp.ClassFile.AlarmReceiver
 import com.leejang.sleeptandard_mvp.Prefs.AlarmPreferences
+import com.google.android.gms.wearable.Channel
 import com.google.android.gms.wearable.MessageEvent
+import com.google.android.gms.wearable.Wearable
 import com.google.android.gms.wearable.WearableListenerService
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
+import java.io.File
 import java.nio.ByteBuffer
 
 /**
- * PhoneListenerService - Watch로부터 메시지를 수신하는 서비스
+ * PhoneListenerService - Watch로부터 메시지 및 파일을 수신하는 서비스
  * 
  * 역할:
  * - /WATCH_SENSING_STARTED: Watch에서 센싱이 시작되었음을 알림
  * - /TRIGGER_ALARM: Watch가 감지한 최적의 기상 시점에 알람 트리거
  * - /SLEEP_DATA_RESULT: 수면 데이터 결과 수신 (추후 UI 표시용)
+ * - /sleep_log_transfer/*: Watch로부터 로그 파일 수신 (ChannelClient)
  */
 class PhoneListenerService : WearableListenerService() {
+
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    override fun onDestroy() {
+        super.onDestroy()
+        serviceScope.cancel()
+    }
 
     override fun onMessageReceived(messageEvent: MessageEvent) {
         Log.d(TAG, "Message received from Watch: ${messageEvent.path}")
@@ -141,13 +162,126 @@ class PhoneListenerService : WearableListenerService() {
         }
     }
     
+    /**
+     * Watch로부터 Channel을 통한 파일 전송 수신
+     * ChannelClient를 사용한 대용량 파일 전송
+     */
+    override fun onChannelOpened(channel: Channel) {
+        super.onChannelOpened(channel)
+        
+        val channelPath = channel.path
+        Log.i(TAG, "📥 Channel opened: $channelPath")
+        
+        // /sleep_log_transfer/로 시작하는 채널만 처리
+        if (channelPath.startsWith(PATH_LOG_TRANSFER_PREFIX)) {
+            serviceScope.launch {
+                receiveLogFile(channel)
+            }
+        }
+    }
+
+    /**
+     * Channel을 통해 로그 파일 수신 및 저장
+     */
+    private suspend fun receiveLogFile(channel: Channel) {
+        try {
+            // 경로에서 파일명 추출 (예: /sleep_log_transfer/sensor_log_xxx.csv)
+            val fileName = channel.path.substringAfterLast("/")
+            Log.i(TAG, "Receiving file: $fileName")
+            
+            // 파일 저장 경로
+            val outputFile = File(filesDir, "received_$fileName")
+            
+            // ChannelClient로 입력 스트림 받기
+            val channelClient = Wearable.getChannelClient(this)
+            val inputStream = channelClient.getInputStream(channel).await()
+            
+            // 파일 저장
+            var totalBytes = 0L
+            inputStream.use { input ->
+                outputFile.outputStream().use { output ->
+                    val buffer = ByteArray(8192)
+                    var bytesRead: Int
+                    
+                    while (input.read(buffer).also { bytesRead = it } != -1) {
+                        output.write(buffer, 0, bytesRead)
+                        totalBytes += bytesRead
+                    }
+                }
+            }
+            
+            Log.i(TAG, "✅ File saved: ${outputFile.name} (${totalBytes / 1024}KB)")
+            
+            // 알림 표시
+            showFileReceivedNotification(fileName, totalBytes)
+            
+            // 채널 닫기
+            channelClient.close(channel).await()
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to receive file", e)
+            
+            // 에러 발생 시 채널 닫기 시도
+            try {
+                Wearable.getChannelClient(this).close(channel).await()
+            } catch (closeError: Exception) {
+                Log.e(TAG, "Failed to close channel", closeError)
+            }
+        }
+    }
+
+    /**
+     * 파일 수신 완료 알림
+     */
+    private fun showFileReceivedNotification(fileName: String, sizeBytes: Long) {
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        
+        // Android 8.0+ 채널 생성
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                NOTIFICATION_CHANNEL_ID,
+                "로그 파일 전송",
+                NotificationManager.IMPORTANCE_DEFAULT
+            ).apply {
+                description = "워치로부터 로그 파일 수신 알림"
+            }
+            notificationManager.createNotificationChannel(channel)
+        }
+        
+        val notification = NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.stat_sys_download_done)
+            .setContentTitle("로그 파일 수신 완료")
+            .setContentText("$fileName (${sizeBytes / 1024}KB)")
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setAutoCancel(true)
+            .build()
+        
+        notificationManager.notify(NOTIFICATION_ID_FILE_RECEIVED, notification)
+        
+        // 메인 스레드에서 토스트 표시
+        Handler(Looper.getMainLooper()).post {
+            Toast.makeText(
+                applicationContext,
+                "로그 파일 수신 완료 ✅",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
+
     companion object {
         private const val TAG = "PhoneListenerService"
         
         // Message paths from Watch
-        private const val PATH_SENSING_STARTED = "/WATCH_SENSING_STARTED"  // [신규] 센싱 시작 경로
+        private const val PATH_SENSING_STARTED = "/WATCH_SENSING_STARTED"
         private const val PATH_TRIGGER_ALARM = "/TRIGGER_ALARM"
         private const val PATH_SLEEP_DATA_RESULT = "/SLEEP_DATA_RESULT"
+        
+        // Channel paths for file transfer
+        private const val PATH_LOG_TRANSFER_PREFIX = "/sleep_log_transfer"
+        
+        // Notification
+        private const val NOTIFICATION_CHANNEL_ID = "log_file_transfer"
+        private const val NOTIFICATION_ID_FILE_RECEIVED = 2001
     }
 }
 
