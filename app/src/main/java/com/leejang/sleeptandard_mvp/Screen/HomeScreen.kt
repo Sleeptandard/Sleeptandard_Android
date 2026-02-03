@@ -1,6 +1,9 @@
 package com.leejang.sleeptandard_mvp.Screen
 
 import android.annotation.SuppressLint
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import android.media.RingtoneManager
 
 import androidx.compose.foundation.BorderStroke
@@ -55,6 +58,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
+import androidx.compose.runtime.rememberCoroutineScope
 
 import androidx.core.net.toUri
 
@@ -63,12 +67,16 @@ import com.leejang.sleeptandard_mvp.Component.AlarmSoundSettingContent
 import com.leejang.sleeptandard_mvp.Component.ConfirmButton
 import com.leejang.sleeptandard_mvp.Component.CustomTimePicker
 import com.leejang.sleeptandard_mvp.Component.OptionsSection
+import com.leejang.sleeptandard_mvp.Permission.isAllEssentialPermissionsGranted
+import com.leejang.sleeptandard_mvp.Permission.openAppSettings
 import com.leejang.sleeptandard_mvp.Prefs.AlarmPreferences
 import com.leejang.sleeptandard_mvp.ViewModel.AlarmViewModel
 import com.leejang.sleeptandard_mvp.ui.theme.AppIcons
 import com.leejang.sleeptandard_mvp.Prefs.CustomSituationItem
 import com.leejang.sleeptandard_mvp.Prefs.CustomSituationPreferences
 import com.leejang.sleeptandard_mvp.ui.theme.DarkBackground
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 
 @SuppressLint("ConfigurationScreenWidthHeight")
@@ -78,10 +86,9 @@ fun HomeScreen(
     alarmViewModel: AlarmViewModel,
     scheduler: AlarmScheduler,
     onClickConfirm: ()-> Unit,
-    goToAlarmRingScreen: ()-> Unit,
-    goToFeedbackScreen: ()-> Unit
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope() // ✅ 코루틴 스코프 선언
 
     // 알람뷰모델에 넣을 값들임.
     var selectedHour by remember { mutableIntStateOf(alarmViewModel.alarm.hour) }
@@ -481,6 +488,23 @@ fun HomeScreen(
                                 ){
                                     Button(
                                         onClick = {
+
+                                            if(!isAllEssentialPermissionsGranted(context)){
+
+                                                android.widget.Toast.makeText(
+                                                    context,
+                                                    "권한 설정이 필요합니다. 잠시 후 설정 화면으로 이동합니다.",
+                                                    android.widget.Toast.LENGTH_SHORT
+                                                ).show()
+
+                                                // 코루틴을 사용하여 지연 실행
+                                                scope.launch {
+                                                    delay(1500L) // 1.5초 지연 (사용자가 토스트를 읽을 시간)
+                                                    openAppSettings(context)
+                                                }
+                                                // 권한이 없으므로 알람 등록을 진행하지 않고 종료
+                                                return@Button
+                                            }
                                             showSituationModal = false
 
                                             // 알람정보 뷰모델로 저장하고 스케쥴러에 등록하고 다음 화면으로
@@ -510,6 +534,8 @@ fun HomeScreen(
                                             alarmPrefs.saveAlarm(alarmViewModel.alarm)
 
                                             onClickConfirm()
+
+
                                         },
                                         modifier = Modifier
                                             .weight(1f)
@@ -530,6 +556,24 @@ fun HomeScreen(
                                     Button(
                                         onClick = {
                                             showSituationModal = false
+
+                                            if(!isAllEssentialPermissionsGranted(context)){
+
+                                                android.widget.Toast.makeText(
+                                                    context,
+                                                    "권한 설정이 필요합니다. 잠시 후 설정 화면으로 이동합니다.",
+                                                    android.widget.Toast.LENGTH_SHORT
+                                                ).show()
+
+                                                // 코루틴을 사용하여 지연 실행
+                                                scope.launch {
+                                                    delay(1500L) // 1.5초 지연 (사용자가 토스트를 읽을 시간)
+                                                    openAppSettings(context)
+                                                }
+
+                                                // 권한이 없으므로 알람 등록을 진행하지 않고 종료
+                                                return@Button
+                                            }
 
                                             // 알람정보 뷰모델로 저장하고 스케쥴러에 등록하고 다음 화면으로
 
@@ -633,6 +677,25 @@ fun HomeScreen(
                                                 selectedSituation = selectedSituation + saved.id
 
                                             }
+
+                                            if(!isAllEssentialPermissionsGranted(context)){
+
+                                                android.widget.Toast.makeText(
+                                                    context,
+                                                    "권한 설정이 필요합니다. 잠시 후 설정 화면으로 이동합니다.",
+                                                    android.widget.Toast.LENGTH_SHORT
+                                                ).show()
+
+                                                // 코루틴을 사용하여 지연 실행
+                                                scope.launch {
+                                                    delay(1500L) // 1.5초 지연 (사용자가 토스트를 읽을 시간)
+                                                    openAppSettings(context)
+                                                }
+
+                                                // 권한이 없으므로 알람 등록을 진행하지 않고 종료
+                                                return@Button
+                                            }
+
 
                                             if(!customChecked){
                                                 // 알람정보 뷰모델로 저장하고 스케쥴러에 등록하고 다음 화면으로

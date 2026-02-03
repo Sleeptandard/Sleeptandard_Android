@@ -130,6 +130,7 @@ fun SendingDataScreen(
                 .fillMaxWidth()
                 .padding(vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
+
         ) {
             IconButton(
                 modifier = Modifier.size(40.dp),

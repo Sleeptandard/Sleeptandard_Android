@@ -127,12 +127,6 @@ fun AppNav(
                         popUpTo(Screen.Home.route){inclusive = true}
                     }
                 },
-                goToAlarmRingScreen = {
-                    rememberNavController.navigate(Screen.AlarmRing.route)
-                },
-                goToFeedbackScreen = {
-                    rememberNavController.navigate(Screen.ReviewAlarm.route)
-                }
             )
         }
 
@@ -200,9 +194,9 @@ fun AppNav(
         composable(Screen.Tutorial.route){
             TutorialScreen(
                 onFinish = {
-                    rememberNavController.navigate(Screen.Home.route){
-                        popUpTo(Screen.Home.route){inclusive = true}
-                    }
+                    alarmPrefs.setFirstRunCompleted()
+                    rememberNavController.popBackStack()
+                    rememberNavController.navigate(Screen.Home.route)
                 }
             )
         }
