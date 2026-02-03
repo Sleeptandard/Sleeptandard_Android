@@ -15,7 +15,7 @@ android {
         // namespace remains ".wear" to preserve R class and internal code structure
         applicationId = "com.leejang.sleeptandard_mvp"
         minSdk = 26
-        targetSdk = 36
+        targetSdk = 35
         versionCode = libs.versions.project.versionCode.get().toInt()
         versionName = libs.versions.project.versionName.get()
     }

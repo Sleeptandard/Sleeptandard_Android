@@ -1,6 +1,8 @@
 package com.leejang.sleeptandard_mvp.Screen
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -19,6 +21,9 @@ fun QnADetailScreen(
     onBack: () -> Unit,
     onClickAskDeveloper: () -> Unit = {}
 ) {
+    // 1. 스크롤 상태 기억
+    val scrollState = androidx.compose.foundation.rememberScrollState()
+
     Scaffold(
         containerColor = Color(0xFF0B111A),
         topBar = {
@@ -41,6 +46,7 @@ fun QnADetailScreen(
                 .fillMaxSize()
                 .padding(inner)
                 .padding(horizontal = 24.dp)
+                .verticalScroll(scrollState) // ✅ 스크롤 활성화
         ) {
             Spacer(Modifier.height(12.dp))
 
@@ -65,9 +71,10 @@ fun QnADetailScreen(
 
             // 담당자 답변 섹션(구분선/블록)
             Surface(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth(),
                 shape = MaterialTheme.shapes.large,
-                tonalElevation = 0.dp
+                tonalElevation = 0.dp,
             ) {
                 Column(modifier = Modifier.padding(18.dp)) {
                     Text(
@@ -75,7 +82,8 @@ fun QnADetailScreen(
                         color = Color(0xE5F1F1F1),
                         style = MaterialTheme.typography.bodyMedium.copy(fontSize = 16.sp)
                     )
-                    Spacer(Modifier.height(10.dp))
+                    Spacer(Modifier.height(20.dp))
+
                     Text(
                         text = item.answer,
                         color = Color(0xE5F1F1F1),
