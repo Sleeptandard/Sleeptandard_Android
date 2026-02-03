@@ -4,7 +4,10 @@ import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
+import android.widget.Toast
 import com.leejang.sleeptandard_mvp.ClassFile.AlarmReceiver
 import com.leejang.sleeptandard_mvp.Prefs.AlarmPreferences
 import com.google.android.gms.wearable.MessageEvent
@@ -15,6 +18,7 @@ import java.nio.ByteBuffer
  * PhoneListenerService - Watch로부터 메시지를 수신하는 서비스
  * 
  * 역할:
+ * - /WATCH_SENSING_STARTED: Watch에서 센싱이 시작되었음을 알림
  * - /TRIGGER_ALARM: Watch가 감지한 최적의 기상 시점에 알람 트리거
  * - /SLEEP_DATA_RESULT: 수면 데이터 결과 수신 (추후 UI 표시용)
  */
@@ -24,6 +28,9 @@ class PhoneListenerService : WearableListenerService() {
         Log.d(TAG, "Message received from Watch: ${messageEvent.path}")
         
         when (messageEvent.path) {
+            PATH_SENSING_STARTED -> {
+                handleWatchSensingStarted()
+            }
             PATH_TRIGGER_ALARM -> {
                 handleTriggerAlarm(messageEvent.data)
             }
@@ -33,6 +40,23 @@ class PhoneListenerService : WearableListenerService() {
             else -> {
                 Log.w(TAG, "Unknown message path: ${messageEvent.path}")
             }
+        }
+    }
+    
+    /**
+     * /WATCH_SENSING_STARTED 처리
+     * Watch에서 센서 감지가 시작되었을 때 호출됨
+     */
+    private fun handleWatchSensingStarted() {
+        Log.i(TAG, "Watch sensing started!")
+        
+        // 메인 스레드에서 토스트 표시
+        Handler(Looper.getMainLooper()).post {
+            Toast.makeText(
+                applicationContext,
+                "워치가 연결되었습니다 ✅",
+                Toast.LENGTH_SHORT
+            ).show()
         }
     }
     
@@ -121,6 +145,7 @@ class PhoneListenerService : WearableListenerService() {
         private const val TAG = "PhoneListenerService"
         
         // Message paths from Watch
+        private const val PATH_SENSING_STARTED = "/WATCH_SENSING_STARTED"  // [신규] 센싱 시작 경로
         private const val PATH_TRIGGER_ALARM = "/TRIGGER_ALARM"
         private const val PATH_SLEEP_DATA_RESULT = "/SLEEP_DATA_RESULT"
     }

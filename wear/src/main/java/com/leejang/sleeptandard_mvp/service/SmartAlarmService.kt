@@ -76,6 +76,7 @@ class SmartAlarmService : Service(), SensorEventListener {
     private var consecutiveRemCount = 0  // REM 수면 연속 카운트
     private var lastStage: SleepStage = SleepStage.UNKNOWN
     private var hasTriggered = false
+    private var hasNotifiedSensingStart = false  // [신규] 첫 센싱 감지 알림 플래그
 
     override fun onCreate() {
         super.onCreate()
@@ -192,6 +193,14 @@ class SmartAlarmService : Service(), SensorEventListener {
         if (!isServiceRunning) return
         if (!::dataRepository.isInitialized || !::userStatsManager.isInitialized || !::inferenceManager.isInitialized) {
             return
+        }
+        
+        // [신규] 첫 센싱 감지 시 폰에 알림 전송
+        if (!hasNotifiedSensingStart) {
+            hasNotifiedSensingStart = true
+            serviceScope.launch {
+                sendSensingStartSignal()
+            }
         }
         
         val timestamp = System.currentTimeMillis()
@@ -348,6 +357,29 @@ class SmartAlarmService : Service(), SensorEventListener {
         lastStage = currentStage
     }
 
+    // [신규] 첫 센싱 시작 신호를 폰에 전송
+    private suspend fun sendSensingStartSignal() {
+        try {
+            if (!::messageClient.isInitialized) {
+                Log.w(TAG, "MessageClient not initialized, skipping sensing start signal")
+                return
+            }
+            
+            val nodeClient = Wearable.getNodeClient(this@SmartAlarmService)
+            val connectedNodes = nodeClient.connectedNodes.await()
+            
+            if (connectedNodes.isNotEmpty()) {
+                val phoneNodeId = connectedNodes.first().id
+                messageClient.sendMessage(phoneNodeId, PATH_SENSING_STARTED, ByteArray(0)).await()
+                Log.i(TAG, "✅ Sensing start signal sent to phone!")
+            } else {
+                Log.w(TAG, "No connected nodes to send sensing start signal")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to send sensing start signal", e)
+        }
+    }
+
     // [리팩토링] Suspend 함수로 변경 - 순차 실행 가능
     private suspend fun sendTriggerSignalSuspend(triggerTime: Long) {
         try {
@@ -473,6 +505,7 @@ class SmartAlarmService : Service(), SensorEventListener {
         const val EXTRA_TARGET_TIME = "EXTRA_TARGET_TIME"
         const val EXTRA_SITUATION_LABEL = "EXTRA_SITUATION_LABEL" // [추가] 라벨 Extra 키
 
+        private const val PATH_SENSING_STARTED = "/WATCH_SENSING_STARTED"  // [신규] 센싱 시작 경로
         private const val PATH_TRIGGER_ALARM = "/TRIGGER_ALARM"
         private const val PATH_SLEEP_DATA_RESULT = "/SLEEP_DATA_RESULT"
     }
