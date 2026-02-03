@@ -9,9 +9,11 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -19,6 +21,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -35,6 +40,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -63,7 +69,7 @@ fun TutorialScreen(
     )
 
     var currentPage by remember { mutableIntStateOf(0) }
-    val maxPage = 3 // 0: 시작, 1: 알람설정, 2: 취침, 3: 피드백, 4: 절전 상태 해제
+    val maxPage = 4 // 0: 시작, 1: 알람설정, 2: 취침, 3: 피드백, 4: 절전 상태 해제
 
     // ✅ 뒤로가기 제어 로직 추가
     // currentPage가 0보다 클 때만 이 핸들러가 동작합니다.
@@ -117,7 +123,7 @@ fun TutorialScreen(
                 }
             }
         }
-        Spacer(Modifier.height(40.dp))
+        Spacer(Modifier.height(40 .dp))
 
         // 2. 페이지 내용 (애니메이션 적용 영역)
         Box(modifier = Modifier.weight(1f)) {
@@ -133,6 +139,7 @@ fun TutorialScreen(
                     1 -> AlarmSettingPart()
                     2 -> AlarmSettedPart()
                     3 -> FeedbackPart()
+                    4 -> WatchPowerSavingPage()
                 }
             }
         }
@@ -414,4 +421,139 @@ fun FeedbackPart(){
 @Composable
 fun WatchPowerSavingPage(){
 
+    // 1. 스냅 및 스크롤 상태 관리
+    val lazyListState = rememberLazyListState()
+    val snapFlingBehavior = rememberSnapFlingBehavior(lazyListState = lazyListState)
+
+    // 2. 화면 너비를 계산하여 양옆 패딩 설정 (아이템 너비가 250.dp일 때)
+    val configuration = LocalConfiguration.current
+    val screenWidth = configuration.screenWidthDp.dp
+    val itemWidth = 250.dp
+    val horizontalPadding = (screenWidth - itemWidth) / 2
+
+    Column(
+        modifier = Modifier.fillMaxSize(),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Spacer(Modifier.weight(5f))
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = "수면 측정이 중단되지 않도록",
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontSize = 16.sp
+                )
+            )
+            Row(
+                verticalAlignment = Alignment.Bottom
+            ) {
+                Text(
+                    text = "워치앱에서 ",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 18.sp,
+                        color = Color(0xFF8DF1E2)
+                    )
+                )
+                Text(
+                    text = "절전 상태를 ",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 16.sp
+                    )
+                )
+                Text(
+                    text = "해제",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 18.sp,
+                        color = Color(0xFFFF3A3A)
+                    )
+                )
+                Text(
+                    text = "해 주세요.",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 16.sp
+                    )
+                )
+            }
+        }
+
+        Spacer(Modifier.weight(6f))
+
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = "[설정] ➡\uFE0E [배터리] ➡\uFE0E [절전 상태 앱]",
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontSize = 15.sp,
+                    color = Color(0xFFD4D4D4)
+                )
+            )
+            Text(
+                text = "알람의 정석 제거",
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontSize = 15.sp,
+                    color = Color(0xFFD4D4D4)
+                )
+            )
+        }
+
+        Spacer(Modifier.weight(3.6f))
+
+        // 3. LazyRow 이미지 영역 (잘려 있는 부분)
+        LazyRow(
+            state = lazyListState, // 상태 연결
+            flingBehavior = snapFlingBehavior, // 스냅 동작 연결
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(260.dp),
+            contentPadding = PaddingValues(horizontal = horizontalPadding), // 계산된 패딩 적용
+            horizontalArrangement = Arrangement.spacedBy(20.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // 가이드 이미지 1
+            item {
+                Box(
+                    modifier = Modifier
+                        .size(itemWidth) // 변수 사용
+                        .clip(RoundedCornerShape(32.dp))
+                        .background(Color.Black.copy(alpha = 0.3f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Image(
+                        painter = painterResource(id = AppIcons.TutorialPowerSaving1),
+                        contentDescription = "Step 1",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Fit
+                    )
+                }
+            }
+            // 가이드 이미지 2
+            item {
+                Box(
+                    modifier = Modifier
+                        .size(itemWidth)
+                        .clip(RoundedCornerShape(32.dp))
+                        .background(Color.Black.copy(alpha = 0.3f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Image(
+                        painter = painterResource(id = AppIcons.TutorialPowerSaving2),
+                        contentDescription = "Step 2",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Fit
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.weight(6f)) // 하단 버튼과의 간격 조절
+
+
+
+
+
+    }
 }

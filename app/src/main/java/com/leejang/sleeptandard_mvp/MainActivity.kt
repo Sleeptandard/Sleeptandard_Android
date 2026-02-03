@@ -16,8 +16,8 @@ import com.leejang.sleeptandard_mvp.Permission.checkNotificationPermission
 import com.leejang.sleeptandard_mvp.Permission.checkSetExactAlarms
 import com.leejang.sleeptandard_mvp.Prefs.AlarmPreferences
 
-
 class MainActivity : ComponentActivity() {
+
     override fun onCreate(savedInstanceState: Bundle?) {
         val splash = installSplashScreen()
 
@@ -29,22 +29,11 @@ class MainActivity : ComponentActivity() {
         checkFullScreenIntentPermission(this)
         checkNotificationPermission(this)
 
-        // SharedPreferences 불러오기
         val alarmPrefs = AlarmPreferences(this)
-        val initialAlarm = alarmPrefs.loadAlarm()
-
-        // 인텐트에서 온 startDestination(알람 끈 후 reviewAlarm용)이 우선
-        val startDestinationFromIntent =
-            intent.getStringExtra("startDestination")
-
-        val startDestination =
-            startDestinationFromIntent
-                ?: if (alarmPrefs.isAlarmSet()) Screen.SettedAlarm.route
-                // else Screen.Splash.route // 컴포즈 스플래시 화면
-                else Screen.Home.route
 
         enableEdgeToEdge()
 
+        // 스플래시 화면에서 빠져나오는 전환 애니메이션
         splash.setOnExitAnimationListener { splashScreenView ->
 
             // 예쁜 “창 전환” 느낌: 살짝 축소 + 페이드아웃
@@ -63,12 +52,27 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             Sleeptandard_MVP_DemoTheme {
+
                 AppNav(
-                    scheduler = scheduler,
-                    startDestination = startDestination,
-                    initialAlarm = initialAlarm
+                    scheduler = AlarmScheduler(this),
+                    startDestination = getStartDestination(alarmPrefs), // 기존 로직을 함수로 분리
+                    initialAlarm = alarmPrefs.loadAlarm()
                 )
             }
+        }
+    }
+
+    // 시작 화면 정하는 함수
+    private fun getStartDestination(
+        alarmPrefs: AlarmPreferences
+    ): String {
+        val startDestinationFromIntent = intent.getStringExtra("startDestination")
+
+        return when {
+            alarmPrefs.isFirstRun() -> Screen.Tutorial.route           // 1순위: 앱을 처음 실행한 경우
+            alarmPrefs.isAlarmSet() -> Screen.SettedAlarm.route       // 2순위: 알람이 설정되어 있는 경우
+            startDestinationFromIntent != null -> startDestinationFromIntent // 3순위: 알람을 끄고 온 경우 (피드백 화면)
+            else -> Screen.Home.route                                 // 4순위: 일반적인 경우
         }
     }
 }
