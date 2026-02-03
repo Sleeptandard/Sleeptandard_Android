@@ -432,6 +432,23 @@ class SmartAlarmService : Service(), SensorEventListener {
             } else {
                 Log.w(TAG, "No connected nodes to send result")
             }
+            
+            // [자동 로그 전송] 알람 종료 시 로그 파일 자동 전송
+            try {
+                Log.i(TAG, "🚀 Auto-transferring log files to phone...")
+                val transferManager = com.leejang.sleeptandard_mvp.backend.manager.LogFileTransferManager(this@SmartAlarmService)
+                val transferResult = transferManager.sendLatestLogsToPhone()
+                
+                transferResult.onSuccess { count ->
+                    Log.i(TAG, "✅ Auto-transfer completed: $count files")
+                }.onFailure { error ->
+                    Log.w(TAG, "⚠️ Auto-transfer failed: ${error.message}")
+                    // 자동 전송 실패는 치명적이지 않으므로 서비스 종료는 계속 진행
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Auto-transfer error (non-critical)", e)
+            }
+            
         } catch (e: Exception) {
             Log.e(TAG, "Failed to send result", e)
         } finally {

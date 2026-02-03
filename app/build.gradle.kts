@@ -79,6 +79,9 @@ dependencies {
     
     // Wearable API for Phone-Watch communication
     implementation("com.google.android.gms:play-services-wearable:18.1.0")
+    
+    // Coroutines support for Play Services (await() 사용)
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3")
 
     // 앱 시작 화면
     implementation("androidx.core:core-splashscreen:1.0.1")
