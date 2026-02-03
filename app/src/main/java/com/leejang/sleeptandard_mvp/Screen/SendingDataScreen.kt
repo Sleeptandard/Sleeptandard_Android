@@ -354,13 +354,9 @@ private fun shareLogFilesWithResult(
         val intent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
             type = "text/csv"
             putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(uris))
-            putExtra(Intent.EXTRA_SUBJECT, "Sleep Log Data from SleepTandard")
-            putExtra(
-                Intent.EXTRA_TEXT,
-                "수면 데이터 로그 파일입니다.\n파일 개수: ${files.size}\n전체 크기: %.2f MB".format(
-                    files.sumOf { it.length() } / (1024.0 * 1024.0)
-                )
-            )
+            putExtra(Intent.EXTRA_SUBJECT, "Sleep Log Data (${files.size} files, %.2f MB)".format(
+                files.sumOf { it.length() } / (1024.0 * 1024.0)
+            ))
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
 
