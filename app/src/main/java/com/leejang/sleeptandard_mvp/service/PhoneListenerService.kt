@@ -284,4 +284,3 @@ class PhoneListenerService : WearableListenerService() {
         private const val NOTIFICATION_ID_FILE_RECEIVED = 2001
     }
 }
-
