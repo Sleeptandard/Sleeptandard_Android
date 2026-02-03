@@ -14,7 +14,7 @@ import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import com.leejang.sleeptandard_mvp.ClassFile.AlarmReceiver
 import com.leejang.sleeptandard_mvp.Prefs.AlarmPreferences
-import com.google.android.gms.wearable.Channel
+import com.google.android.gms.wearable.ChannelClient
 import com.google.android.gms.wearable.MessageEvent
 import com.google.android.gms.wearable.Wearable
 import com.google.android.gms.wearable.WearableListenerService
@@ -27,15 +27,8 @@ import kotlinx.coroutines.tasks.await
 import java.io.File
 import java.nio.ByteBuffer
 
-/**
- * PhoneListenerService - Watch로부터 메시지 및 파일을 수신하는 서비스
- * 
- * 역할:
- * - /WATCH_SENSING_STARTED: Watch에서 센싱이 시작되었음을 알림
- * - /TRIGGER_ALARM: Watch가 감지한 최적의 기상 시점에 알람 트리거
- * - /SLEEP_DATA_RESULT: 수면 데이터 결과 수신 (추후 UI 표시용)
- * - /sleep_log_transfer/*: Watch로부터 로그 파일 수신 (ChannelClient)
- */
+
+
 class PhoneListenerService : WearableListenerService() {
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -166,7 +159,7 @@ class PhoneListenerService : WearableListenerService() {
      * Watch로부터 Channel을 통한 파일 전송 수신
      * ChannelClient를 사용한 대용량 파일 전송
      */
-    override fun onChannelOpened(channel: Channel) {
+    override fun onChannelOpened(channel: ChannelClient.Channel) {
         super.onChannelOpened(channel)
         
         val channelPath = channel.path
@@ -183,7 +176,7 @@ class PhoneListenerService : WearableListenerService() {
     /**
      * Channel을 통해 로그 파일 수신 및 저장
      */
-    private suspend fun receiveLogFile(channel: Channel) {
+    private suspend fun receiveLogFile(channel: ChannelClient.Channel) {
         try {
             // 경로에서 파일명 추출 (예: /sleep_log_transfer/sensor_log_xxx.csv)
             val fileName = channel.path.substringAfterLast("/")
