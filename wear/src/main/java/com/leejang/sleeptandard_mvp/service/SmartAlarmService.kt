@@ -31,6 +31,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.tasks.await // [핵심] 이 친구가 .await()를 가능하게 합니다
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -435,6 +436,20 @@ class SmartAlarmService : Service(), SensorEventListener {
             
             // [자동 로그 전송] 알람 종료 시 로그 파일 자동 전송
             try {
+                // [중요] 로그 쓰기 완료 대기 (파일 누락 방지)
+                Log.i(TAG, "⏳ Waiting for log writing to complete...")
+                
+                // DataRepository 중단 및 완료 대기
+                if (::dataRepository.isInitialized) {
+                    withContext(Dispatchers.IO) {
+                        dataRepository.stopLogging()
+                        val completed = dataRepository.waitForCompletion(5000)
+                        if (!completed) {
+                            Log.w(TAG, "⚠️ Log writing timeout, but proceeding with transfer")
+                        }
+                    }
+                }
+                
                 Log.i(TAG, "🚀 Auto-transferring log files to phone...")
                 val transferManager = com.leejang.sleeptandard_mvp.backend.manager.LogFileTransferManager(this@SmartAlarmService)
                 val transferResult = transferManager.sendLatestLogsToPhone()
@@ -480,15 +495,17 @@ class SmartAlarmService : Service(), SensorEventListener {
         }
         
         // [안전성] DataRepository 초기화 확인 후 로깅 중단
+        // 참고: stopAndSendResultSuspend()에서 이미 처리됨
         if (::dataRepository.isInitialized) {
             try {
-                dataRepository.stopLogging()
-                Log.d(TAG, "DataRepository logging stopped")
+                // 이미 stopLogging()이 호출되었을 수 있음
+                // 중복 호출은 안전하지만 로그만 남김
+                Log.d(TAG, "DataRepository cleanup in onDestroy (may be already stopped)")
             } catch (e: Exception) {
-                Log.e(TAG, "DataRepository stop error", e)
+                Log.e(TAG, "DataRepository cleanup error", e)
             }
         } else {
-            Log.w(TAG, "DataRepository not initialized, skipping stop")
+            Log.w(TAG, "DataRepository not initialized, skipping cleanup")
         }
         
         // Coroutine Scope 취소
