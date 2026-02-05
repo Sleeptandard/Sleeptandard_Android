@@ -8,6 +8,7 @@ import java.io.FileOutputStream // [수정] FileWriter 대신 FileOutputStream �
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
@@ -38,6 +39,7 @@ class DataRepository(
 
     @Volatile private var isLogging = false
     private var logThread: Thread? = null
+    private var completionLatch: CountDownLatch? = null
 
     // [개선] 세션 시작 시간을 파일명에 포함하여 고유한 로그 파일 생성
     private val sessionTimestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault())
@@ -82,6 +84,7 @@ class DataRepository(
 
     private fun startConsumer() {
         isLogging = true
+        completionLatch = CountDownLatch(1)
         logThread = thread(start = true, name = "LogWriterThread") {
             val sensorFile = File(context.filesDir, sensorFileName)
             val inferenceFile = File(context.filesDir, inferenceFileName)
@@ -132,6 +135,8 @@ class DataRepository(
                 Log.e(TAG, "File Stream Error", e)
             } finally {
                 logThread = null
+                completionLatch?.countDown()  // 로그 쓰기 완료 신호
+                Log.d(TAG, "LogWriterThread completed, latch released")
             }
         }
 
@@ -143,6 +148,35 @@ class DataRepository(
         // 종료 신호 주입 (Spin-lock)
         while (!dataQueue.offer(LogEvent.Stop)) {
             dataQueue.poll()
+        }
+        Log.d(TAG, "Stop signal sent to LogWriterThread")
+    }
+    
+    /**
+     * 로그 쓰기 완료를 대기
+     * 
+     * @param timeoutMs 대기 시간 (밀리초)
+     * @return true: 정상 완료, false: 타임아웃
+     */
+    fun waitForCompletion(timeoutMs: Long = 5000): Boolean {
+        return try {
+            val latch = completionLatch
+            if (latch == null) {
+                Log.w(TAG, "CompletionLatch not initialized, assuming already completed")
+                true
+            } else {
+                val completed = latch.await(timeoutMs, TimeUnit.MILLISECONDS)
+                if (completed) {
+                    Log.i(TAG, "✅ Log writing completed successfully")
+                } else {
+                    Log.w(TAG, "⚠️ Log writing timeout after ${timeoutMs}ms")
+                }
+                completed
+            }
+        } catch (e: InterruptedException) {
+            Log.e(TAG, "Wait interrupted", e)
+            Thread.currentThread().interrupt()
+            false
         }
     }
 
