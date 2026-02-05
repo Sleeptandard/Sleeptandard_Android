@@ -98,7 +98,13 @@ class PhoneListenerService : WearableListenerService() {
             // [중요] 백업 알람 즉시 취소 (스마트 알람이 울렸으므로 목표 시간의 백업 알람 불필요)
             try {
                 val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
-                val backupIntent = Intent(this, AlarmReceiver::class.java)
+                // ✅ AlarmScheduler에서 설정한 것과 동일한 extras를 넣어야 PendingIntent를 찾을 수 있음
+                val backupIntent = Intent(this, AlarmReceiver::class.java).apply {
+                    putExtra("alarmId", currentAlarm.id)
+                    putExtra("ringtoneUri", currentAlarm.ringtoneUri)
+                    putExtra("volume", currentAlarm.volume)
+                    putExtra("vibrationEnabled", currentAlarm.vibrationEnabled)
+                }
                 val pendingIntent = PendingIntent.getBroadcast(
                     this,
                     currentAlarm.id, // 동일한 requestCode 사용
@@ -112,7 +118,7 @@ class PhoneListenerService : WearableListenerService() {
                     pendingIntent.cancel()
                     Log.i(TAG, "✅ Backup alarm cancelled for alarmId: ${currentAlarm.id}")
                 } else {
-                    Log.d(TAG, "No pending backup alarm found for alarmId: ${currentAlarm.id}")
+                    Log.w(TAG, "⚠️ No pending backup alarm found for alarmId: ${currentAlarm.id}")
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to cancel backup alarm", e)

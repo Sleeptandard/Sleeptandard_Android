@@ -103,7 +103,16 @@ class AlarmRingActivity : ComponentActivity() {
         // 3) 백업 알람 취소 (스마트 알람이 먼저 울렸을 경우 목표 시각의 백업 알람을 제거)
         try {
             val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
-            val intent = Intent(this, AlarmReceiver::class.java)
+            val alarmPrefs = AlarmPreferences(this)
+            val currentAlarm = alarmPrefs.loadAlarm()
+            
+            // ✅ AlarmScheduler에서 설정한 것과 동일한 extras를 넣어야 PendingIntent를 찾을 수 있음
+            val intent = Intent(this, AlarmReceiver::class.java).apply {
+                putExtra("alarmId", currentAlarm.id)
+                putExtra("ringtoneUri", currentAlarm.ringtoneUri)
+                putExtra("volume", currentAlarm.volume)
+                putExtra("vibrationEnabled", currentAlarm.vibrationEnabled)
+            }
             val pendingIntent = PendingIntent.getBroadcast(
                 this,
                 alarmId, // 동일한 requestCode 사용
@@ -117,7 +126,7 @@ class AlarmRingActivity : ComponentActivity() {
                 pendingIntent.cancel()
                 Log.i(TAG, "✅ Backup alarm cancelled for alarmId: $alarmId")
             } else {
-                Log.d(TAG, "No pending alarm found for alarmId: $alarmId")
+                Log.w(TAG, "⚠️ No pending alarm found for alarmId: $alarmId")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to cancel backup alarm", e)
