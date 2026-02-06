@@ -120,7 +120,7 @@ fun OptionsSection(
             ) {
                 Row(
                     modifier = Modifier
-                        .fillMaxSize(),
+                        .weight(1f),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
@@ -151,6 +151,7 @@ fun OptionsSection(
                             color = Color(0xFFEB3737)
                         ),
                     )
+                    Spacer(Modifier.height(4.dp))
                 }
             }
 
