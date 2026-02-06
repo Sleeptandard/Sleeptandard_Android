@@ -30,6 +30,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.sp
 
 @Composable
@@ -40,12 +41,20 @@ fun OptionsSection(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
     alarmName: String,
+    isSystemVibrationOn: Boolean,
 ) {
     val isNone = alarmName == "소리 없음"
 
     val textColor =
         if (isNone) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
         else MaterialTheme.colorScheme.onSurface
+
+    var vibSurfaceHeight = 54.dp
+
+    if (!isSystemVibrationOn) {
+        vibSurfaceHeight = 66.dp
+    }
+
 
     Column(
         modifier = modifier
@@ -100,35 +109,51 @@ fun OptionsSection(
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(54.dp),
+                .height(vibSurfaceHeight),
             color = Color.Transparent,
             onClick = onVibrationClick
         ) {
-            Row(
+            Column(
                 modifier = Modifier
-                    .fillMaxSize(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                    .fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Icon(
-                    painter = painterResource(AppIcons.HomeVibrate),
-                    contentDescription = "진동 설정",
-                    tint = MaterialTheme.colorScheme.tertiary
-                )
-                Spacer(Modifier.weight(1f))
-                Switch(
+                Row(
                     modifier = Modifier
-                        .scale(37f/52f),
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = Color.White,
-                        checkedTrackColor = Color(0xFFB1F7FC),
-                        uncheckedThumbColor = Color.White,
-                        uncheckedTrackColor = Color(0xFF858585),
-                    ),
-                    checked = checked,
-                    onCheckedChange = onCheckedChange
-                )
+                        .fillMaxSize(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Icon(
+                        painter = painterResource(AppIcons.HomeVibrate),
+                        contentDescription = "진동 설정",
+                        tint = MaterialTheme.colorScheme.tertiary
+                    )
+                    Spacer(Modifier.weight(1f))
+                    Switch(
+                        modifier = Modifier
+                            .scale(37f/52f),
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = Color(0xFFB1F7FC),
+                            uncheckedThumbColor = Color.White,
+                            uncheckedTrackColor = Color(0xFF858585),
+                        ),
+                        checked = checked,
+                        onCheckedChange = onCheckedChange
+                    )
+                }
+                if (!isSystemVibrationOn){
+                    Text(
+                        text = "※ 시스템 알림 진동세기가 0으로 설정되어 있어 울리지 않아요!",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontSize = 10.sp,
+                            color = Color(0xFFEB3737)
+                        ),
+                    )
+                }
             }
+
         }
     }
 }
@@ -153,4 +178,17 @@ fun ConfirmButton(
             )
         )
     }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun PreviewOptionsSection(){
+    OptionsSection(
+        onSoundClick = {},
+        onVibrationClick = {},
+        checked = true,
+        onCheckedChange = {},
+        alarmName = "Indigo Puff",
+        isSystemVibrationOn = false
+    )
 }

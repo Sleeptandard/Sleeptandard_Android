@@ -1,9 +1,6 @@
 package com.leejang.sleeptandard_mvp.Screen
 
 import android.annotation.SuppressLint
-import android.app.Activity
-import android.content.Context
-import android.content.ContextWrapper
 import android.media.RingtoneManager
 
 import androidx.compose.foundation.BorderStroke
@@ -75,6 +72,7 @@ import com.leejang.sleeptandard_mvp.ui.theme.AppIcons
 import com.leejang.sleeptandard_mvp.Prefs.CustomSituationItem
 import com.leejang.sleeptandard_mvp.Prefs.CustomSituationPreferences
 import com.leejang.sleeptandard_mvp.ui.theme.DarkBackground
+import com.leejang.sleeptandard_mvp.utility.getIsSystemVibrationOn
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -162,6 +160,14 @@ fun HomeScreen(
 
     // sound설정 모달창
     var showSoundSheet by remember { mutableStateOf(false) }
+
+    // 시스템 진동 세기 상태 관리
+    var isSystemVibrationOn by remember { mutableStateOf(false) }
+
+    // 화면이 켜질 때마다 시스템 설정값 확인
+    LaunchedEffect(Unit) {
+        isSystemVibrationOn = getIsSystemVibrationOn(context)
+    }
 
     // CustomSituationPrefs 불러오기
     LaunchedEffect(Unit) {
@@ -253,7 +259,8 @@ fun HomeScreen(
                     onVibrationClick = { selectedVibrationEnabled = !selectedVibrationEnabled },
                     checked = selectedVibrationEnabled,
                     onCheckedChange = { selectedVibrationEnabled = it },
-                    alarmName = alarmName
+                    alarmName = alarmName,
+                    isSystemVibrationOn = isSystemVibrationOn,
                 )
 
                 Spacer(modifier = Modifier.height(24.dp))
@@ -295,7 +302,7 @@ fun HomeScreen(
                                     volume = selectedVolume
                                 )
                             },
-                            defaultVolume = alarmViewModel.alarm.volume
+                            defaultVolume = alarmViewModel.alarm.volume,
                         )
                     }
                 }
