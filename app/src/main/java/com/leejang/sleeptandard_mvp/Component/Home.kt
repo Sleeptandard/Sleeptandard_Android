@@ -52,7 +52,7 @@ fun OptionsSection(
     var vibSurfaceHeight = 54.dp
 
     if (!isSystemVibrationOn) {
-        vibSurfaceHeight = 66.dp
+        vibSurfaceHeight = 70.dp
     }
 
 
@@ -147,7 +147,7 @@ fun OptionsSection(
                     Text(
                         text = "※ 시스템 알림 진동세기가 0으로 설정되어 있어 진동이 울리지 않아요!",
                         style = MaterialTheme.typography.bodySmall.copy(
-                            fontSize = 10.sp,
+                            fontSize = 11.sp,
                             color = Color(0xFFEB3737)
                         ),
                     )

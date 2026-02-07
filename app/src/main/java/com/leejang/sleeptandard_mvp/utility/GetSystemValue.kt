@@ -4,45 +4,29 @@ import android.content.Context
 import android.provider.Settings
 import android.util.Log
 
-/**
- * 시스템의 알림 진동 세기를 가져옵니다. (0 ~ 3 또는 0 ~ 5, 기기마다 다름)
- * 대부분의 기기에서 0은 진동 꺼짐을 의미합니다.
- */
-fun getIsSystemVibrationOn2(context: Context): Boolean {
-    val vibrationSetting = try {
-        Settings.System.getInt(context.contentResolver, "vibration_notif_intensity")
-    }catch(e: Exception){
-        Log.d("VibrationSetting", "Exception: $e")
-    }
-    Log.d("VibrationSetting", "vibrationSetting: $vibrationSetting")
-
-    return try {
-        // 알림 진동 세기 키값은 대중적으로 "vibration_notif_intensity"를 사용합니다.
-        if(vibrationSetting > 0){
-            true
-        }else false
-    } catch (e: Exception) {
-        // 해당 키가 없거나 접근 불가 시 기본값 1(진동 켜짐 가정) 반환
-        true
-    }
-}
-
-fun getIsSystemVibrationOn(context: Context): Boolean {
+fun getIsNotificationVibrationOn(context: Context): Boolean {
     val resolver = context.contentResolver
     Log.d("VibrationSetting", "=== 진동 세기 체크 시작 ===") // ✅ 진입 확인용
 
     val keys = listOf(
+        // 삼성 S10 알림 진동세기 찾는 키
+        "SEM_VIBRATION_NOTIFICATION_INTENSITY",
+        // 이 밑으로는 제미나이 피셜
+        // 삼성
+        "VIB_NOTI_MAGNITUDE",
+        // 안드로이드
         "vibration_notif_intensity",
         "notification_vibration_intensity",
         "vibrate_on_notifications",
-        "VIB_NOTI_MAGNITUDE",
-        "SEM_VIBRATION_NOTIFICATION_INTENSITY"
     )
 
     for (key in keys) {
         try {
+            // 진동 세기 찾아보기
             val intensity = Settings.System.getInt(resolver, key)
             Log.d("VibrationSetting", "✅ 찾은 키: $key, 값: $intensity")
+
+            // 진동 세기가 0보다 큽니까?
             return intensity > 0
         } catch (e: Settings.SettingNotFoundException) {
             // 키가 없으면 로그를 남기고 다음으로 이동

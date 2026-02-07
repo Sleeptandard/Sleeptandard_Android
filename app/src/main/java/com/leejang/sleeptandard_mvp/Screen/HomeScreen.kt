@@ -72,7 +72,7 @@ import com.leejang.sleeptandard_mvp.ui.theme.AppIcons
 import com.leejang.sleeptandard_mvp.Prefs.CustomSituationItem
 import com.leejang.sleeptandard_mvp.Prefs.CustomSituationPreferences
 import com.leejang.sleeptandard_mvp.ui.theme.DarkBackground
-import com.leejang.sleeptandard_mvp.utility.getIsSystemVibrationOn
+import com.leejang.sleeptandard_mvp.utility.getIsNotificationVibrationOn
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -166,7 +166,7 @@ fun HomeScreen(
 
     // 화면이 켜질 때마다 시스템 설정값 확인
     LaunchedEffect(Unit) {
-        isSystemVibrationOn = getIsSystemVibrationOn(context)
+        isSystemVibrationOn = getIsNotificationVibrationOn(context)
     }
 
     // CustomSituationPrefs 불러오기
