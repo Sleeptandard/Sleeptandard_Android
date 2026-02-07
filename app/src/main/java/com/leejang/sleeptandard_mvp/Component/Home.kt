@@ -23,7 +23,6 @@ import androidx.compose.ui.unit.dp
 import com.leejang.sleeptandard_mvp.ui.theme.AppIcons
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.SwitchDefaults
@@ -49,28 +48,28 @@ fun OptionsSection(
         if (isNone) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
         else MaterialTheme.colorScheme.onSurface
 
+    var entireHeight = 140.dp
     var vibSurfaceHeight = 54.dp
-
-    var togglechecked = checked
-    var toggleEnabled = checked
+    var vibTogglechecked = checked
+    var vibToggleEnabled = checked
 
     if (!isSystemVibrationOn) {
+        entireHeight = 156.dp
         vibSurfaceHeight = 70.dp
-        togglechecked = false
-        toggleEnabled = false
+        vibTogglechecked = false
+        vibToggleEnabled = false
     }
-
 
 
     Column(
         modifier = modifier
-            .height(140.dp)
+            .height(entireHeight)
             .background(
                 color = MaterialTheme.colorScheme.surface,
                 shape = RoundedCornerShape(size = 26.dp)
             )
             .padding(horizontal = 18.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp)
+        verticalArrangement = Arrangement.SpaceEvenly
     ) {
 
         Surface(
@@ -82,7 +81,7 @@ fun OptionsSection(
         ) {
             Row(
                 modifier = Modifier
-                    .fillMaxSize(),
+                    .weight(1f),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -145,9 +144,9 @@ fun OptionsSection(
                             uncheckedThumbColor = Color.White,
                             uncheckedTrackColor = Color(0xFF858585),
                         ),
-                        checked = togglechecked,
+                        checked = vibTogglechecked,
                         onCheckedChange = onCheckedChange,
-                        enabled = toggleEnabled
+                        enabled = vibToggleEnabled
                     )
                 }
                 if (!isSystemVibrationOn){
