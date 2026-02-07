@@ -56,7 +56,7 @@ fun AlarmSoundSettingContent(
     onClose: () -> Unit,
     onSelectUriString: (String) -> Unit,
     onVolumeChange: (Int) -> Unit, // ✅ 볼륨 변경 콜백 추가
-    defaultVolume: Int = 5
+    defaultVolume: Int = 5,
 ) {
     val context = LocalContext.current
 
