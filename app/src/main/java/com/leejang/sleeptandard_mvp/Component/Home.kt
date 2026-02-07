@@ -63,7 +63,7 @@ fun OptionsSection(
                 color = MaterialTheme.colorScheme.surface,
                 shape = RoundedCornerShape(size = 26.dp)
             )
-            .padding(horizontal = 18.dp, vertical = 8.dp),
+            .padding(horizontal = 18.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
 
@@ -145,7 +145,7 @@ fun OptionsSection(
                 }
                 if (!isSystemVibrationOn){
                     Text(
-                        text = "※ 시스템 알림 진동세기가 0으로 설정되어 있어 울리지 않아요!",
+                        text = "※ 시스템 알림 진동세기가 0으로 설정되어 있어 진동이 울리지 않아요!",
                         style = MaterialTheme.typography.bodySmall.copy(
                             fontSize = 10.sp,
                             color = Color(0xFFEB3737)
