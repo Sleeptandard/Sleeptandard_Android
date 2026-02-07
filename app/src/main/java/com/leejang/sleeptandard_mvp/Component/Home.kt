@@ -51,9 +51,15 @@ fun OptionsSection(
 
     var vibSurfaceHeight = 54.dp
 
+    var togglechecked = checked
+    var toggleEnabled = checked
+
     if (!isSystemVibrationOn) {
         vibSurfaceHeight = 70.dp
+        togglechecked = false
+        toggleEnabled = false
     }
+
 
 
     Column(
@@ -139,8 +145,9 @@ fun OptionsSection(
                             uncheckedThumbColor = Color.White,
                             uncheckedTrackColor = Color(0xFF858585),
                         ),
-                        checked = checked,
-                        onCheckedChange = onCheckedChange
+                        checked = togglechecked,
+                        onCheckedChange = onCheckedChange,
+                        enabled = toggleEnabled
                     )
                 }
                 if (!isSystemVibrationOn){

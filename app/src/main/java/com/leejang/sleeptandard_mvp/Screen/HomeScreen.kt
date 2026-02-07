@@ -2,6 +2,7 @@ package com.leejang.sleeptandard_mvp.Screen
 
 import android.annotation.SuppressLint
 import android.media.RingtoneManager
+import android.util.Log
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
@@ -55,9 +56,13 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.rememberCoroutineScope
 
 import androidx.core.net.toUri
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 
 import com.leejang.sleeptandard_mvp.ClassFile.AlarmScheduler
 import com.leejang.sleeptandard_mvp.Component.AlarmSoundSettingContent
@@ -86,37 +91,36 @@ fun HomeScreen(
     onClickConfirm: ()-> Unit,
 ) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope() // ✅ 코루틴 스코프 선언
+    val scope = rememberCoroutineScope() // 코루틴 스코프 선언
+    val alarmPrefs = remember(context) { AlarmPreferences(context) }  // 알람 SharedPreference 가져오기
 
-    // 알람뷰모델에 넣을 값들임.
+    /**** 알람뷰모델에 넣을 값들임 ****/
     var selectedHour by remember { mutableIntStateOf(alarmViewModel.alarm.hour) }
     var selectedMinute by remember { mutableIntStateOf(alarmViewModel.alarm.minute) }
     var selectedIsAm by remember { mutableStateOf(alarmViewModel.alarm.isAm) }
-    /** 알람음 기억해놓기 **/
     var selectedRingtoneUri by remember { mutableStateOf(alarmViewModel.alarm.ringtoneUri) }
     var selectedVibrationEnabled by remember { mutableStateOf(alarmViewModel.alarm.vibrationEnabled) }
     var selectedVolume by remember { mutableIntStateOf(alarmViewModel.alarm.volume) }
 
-    // 알람 SharedPreference 가져오기
-    val alarmPrefs = remember(context) { AlarmPreferences(context) }  // (선택) 매번 생성 안 하게
 
-    // 알람음 이름
+
+    // 옵션 컴포넌트에 띄울 알람음 이름
     var alarmName by remember { mutableStateOf("") }
+
     // 타임피커 멈춤 트리거
     var stopSignal by remember { mutableIntStateOf(0) }
 
-    // 메모 모달창 띄우는 트리거
-    var showSituationModal by remember { mutableStateOf(false) }
-    // ✅ 모달에서 선택한 상태(여러 개 토글 가능)
-    var selectedSituation by remember { mutableStateOf(setOf<String>()) }
+    /****** 메모장 관련 녀석들 ******/
+    var showSituationModal by remember { mutableStateOf(false) }     // 메모 모달창 띄우는 트리거
+    var selectedSituation by remember { mutableStateOf(setOf<String>()) }    // 메모 모달창에서 선택한 상태(여러 개 토글 가능)
 
-    // 상태 종류
+    // 메모장에 들어가는 상태 데이터 클래스 정의
     data class SituationOption(
         val id: String,
         val label: String,
         val iconRes: Int?
     )
-    // 기본 상태 (커스텀 x)
+    // 기본 상태
     var situationOptions = listOf(
         SituationOption("custom", "직접 추가", AppIcons.MemoPencil),
         SituationOption("sick", "아픔", AppIcons.MemoAid),
@@ -158,15 +162,31 @@ fun HomeScreen(
     val spacing = 12.dp
     val gridHeight = itemHeight * visibleRows + spacing * (visibleRows - 1)
 
-    // sound설정 모달창
+    /** 사운드 설정창 띄우는 트리거 **/
     var showSoundSheet by remember { mutableStateOf(false) }
 
+    /** 진동 세기 감지하는데 사용하는 녀석들 **/
     // 시스템 진동 세기 상태 관리
-    var isSystemVibrationOn by remember { mutableStateOf(false) }
-
+    var isNotificationVibrationOn by remember { mutableStateOf(false) }
     // 화면이 켜질 때마다 시스템 설정값 확인
-    LaunchedEffect(Unit) {
-        isSystemVibrationOn = getIsNotificationVibrationOn(context)
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    // 화면이 다시 활성화될 때마다(Resume) 실행되는 로직
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                Log.d("VibrationSetting", "앱으로 돌아옴: 진동 세기 다시 체크")
+                isNotificationVibrationOn = getIsNotificationVibrationOn(context)
+            }
+        }
+
+        // 옵저버 등록
+        lifecycleOwner.lifecycle.addObserver(observer)
+
+        // 컴포저블이 파괴될 때 옵저버 제거
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
     }
 
     // CustomSituationPrefs 불러오기
@@ -260,7 +280,7 @@ fun HomeScreen(
                     checked = selectedVibrationEnabled,
                     onCheckedChange = { selectedVibrationEnabled = it },
                     alarmName = alarmName,
-                    isSystemVibrationOn = isSystemVibrationOn,
+                    isSystemVibrationOn = isNotificationVibrationOn,
                 )
 
                 Spacer(modifier = Modifier.height(24.dp))
