@@ -276,7 +276,25 @@ fun HomeScreen(
                     },
 
                     // 진동 토글
-                    onVibrationClick = { selectedVibrationEnabled = !selectedVibrationEnabled },
+                    onVibrationClick = {
+                        if(isNotificationVibrationOn){
+                            selectedVibrationEnabled = !selectedVibrationEnabled
+                        }
+                        else{
+                            try {
+                                // 안드로이드 시스템 소리 및 진동 설정창 호출
+                                val intent = android.content.Intent(android.provider.Settings.ACTION_SOUND_SETTINGS)
+                                context.startActivity(intent)
+
+                                // (선택 사항) 사용자에게 안내 메시지 표시
+                                android.widget.Toast.makeText(context, "알림 진동 세기를 조절해주세요.", android.widget.Toast.LENGTH_SHORT).show()
+                            } catch (e: Exception) {
+                                // 드문 경우지만 진동 설정창에 직접 접근이 안 될 때 일반 설정창으로 보냄
+                                val intent = android.content.Intent(android.provider.Settings.ACTION_SETTINGS)
+                                context.startActivity(intent)
+                            }
+                        }
+                                       },
                     checked = selectedVibrationEnabled,
                     onCheckedChange = { selectedVibrationEnabled = it },
                     alarmName = alarmName,
@@ -294,7 +312,8 @@ fun HomeScreen(
 
                 /***사운드 선택 모달***/
                 if (showSoundSheet) {
-                    val soundSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+                    val soundSheetState =
+                        rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
                     ModalBottomSheet(
                         onDismissRequest = { showSoundSheet = false },
