@@ -1,6 +1,9 @@
 package com.leejang.sleeptandard_mvp
 
+import android.content.Context
 import android.os.Bundle
+import android.provider.Settings
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -15,6 +18,7 @@ import com.leejang.sleeptandard_mvp.Permission.checkFullScreenIntentPermission
 import com.leejang.sleeptandard_mvp.Permission.checkNotificationPermission
 import com.leejang.sleeptandard_mvp.Permission.checkSetExactAlarms
 import com.leejang.sleeptandard_mvp.Prefs.AlarmPreferences
+import com.leejang.sleeptandard_mvp.utility.getIsSystemVibrationOn
 
 class MainActivity : ComponentActivity() {
 
@@ -75,4 +79,6 @@ class MainActivity : ComponentActivity() {
             else -> Screen.Home.route                                 // 4순위: 일반적인 경우
         }
     }
+
 }
+
