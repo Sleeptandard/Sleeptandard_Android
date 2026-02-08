@@ -105,8 +105,8 @@ fun AlarmSoundSettingContent(
     fun playPreview(uri: Uri) {
         stopPreview()
 
-        // 실제 알람과 동일한 환경을 위해 시스템 볼륨을 최대치로 설정
-        val systemMax = audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM)
+        // 실제 알람과 동일한 환경을 위해 시스템 볼륨을 최대치(*0.7)로 설정
+        val systemMax = (audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM) * 0.7f).toInt()
         audioManager.setStreamVolume(AudioManager.STREAM_ALARM, systemMax, 0)
 
         val r = RingtoneManager.getRingtone(context, uri) ?: return

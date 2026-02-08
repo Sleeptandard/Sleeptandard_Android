@@ -51,7 +51,7 @@ fun OptionsSection(
     var entireHeight = 140.dp
     var vibSurfaceHeight = 54.dp
     var vibTogglechecked = checked
-    var vibToggleEnabled = checked
+    var vibToggleEnabled = true
 
     if (!isSystemVibrationOn) {
         entireHeight = 156.dp
