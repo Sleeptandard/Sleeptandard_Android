@@ -75,4 +75,6 @@ class MainActivity : ComponentActivity() {
             else -> Screen.Home.route                                 // 4순위: 일반적인 경우
         }
     }
+
 }
+
