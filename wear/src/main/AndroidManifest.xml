@@ -18,6 +18,10 @@
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true">
+        
+        <!-- Attribution Tag for Sensor Access (Android 12+) -->
+        <attribution android:tag="sensors" android:label="@string/app_name" />
+        
         <meta-data
             android:name="com.google.android.wearable.standalone"
             android:value="false" />
