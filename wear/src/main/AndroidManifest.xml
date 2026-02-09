@@ -5,6 +5,7 @@
     <!-- Foreground Service & Health Tracking Permissions -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_HEALTH" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     
@@ -39,6 +40,11 @@
         <service
             android:name="com.leejang.sleeptandard_mvp.service.SmartAlarmService"
             android:foregroundServiceType="health"
+            android:exported="false" />
+
+        <service
+            android:name="com.leejang.sleeptandard_mvp.backend.service.LogTransferService"
+            android:foregroundServiceType="dataSync"
             android:exported="false" />
 
         <service

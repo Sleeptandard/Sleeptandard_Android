@@ -1,5 +1,6 @@
 package com.leejang.sleeptandard_mvp.ui
 
+import android.content.Intent
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -30,6 +31,7 @@ import androidx.compose.ui.unit.sp
 import androidx.wear.compose.material.Icon
 import androidx.wear.tooling.preview.devices.WearDevices
 import com.leejang.sleeptandard_mvp.backend.manager.LogFileTransferManager
+import com.leejang.sleeptandard_mvp.backend.service.LogTransferService
 import com.leejang.sleeptandard_mvp.wear.R
 import kotlinx.coroutines.launch
 
@@ -92,26 +94,11 @@ fun WearHomeScreen() {
                             .size(32.dp)
                             .background(Color(0xFF336699), shape = CircleShape)
                             .clickable {
-                                scope.launch {
-                                    Toast.makeText(context, "로그 재전송 중...", Toast.LENGTH_SHORT).show()
-                                    
-                                    val transferManager = LogFileTransferManager(context)
-                                    val result = transferManager.sendLatestLogsToPhone()
-                                    
-                                    result.onSuccess { count ->
-                                        Toast.makeText(
-                                            context,
-                                            "✅ $count 개 파일 재전송 완료",
-                                            Toast.LENGTH_LONG
-                                        ).show()
-                                    }.onFailure { error ->
-                                        Toast.makeText(
-                                            context,
-                                            "❌ 재전송 실패: ${error.message}",
-                                            Toast.LENGTH_LONG
-                                        ).show()
-                                    }
-                                }
+                                Toast.makeText(context, "로그 재전송 중...", Toast.LENGTH_SHORT).show()
+                                
+                                // ForegroundService로 전송 시작
+                                val intent = Intent(context, LogTransferService::class.java)
+                                context.startForegroundService(intent)
                             }
                             .padding(6.dp),
                         contentAlignment = Alignment.Center
@@ -130,21 +117,23 @@ fun WearHomeScreen() {
                             .size(32.dp)
                             .background(Color(0xFF555555), shape = CircleShape)
                             .clickable {
-                                val transferManager = LogFileTransferManager(context)
-                                val stats = transferManager.getLogFileStats()
-                                
-                                if (stats.fileCount == 0) {
-                                    Toast.makeText(
-                                        context,
-                                        "로그 파일 없음\n(알람 종료 시 자동 전송됨)",
-                                        Toast.LENGTH_LONG
-                                    ).show()
-                                } else {
-                                    Toast.makeText(
-                                        context,
-                                        "📊 ${stats.fileCount}개 파일 (%.1f MB)".format(stats.totalSizeMB),
-                                        Toast.LENGTH_LONG
-                                    ).show()
+                                scope.launch {
+                                    val transferManager = LogFileTransferManager(context)
+                                    val stats = transferManager.getLogFileStats()
+                                    
+                                    if (stats.fileCount == 0) {
+                                        Toast.makeText(
+                                            context,
+                                            "로그 파일 없음\n(알람 종료 시 자동 전송됨)",
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                    } else {
+                                        Toast.makeText(
+                                            context,
+                                            "📊 ${stats.fileCount}개 파일 (%.1f MB)".format(stats.totalSizeMB),
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                    }
                                 }
                             }
                             .padding(6.dp),
