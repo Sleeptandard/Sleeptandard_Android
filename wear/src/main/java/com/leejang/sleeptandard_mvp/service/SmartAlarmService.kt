@@ -129,7 +129,12 @@ class SmartAlarmService : Service(), SensorEventListener {
                 Log.d(TAG, "WakeLock acquired")
             }
 
-            sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
+            // Android 12+ attributionTag 에러 방지
+            sensorManager = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                createAttributionContext(null).getSystemService(SENSOR_SERVICE) as SensorManager
+            } else {
+                getSystemService(SENSOR_SERVICE) as SensorManager
+            }
             dataRepository = DataRepository(this, situationLabel) // [수정] 라벨 전달
             userStatsManager = UserStatsManager(this)
             messageClient = Wearable.getMessageClient(this)
