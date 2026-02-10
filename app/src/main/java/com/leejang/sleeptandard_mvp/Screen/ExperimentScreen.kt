@@ -87,7 +87,7 @@ fun RollingTextNoDisappear(
         )
     }
 }
-
+/*
 @Composable
 fun StackedRollingText(
     texts: List<String>,
@@ -164,7 +164,7 @@ fun StackedRollingText(
         }
     }
 }
-
+*/
 @Composable
 fun StackedRollingTextsOnly(
     texts: List<String>,
@@ -228,38 +228,5 @@ fun StackedRollingTextsOnly(
 
 @Composable
 fun ExperimentScreen() {
-
-    val list = listOf("알람을 설정해볼까요?", "오늘도 화이팅!", "기상 시간을 지켜드릴게요")
-    var i by remember { mutableIntStateOf(0) }
-/*
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(1800)
-            i = (i + 1) % list.size
-        }
-    }
-*/
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-
-        Spacer(modifier = Modifier.height(100.dp))
-
-        StackedRollingText(
-            texts = list,
-            modifier = Modifier.fillMaxWidth(),
-            stayMs = 1200L,
-            moveMs = 320,
-            shift = 18.dp,
-            maxLines = 3
-        )
-        /*
-        RollingTextNoDisappear(
-            text = list[i],
-            modifier = Modifier.fillMaxWidth()
-        )
-        */
-    }
 
 }
