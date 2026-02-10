@@ -315,11 +315,17 @@ fun SendingDataScreen(
 
 @Composable
 private fun FileItemCard(file: File, onDelete: () -> Unit) {
+    // 파일 크기 및 내용 검증
+    val fileSize = file.length()
+    val isSmall = fileSize < 100
+    val lineCount = try { file.readLines().size } catch (e: Exception) { 0 }
+    val isEmpty = lineCount <= 1
+    
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(
-            containerColor = Color(0x1AF1F1F1)
+            containerColor = if (isEmpty || isSmall) Color(0x1AFF5252) else Color(0x1AF1F1F1)
         )
     ) {
         Row(
@@ -332,16 +338,27 @@ private fun FileItemCard(file: File, onDelete: () -> Unit) {
             Column(
                 modifier = Modifier.weight(1f)
             ) {
-                Text(
-                    text = file.name.removePrefix("received_"),
-                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
-                    maxLines = 1
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = file.name.removePrefix("received_"),
+                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                        maxLines = 1
+                    )
+                    if (isEmpty) {
+                        Text(
+                            text = "⚠️",
+                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp)
+                        )
+                    }
+                }
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    text = formatFileInfo(file),
+                    text = formatFileInfo(file, isEmpty, lineCount),
                     style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
-                    color = Color(0x99F1F1F1)
+                    color = if (isEmpty) Color(0xFFFF8A80) else Color(0x99F1F1F1)
                 )
             }
             
@@ -350,9 +367,13 @@ private fun FileItemCard(file: File, onDelete: () -> Unit) {
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text(
-                    text = "%.1f MB".format(file.length() / (1024.0 * 1024.0)),
+                    text = if (fileSize < 1024 * 1024) {
+                        "%.1f KB".format(fileSize / 1024.0)
+                    } else {
+                        "%.1f MB".format(fileSize / (1024.0 * 1024.0))
+                    },
                     style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
-                    color = Color(0xFFE0F5FD)
+                    color = if (isEmpty) Color(0xFFFF8A80) else Color(0xFFE0F5FD)
                 )
                 
                 // 삭제 버튼
@@ -376,10 +397,17 @@ private fun FileItemCard(file: File, onDelete: () -> Unit) {
     }
 }
 
-private fun formatFileInfo(file: File): String {
+private fun formatFileInfo(file: File, isEmpty: Boolean, lineCount: Int): String {
     val dateFormat = SimpleDateFormat("MM/dd HH:mm", Locale.getDefault())
     val date = dateFormat.format(Date(file.lastModified()))
-    return "수신: $date"
+    
+    return if (isEmpty) {
+        "⚠️ 데이터 없음 (헤더만 존재) - 수신: $date"
+    } else if (lineCount < 5) {
+        "⚠️ 데이터 부족 ($lineCount 줄) - 수신: $date"
+    } else {
+        "수신: $date (${lineCount}줄)"
+    }
 }
 
 private fun shareLogFiles(context: android.content.Context, files: List<File>) {
@@ -387,6 +415,46 @@ private fun shareLogFiles(context: android.content.Context, files: List<File>) {
         if (files.isEmpty()) {
             Toast.makeText(context, "공유할 파일이 없습니다", Toast.LENGTH_SHORT).show()
             return
+        }
+
+        // [검증] 파일 크기 및 내용 확인
+        val emptyFiles = mutableListOf<String>()
+        val smallFiles = mutableListOf<String>()
+        
+        files.forEach { file ->
+            val fileSize = file.length()
+            
+            // 100바이트 미만인 파일
+            if (fileSize < 100) {
+                smallFiles.add(file.name.removePrefix("received_"))
+            }
+            
+            // 헤더만 있고 데이터가 없는 파일 (1줄 이하)
+            try {
+                val lineCount = file.readLines().size
+                if (lineCount <= 1) {
+                    emptyFiles.add(file.name.removePrefix("received_"))
+                }
+            } catch (e: Exception) {
+                // 파일 읽기 실패 시 무시
+            }
+        }
+        
+        // [경고] 빈 파일이나 작은 파일이 있으면 사용자에게 알림
+        if (emptyFiles.isNotEmpty()) {
+            val emptyFileNames = emptyFiles.joinToString(", ")
+            Toast.makeText(
+                context,
+                "⚠️ 일부 파일에 데이터가 없습니다:\n$emptyFileNames\n\n공유 앱에서 '지원하지 않음' 오류가 발생할 수 있습니다.",
+                Toast.LENGTH_LONG
+            ).show()
+        } else if (smallFiles.isNotEmpty()) {
+            val smallFileNames = smallFiles.joinToString(", ")
+            Toast.makeText(
+                context,
+                "⚠️ 일부 파일 크기가 매우 작습니다:\n$smallFileNames\n\n데이터가 부족할 수 있습니다.",
+                Toast.LENGTH_LONG
+            ).show()
         }
 
         val uris = files.map { file ->

@@ -135,7 +135,11 @@ class SmartAlarmService : Service(), SensorEventListener {
             } else {
                 getSystemService(SENSOR_SERVICE) as SensorManager
             }
+            
+            Log.i(TAG, "🔧 Initializing DataRepository with label: $situationLabel")
             dataRepository = DataRepository(this, situationLabel) // [수정] 라벨 전달
+            Log.i(TAG, "✅ DataRepository initialized successfully")
+            
             userStatsManager = UserStatsManager(this)
             messageClient = Wearable.getMessageClient(this)
             inferenceManager = InferenceManager(this)
@@ -251,6 +255,8 @@ class SmartAlarmService : Service(), SensorEventListener {
     private fun runInferencePipeline(timestamp: Long) {
         val hrSnapshot = hrWindow.toList()
         val accSnapshot = accWindow.toList()
+        
+        Log.d(TAG, "🔍 runInferencePipeline called | HR samples: ${hrSnapshot.size}, ACC samples: ${accSnapshot.size}")
 
         serviceScope.launch {
             try {
@@ -276,9 +282,11 @@ class SmartAlarmService : Service(), SensorEventListener {
                 val currentStage = inferenceManager.predict(accSnapshot, hrFeatures)
 
                 inferenceHistory.add(StageEntry(timestamp, currentStage.name))
-                dataRepository.enqueueInferenceLog(timestamp, "${currentStage.name},0.0,$featureString")
-
-                Log.d(TAG, "Inference Result: $currentStage")
+                
+                val logData = "${currentStage.name},0.0,$featureString"
+                Log.i(TAG, "📊 Inference Result: $currentStage | Features: $featureString")
+                dataRepository.enqueueInferenceLog(timestamp, logData)
+                Log.d(TAG, "📝 Inference log enqueued successfully")
                 checkSmartWindowAndTrigger(timestamp, currentStage)
 
             } catch (e: Exception) {
