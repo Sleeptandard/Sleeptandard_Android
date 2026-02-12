@@ -69,7 +69,11 @@ class DataRepository(
     }
 
     fun enqueueInferenceLog(timestamp: Long, result: String) {
-        if (!isLogging) return
+        if (!isLogging) {
+            Log.w(TAG, "⚠️ enqueueInferenceLog called but isLogging=false! Data will be lost!")
+            return
+        }
+        Log.d(TAG, "📊 Enqueueing inference log: $result")
         offerWithDropOldest(LogEvent.InferenceLog(timestamp, result))
     }
 
@@ -88,11 +92,19 @@ class DataRepository(
         logThread = thread(start = true, name = "LogWriterThread") {
             val sensorFile = File(context.filesDir, sensorFileName)
             val inferenceFile = File(context.filesDir, inferenceFileName)
+            
+            Log.i(TAG, "📁 Creating log files:")
+            Log.i(TAG, "  - Sensor: ${sensorFile.absolutePath}")
+            Log.i(TAG, "  - Inference: ${inferenceFile.absolutePath}")
 
             ensureHeader(sensorFile, "Timestamp,Type,X,Y,Z\n")
             ensureHeader(inferenceFile, "Tag,Timestamp,Result,Details\n")
+            
+            Log.i(TAG, "✅ Log files initialized, starting consumer loop...")
 
             try {
+                var sensorDataCount = 0L
+                var inferenceLogCount = 0L
 
                 // [핵심 수정] FileWriter -> FileOutputStream으로 변경하여 bufferedWriter() 확장 함수 사용 가능하게 함
                 FileOutputStream(sensorFile, true).bufferedWriter().use { sensorWriter ->
@@ -106,16 +118,21 @@ class DataRepository(
                                 when (event) {
                                     is LogEvent.SensorData -> {
                                         sensorWriter.write("${event.timestamp},${event.type},${event.x},${event.y},${event.z}\n")
+                                        sensorDataCount++
                                     }
 
                                     is LogEvent.InferenceLog -> {
-                                        inferenceWriter.write("INFERENCE_LOG,${event.timestamp},${event.result}\n")
+                                        val line = "INFERENCE_LOG,${event.timestamp},${event.result}\n"
+                                        inferenceWriter.write(line)
                                         inferenceWriter.flush()
+                                        inferenceLogCount++
+                                        Log.d(TAG, "✅ Inference log written to file (#$inferenceLogCount): ${event.result}")
                                     }
 
                                     is LogEvent.Stop -> {
                                         // 더 이상 새로운 데이터를 받지 않겠다고 플래그만 내림.
                                         // while 문의 !dataQueue.isEmpty() 조건에 의해 남은 데이터를 모두 처리하게 됨.
+                                        Log.i(TAG, "🛑 Stop signal received in writer thread")
                                         isLogging = false
                                     }
                                 }
@@ -129,6 +146,12 @@ class DataRepository(
                         // 루프 종료 후 최종 플러시
                         sensorWriter.flush()
                         inferenceWriter.flush()
+                        
+                        Log.i(TAG, "📊 Final Statistics:")
+                        Log.i(TAG, "  - Sensor data written: $sensorDataCount lines")
+                        Log.i(TAG, "  - Inference logs written: $inferenceLogCount lines")
+                        Log.i(TAG, "  - Sensor file size: ${sensorFile.length()} bytes")
+                        Log.i(TAG, "  - Inference file size: ${inferenceFile.length()} bytes")
                     }
                 }
             } catch (e: Exception) {
@@ -144,12 +167,13 @@ class DataRepository(
     }
 
     fun stopLogging() {
+        Log.i(TAG, "🛑 stopLogging() called | Queue size: ${dataQueue.size}")
         isLogging = false
         // 종료 신호 주입 (Spin-lock)
         while (!dataQueue.offer(LogEvent.Stop)) {
             dataQueue.poll()
         }
-        Log.d(TAG, "Stop signal sent to LogWriterThread")
+        Log.d(TAG, "Stop signal sent to LogWriterThread | Remaining queue items: ${dataQueue.size}")
     }
     
     /**
@@ -185,8 +209,13 @@ class DataRepository(
             try {
                 // [핵심 수정] 파일 생성 시에도 FileOutputStream 사용 (Byte Array 방식이 더 안전)
                 FileOutputStream(file).use { it.write(header.toByteArray()) }
-            } catch (e: Exception) { e.printStackTrace() }
+                Log.i(TAG, "✅ Created file with header: ${file.name}")
+            } catch (e: Exception) {
+                Log.e(TAG, "❌ Failed to create header for ${file.name}", e)
+                e.printStackTrace()
+            }
+        } else {
+            Log.d(TAG, "📄 File already exists: ${file.name}")
         }
-
     }
 }

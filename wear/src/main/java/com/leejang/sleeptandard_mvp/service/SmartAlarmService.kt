@@ -135,7 +135,11 @@ class SmartAlarmService : Service(), SensorEventListener {
             } else {
                 getSystemService(SENSOR_SERVICE) as SensorManager
             }
+            
+            Log.i(TAG, "🔧 Initializing DataRepository with label: $situationLabel")
             dataRepository = DataRepository(this, situationLabel) // [수정] 라벨 전달
+            Log.i(TAG, "✅ DataRepository initialized successfully")
+            
             userStatsManager = UserStatsManager(this)
             messageClient = Wearable.getMessageClient(this)
             inferenceManager = InferenceManager(this)
@@ -251,6 +255,8 @@ class SmartAlarmService : Service(), SensorEventListener {
     private fun runInferencePipeline(timestamp: Long) {
         val hrSnapshot = hrWindow.toList()
         val accSnapshot = accWindow.toList()
+        
+        Log.d(TAG, "🔍 runInferencePipeline called | HR samples: ${hrSnapshot.size}, ACC samples: ${accSnapshot.size}")
 
         serviceScope.launch {
             try {
@@ -276,9 +282,11 @@ class SmartAlarmService : Service(), SensorEventListener {
                 val currentStage = inferenceManager.predict(accSnapshot, hrFeatures)
 
                 inferenceHistory.add(StageEntry(timestamp, currentStage.name))
-                dataRepository.enqueueInferenceLog(timestamp, "${currentStage.name},0.0,$featureString")
-
-                Log.d(TAG, "Inference Result: $currentStage")
+                
+                val logData = "${currentStage.name},0.0,$featureString"
+                Log.i(TAG, "📊 Inference Result: $currentStage | Features: $featureString")
+                dataRepository.enqueueInferenceLog(timestamp, logData)
+                Log.d(TAG, "📝 Inference log enqueued successfully")
                 checkSmartWindowAndTrigger(timestamp, currentStage)
 
             } catch (e: Exception) {
@@ -294,29 +302,9 @@ class SmartAlarmService : Service(), SensorEventListener {
 
         if (currentTime < windowStart) return
         
-        // [개선] 목표 시간 초과 시 폴백 알람 실행
-        if (currentTime > targetAlarmTime) {
-            Log.w(TAG, "⏰ Target time reached without smart trigger. Triggering fallback alarm...")
-            hasTriggered = true // 중복 실행 방지
-            
-            serviceScope.launch {
-                try {
-                    // 1. 폴백 알람 전송 (목표 시간에 무조건 울림)
-                    sendTriggerSignalSuspend(targetAlarmTime)
-                    
-                    // 2. 짧은 대기 (메시지 전송 안정성 확보)
-                    delay(500L)
-                    
-                    // 3. 결과 전송 및 서비스 종료
-                    stopAndSendResultSuspend()
-                } catch (e: Exception) {
-                    Log.e(TAG, "❌ Error during fallback alarm", e)
-                    stopSelf() // 에러 발생 시에도 서비스는 종료
-                }
-            }
-            return
-        }
-
+        // [제거됨] 워치 폴백 알람 로직 제거 (폰 백업 알람이 이미 처리하므로 중복 방지)
+        // 목표 시간 초과 시 워치는 아무것도 하지 않고, 폰의 백업 알람이 정시에 울림
+        
         var shouldTrigger = false
         var triggerReason = ""
 

@@ -90,7 +90,25 @@ class LogFileTransferManager(private val context: Context) {
         // 채널 경로에 파일명 포함
         val channelPath = "$CHANNEL_PATH_PREFIX/${file.name}"
         
-        Log.d(TAG, "Opening channel: $channelPath (${file.length()} bytes)")
+        val fileSize = file.length()
+        Log.d(TAG, "Opening channel: $channelPath (${fileSize} bytes)")
+        
+        // [경고] 파일이 너무 작으면 경고 표시
+        if (fileSize < 100) {
+            Log.w(TAG, "⚠️ WARNING: ${file.name} is very small (${fileSize} bytes)")
+            Log.w(TAG, "⚠️ File may contain only header, which can cause sharing issues")
+            
+            // 파일 내용 확인 (디버깅용)
+            try {
+                val lineCount = file.readLines().size
+                Log.w(TAG, "⚠️ Line count: $lineCount (header + data)")
+                if (lineCount <= 1) {
+                    Log.e(TAG, "❌ File contains NO DATA, only header!")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to read file for validation", e)
+            }
+        }
         
         // 채널 열기
         val channel = channelClient.openChannel(nodeId, channelPath).await()
