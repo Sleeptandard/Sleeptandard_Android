@@ -2,12 +2,24 @@ package com.leejang.sleeptandard_mvp.Screen
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -19,214 +31,104 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 
 @Composable
-fun RollingTextNoDisappear(
-    text: String,
+fun GlassCard(
     modifier: Modifier = Modifier,
-    durationMs: Int = 350
+    content: @Composable () -> Unit
 ) {
-    var prev by remember { mutableStateOf(text) }         // 이전 텍스트
-    val anim = remember { Animatable(1f) }               // 0 -> 1 진행도
+    val backgroundColor = Color.White.copy(alpha = 0.1f)
+    val borderColor = Color.White.copy(alpha = 0.2f)
 
-    LaunchedEffect(text) {
-        // 이전 텍스트(prev)는 그대로 둔 상태에서 새 텍스트(text)로 전환 애니메이션
-        anim.snapTo(0f)
-        anim.animateTo(
-            targetValue = 1f,
-            animationSpec = tween(durationMs, easing = FastOutSlowInEasing)
-        )
-        // ✅ 애니메이션이 끝난 뒤에야 prev를 새 텍스트로 갱신
-        prev = text
-    }
-
-    val t = anim.value
-
-    val shift = 18.dp
-    val density = androidx.compose.ui.platform.LocalDensity.current
-    val shiftPx = with(density) { shift.toPx() }
-
-    val outY = -shiftPx * t 
-    val inY = shiftPx * (1f - t)
-
-    val outScale = 1f - 0.08f * t
-    val inScale = 0.92f + 0.08f * t
-
-    // "완전 사라지지" 않게 최소 알파를 유지
-    val outAlpha = 1f - 0.15f * t      // 1 -> 0.85
-    val inAlpha = 0.85f + 0.15f * t    // 0.85 -> 1
-
-    Box(modifier = modifier, contentAlignment = Alignment.Center) {
-        // ✅ 이전 텍스트: prev
-        Text(
-            text = prev,
-            style = MaterialTheme.typography.titleLarge,
-            modifier = Modifier.graphicsLayer {
-                translationY = outY
-                scaleX = outScale
-                scaleY = outScale
-                alpha = outAlpha
-            }
-        )
-
-        // ✅ 새 텍스트: text
-        Text(
-            text = text,
-            style = MaterialTheme.typography.titleLarge,
-            modifier = Modifier.graphicsLayer {
-                translationY = inY
-                scaleX = inScale
-                scaleY = inScale
-                alpha = inAlpha
-            }
-        )
-    }
-}
-/*
-@Composable
-fun StackedRollingText(
-    texts: List<String>,
-    modifier: Modifier = Modifier,
-    stayMs: Long = 1200L,
-    moveMs: Int = 320,
-    shift: Dp = 18.dp,
-    maxLines: Int = 3
-) {
-    require(texts.isNotEmpty())
-
-    var index by remember { mutableIntStateOf(0) }
-
-    // 처음엔 1번 텍스트만 중앙
-    var stack by remember { mutableStateOf(listOf(texts.first())) }
-
-    val anim = remember { Animatable(0f) }
-
-    val density = LocalDensity.current
-    val shiftPx = with(density) { shift.toPx() }
-
-    LaunchedEffect(Unit) {
-        // ✅ 마지막 텍스트가 중앙에 올 때까지만 반복
-        while (index < texts.lastIndex) {
-            delay(stayMs)
-
-            // 1) 기존 텍스트들 위로 이동
-            anim.snapTo(0f)
-            anim.animateTo(
-                targetValue = 1f,
-                animationSpec = tween(
-                    durationMillis = moveMs,
-                    easing = FastOutSlowInEasing
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(24.dp)) // 카드 모양
+    ) {
+        // [Layer 1] 배경 블러 & 그라데이션
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .blur(30.dp) // 유리 뒤를 흐리게
+                .background(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            Color.White.copy(alpha = 0.15f), // 위쪽 하이라이트
+                            Color.White.copy(alpha = 0.05f)  // 아래쪽 그림자
+                        )
+                    )
                 )
-            )
+                .border(
+                    width = 1.dp,
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            Color.White.copy(alpha = 0.4f), // 테두리 위쪽 (빛남)
+                            Color.Transparent,             // 테두리 중간 (투명)
+                            Color.White.copy(alpha = 0.1f)  // 테두리 아래쪽 (은은함)
+                        )
+                    ),
+                    shape = RoundedCornerShape(24.dp)
+                )
+        )
 
-            // 2) 다음 텍스트를 중앙에 추가
-            index += 1
-            stack = (stack + texts[index]).takeLast(maxLines)
-
-            // 3) 오프셋 리셋
-            anim.snapTo(0f)
-        }
-        // 👉 여기 도달하면 3번째 텍스트가 중앙에 있고 그대로 멈춤
-    }
-
-    Box(modifier = modifier, contentAlignment = Alignment.Center) {
-        stack.forEachIndexed { i, s ->
-            val fromBottom = stack.lastIndex - i // 최신=0, 이전=1, ...
-            val baseY = -shiftPx * fromBottom
-            val animY = -shiftPx * anim.value
-
-            // ✅ "현재 줄이 중앙에서 얼마나 멀어졌는지" (0: 중앙, 1: 한 칸 위, 2: 두 칸 위...)
-            val effectiveLevel = fromBottom + anim.value
-
-            // ✅ 레벨이 올라갈수록 작아짐 (원하는 만큼 숫자 조절)
-            val minScale = 0.78f
-            val perLevelShrink = 0.10f // 한 칸 위로 갈 때마다 10%씩 축소
-            val scale = (1f - perLevelShrink * effectiveLevel).coerceIn(minScale, 1f)
-
-            // (옵션) 위로 갈수록 옅게
-            val alpha = (1f - 0.18f * effectiveLevel).coerceIn(0.55f, 1f)
-
-            Text(
-                text = s,
-                style = MaterialTheme.typography.titleLarge,
-                modifier = Modifier.graphicsLayer {
-                    translationY = baseY + animY
-                    scaleX = scale
-                    scaleY = scale
-                    this.alpha = alpha
-                }
-            )
-        }
-    }
-}
-*/
-@Composable
-fun StackedRollingTextsOnly(
-    texts: List<String>,
-    modifier: Modifier = Modifier,
-    stayMs: Long = 1200L,
-    moveMs: Int = 320,
-    shift: Dp = 18.dp,
-    maxLines: Int = 2,          // 여기서는 2번/3번만이라 2가 딱 좋음
-) {
-    require(texts.isNotEmpty())
-
-    var index by remember { mutableIntStateOf(0) }
-    var stack by remember { mutableStateOf(listOf(texts.first())) }
-
-    val anim = remember { Animatable(0f) }
-    val shiftPx = with(LocalDensity.current) { shift.toPx() }
-
-    LaunchedEffect(Unit) {
-        // 마지막 텍스트가 중앙에 오면 멈춤
-        while (index < texts.lastIndex) {
-            delay(stayMs)
-
-            anim.snapTo(0f)
-            anim.animateTo(
-                targetValue = 1f,
-                animationSpec = tween(moveMs, easing = FastOutSlowInEasing)
-            )
-
-            index += 1
-            stack = (stack + texts[index]).takeLast(maxLines)
-
-            anim.snapTo(0f)
-        }
-    }
-
-    Box(modifier = modifier, contentAlignment = Alignment.Center) {
-        stack.forEachIndexed { i, s ->
-            val fromBottom = stack.lastIndex - i
-            val baseY = -shiftPx * fromBottom
-            val animY = -shiftPx * anim.value
-
-            // ✅ 위로 밀릴 때 작아지는 효과(스케일)
-            val effectiveLevel = fromBottom + anim.value
-            val minScale = 0.82f
-            val perLevelShrink = 0.10f
-            val scale = (1f - perLevelShrink * effectiveLevel).coerceIn(minScale, 1f)
-
-            Text(
-                text = s,
-                style = MaterialTheme.typography.bodyLarge,
-                modifier = Modifier.graphicsLayer {
-                    translationY = baseY + animY
-                    scaleX = scale
-                    scaleY = scale
-                    alpha = (1f - 0.15f * effectiveLevel).coerceIn(0.6f, 1f)
-                }
-            )
+        // [Layer 2] 실제 내용물 (선명함 유지)
+        Box(modifier = Modifier.padding(24.dp)) {
+            content()
         }
     }
 }
 
 @Composable
 fun ExperimentScreen() {
+// 애니메이션을 위한 무한 반복 상태
+    val infiniteTransition = rememberInfiniteTransition(label = "background")
+    val offset by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1000f,
+        animationSpec = infiniteRepeatable(tween(20000, easing = LinearEasing)),
+        label = "offset"
+    )
 
+    Box(modifier = Modifier.fillMaxSize().background(Color(0xFF0D1117))) {
+        // [배경] 움직이는 빛 덩어리들 (Canvas 활용)
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            drawCircle(
+                brush = Brush.radialGradient(listOf(Color(0xFF5A4BFF), Color.Transparent)),
+                radius = 400f,
+                center = Offset(offset % size.width, size.height * 0.2f)
+            )
+            drawCircle(
+                brush = Brush.radialGradient(listOf(Color(0xFF3A7DFF), Color.Transparent)),
+                radius = 600f,
+                center = Offset(size.width - (offset % size.width), size.height * 0.7f)
+            )
+        }
+
+        // [중앙 카드]
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            GlassCard(modifier = Modifier.width(300.dp)) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Seoul", color = Color.White, fontSize = 18.sp)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("24°C", color = Color.White, fontSize = 64.sp, fontWeight = FontWeight.Bold)
+                    Text("Partly Cloudy", color = Color.White.copy(alpha = 0.7f))
+                }
+            }
+        }
+    }
 }

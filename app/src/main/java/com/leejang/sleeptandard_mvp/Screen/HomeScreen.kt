@@ -89,6 +89,7 @@ fun HomeScreen(
     alarmViewModel: AlarmViewModel,
     scheduler: AlarmScheduler,
     onClickConfirm: ()-> Unit,
+    goExperimentScreen: ()-> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope() // 코루틴 스코프 선언
@@ -309,6 +310,12 @@ fun HomeScreen(
                         .height(48.dp),
                     onClick = { showSituationModal = true }
                 )
+
+                Button(
+                    onClick = goExperimentScreen
+                ){
+                    Text(text = "goExperimentScreen")
+                }
 
                 /***사운드 선택 모달***/
                 if (showSoundSheet) {
@@ -562,7 +569,7 @@ fun HomeScreen(
                                                 selectedVibrationEnabled,
                                                 selectedVolume
                                             )
-                                            scheduler.schedule(alarmViewModel.alarm)
+                                            // scheduler.schedule(alarmViewModel.alarm)
 
                                             val triggerTime = scheduler.getTriggerTime()
 
@@ -631,7 +638,7 @@ fun HomeScreen(
                                                 selectedVibrationEnabled,
                                                 selectedVolume
                                             )
-                                            scheduler.schedule(alarmViewModel.alarm)
+                                            // scheduler.schedule(alarmViewModel.alarm)
 
                                             val triggerTime = scheduler.getTriggerTime()
                                             
@@ -754,7 +761,7 @@ fun HomeScreen(
                                                     selectedVibrationEnabled,
                                                     selectedVolume
                                                 )
-                                                scheduler.schedule(alarmViewModel.alarm)
+                                                // scheduler.schedule(alarmViewModel.alarm)
 
                                                 val triggerTime = scheduler.getTriggerTime()
                                                 
