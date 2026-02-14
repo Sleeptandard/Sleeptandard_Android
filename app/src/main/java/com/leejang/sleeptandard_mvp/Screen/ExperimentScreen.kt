@@ -100,7 +100,9 @@ fun ExperimentScreen() {
         label = "offset"
     )
 
-    Box(modifier = Modifier.fillMaxSize().background(Color(0xFF0D1117))) {
+    Box(modifier = Modifier.fillMaxSize().background(Color(0xFF050C16))) {
+
+        /*
         // [배경] 움직이는 빛 덩어리들 (Canvas 활용)
         Canvas(modifier = Modifier.fillMaxSize()) {
             drawCircle(
@@ -114,6 +116,7 @@ fun ExperimentScreen() {
                 center = Offset(size.width - (offset % size.width), size.height * 0.7f)
             )
         }
+        */
 
         // [중앙 카드]
         Column(
