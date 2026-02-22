@@ -25,6 +25,7 @@ class AlarmPreferences(private val context: Context) {
             .putInt("volume", alarm.volume) // ✅ 저장 추가
             .putBoolean("vibrationEnabled", alarm.vibrationEnabled)
             .putInt("earlyWakeUpMinutes", alarm.earlyWakeUpMinutes)
+            .putBoolean("isRem", alarm.isRem)
             .apply()
     }
 

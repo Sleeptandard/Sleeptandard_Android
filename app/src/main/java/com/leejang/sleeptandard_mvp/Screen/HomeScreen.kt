@@ -122,6 +122,7 @@ fun HomeScreen(
     var selectedVibrationEnabled by remember { mutableStateOf(alarmViewModel.alarm.vibrationEnabled) }
     var selectedVolume by remember { mutableIntStateOf(alarmViewModel.alarm.volume) }
     var earlyWakeUpMinutes by remember { mutableIntStateOf(alarmViewModel.alarm.earlyWakeUpMinutes) }
+    var isRem by remember { mutableStateOf(alarmViewModel.alarm.isRem) }
 
     // 옵션 컴포넌트에 띄울 알람음 이름
     var alarmName by remember { mutableStateOf("") }
@@ -240,7 +241,7 @@ fun HomeScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 24.dp),
+            .padding(horizontal = 20.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Spacer(
@@ -248,7 +249,7 @@ fun HomeScreen(
         )
         Box(
             modifier = Modifier
-                .size(320.dp, 260.dp)
+                .size(336.dp, 273.dp)
                 .drawBehind {
                     // 흰색 그림자
                     val highlightColor1 = Color(0xFFB9C8DF).copy(alpha = 0.15f)
@@ -370,7 +371,7 @@ fun HomeScreen(
                     DiamondStepSlider(
                         value = earlyWakeUpMinutes,
                         onValueChange = { earlyWakeUpMinutes = it },
-                        modifier = Modifier.fillMaxWidth() // 이제 부모인 Column 너비(0.7f)에 맞춰집니다.
+                        modifier = Modifier.fillMaxWidth(9f/10f)
                     )
                 }
                 Text(
@@ -384,7 +385,7 @@ fun HomeScreen(
                     fontSize = 15.sp
                 )
 
-                Spacer(Modifier.height(30.dp))
+                Spacer(Modifier.height(15.dp))
 
                 OptionsSection(
                     modifier = Modifier
@@ -424,9 +425,11 @@ fun HomeScreen(
                     onCheckedChange = { selectedVibrationEnabled = it },
                     alarmName = alarmName,
                     isSystemVibrationOn = isNotificationVibrationOn,
+                    isRem = isRem,
+                    onRemCheckedChange = { isRem = it }
                 )
 
-                Spacer(modifier = Modifier.height(38.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
                 ConfirmButton(
                     modifier = Modifier
@@ -474,6 +477,7 @@ fun HomeScreen(
                                     vibrationEnabled = selectedVibrationEnabled,
                                     volume = selectedVolume,
                                     earlyWakeUpMinutes = earlyWakeUpMinutes,
+                                    isRem = isRem,
                                 )
                             },
                             defaultVolume = alarmViewModel.alarm.volume,
@@ -706,7 +710,8 @@ fun HomeScreen(
                                                     selectedRingtoneUri,
                                                     selectedVibrationEnabled,
                                                     selectedVolume,
-                                                    earlyWakeUpMinutes = earlyWakeUpMinutes
+                                                    earlyWakeUpMinutes = earlyWakeUpMinutes,
+                                                    isRem = isRem,
                                                 )
                                                 scheduler.schedule(alarmViewModel.alarm)
 
@@ -776,7 +781,8 @@ fun HomeScreen(
                                                     selectedRingtoneUri,
                                                     selectedVibrationEnabled,
                                                     selectedVolume,
-                                                    earlyWakeUpMinutes = earlyWakeUpMinutes
+                                                    earlyWakeUpMinutes = earlyWakeUpMinutes,
+                                                    isRem = isRem,
                                                 )
                                                 scheduler.schedule(alarmViewModel.alarm)
 
@@ -900,7 +906,8 @@ fun HomeScreen(
                                                         selectedRingtoneUri,
                                                         selectedVibrationEnabled,
                                                         selectedVolume,
-                                                        earlyWakeUpMinutes = earlyWakeUpMinutes
+                                                        earlyWakeUpMinutes = earlyWakeUpMinutes,
+                                                        isRem = isRem,
                                                     )
                                                     scheduler.schedule(alarmViewModel.alarm)
 

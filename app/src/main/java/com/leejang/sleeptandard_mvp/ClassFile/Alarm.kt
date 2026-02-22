@@ -8,5 +8,6 @@ data class Alarm (
     val ringtoneUri: String = "",
     val vibrationEnabled: Boolean = true,
     val volume: Int = 10, // ✅ 앱 전용 볼륨 값 (0~15 단계) 추가
-    val earlyWakeUpMinutes: Int = 30
+    val earlyWakeUpMinutes: Int = 30,    // 기상 윈도우 시간
+    val isRem: Boolean = false  // rem에서 깨울지 여부
     )
