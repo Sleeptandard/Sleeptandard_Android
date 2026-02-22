@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.sp
 
 import com.leejang.sleeptandard_mvp.ClassFile.Alarm
 import com.leejang.sleeptandard_mvp.ClassFile.AlarmScheduler
+import com.leejang.sleeptandard_mvp.Component.StackedRollingText
 import com.leejang.sleeptandard_mvp.Prefs.AlarmPreferences
 import com.leejang.sleeptandard_mvp.ViewModel.AlarmViewModel
 import com.leejang.sleeptandard_mvp.ui.theme.AppIcons

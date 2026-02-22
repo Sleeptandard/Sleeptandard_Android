@@ -1,14 +1,29 @@
 package com.leejang.sleeptandard_mvp.Screen
 
+import android.graphics.BlurMaskFilter
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -19,247 +34,327 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.dropShadow
+import androidx.compose.ui.draw.innerShadow
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Paint
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.shadow.Shadow
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.leejang.sleeptandard_mvp.Component.CustomTimePicker
 import kotlinx.coroutines.delay
 
 @Composable
-fun RollingTextNoDisappear(
-    text: String,
+fun GlassCard(
     modifier: Modifier = Modifier,
-    durationMs: Int = 350
+    content: @Composable () -> Unit
 ) {
-    var prev by remember { mutableStateOf(text) }         // 이전 텍스트
-    val anim = remember { Animatable(1f) }               // 0 -> 1 진행도
+    val backgroundColor = Color.White.copy(alpha = 0.1f)
+    val borderColor = Color.White.copy(alpha = 0.2f)
 
-    LaunchedEffect(text) {
-        // 이전 텍스트(prev)는 그대로 둔 상태에서 새 텍스트(text)로 전환 애니메이션
-        anim.snapTo(0f)
-        anim.animateTo(
-            targetValue = 1f,
-            animationSpec = tween(durationMs, easing = FastOutSlowInEasing)
-        )
-        // ✅ 애니메이션이 끝난 뒤에야 prev를 새 텍스트로 갱신
-        prev = text
-    }
-
-    val t = anim.value
-
-    val shift = 18.dp
-    val density = androidx.compose.ui.platform.LocalDensity.current
-    val shiftPx = with(density) { shift.toPx() }
-
-    val outY = -shiftPx * t 
-    val inY = shiftPx * (1f - t)
-
-    val outScale = 1f - 0.08f * t
-    val inScale = 0.92f + 0.08f * t
-
-    // "완전 사라지지" 않게 최소 알파를 유지
-    val outAlpha = 1f - 0.15f * t      // 1 -> 0.85
-    val inAlpha = 0.85f + 0.15f * t    // 0.85 -> 1
-
-    Box(modifier = modifier, contentAlignment = Alignment.Center) {
-        // ✅ 이전 텍스트: prev
-        Text(
-            text = prev,
-            style = MaterialTheme.typography.titleLarge,
-            modifier = Modifier.graphicsLayer {
-                translationY = outY
-                scaleX = outScale
-                scaleY = outScale
-                alpha = outAlpha
-            }
-        )
-
-        // ✅ 새 텍스트: text
-        Text(
-            text = text,
-            style = MaterialTheme.typography.titleLarge,
-            modifier = Modifier.graphicsLayer {
-                translationY = inY
-                scaleX = inScale
-                scaleY = inScale
-                alpha = inAlpha
-            }
-        )
-    }
-}
-
-@Composable
-fun StackedRollingText(
-    texts: List<String>,
-    modifier: Modifier = Modifier,
-    stayMs: Long = 1200L,
-    moveMs: Int = 320,
-    shift: Dp = 18.dp,
-    maxLines: Int = 3
-) {
-    require(texts.isNotEmpty())
-
-    var index by remember { mutableIntStateOf(0) }
-
-    // 처음엔 1번 텍스트만 중앙
-    var stack by remember { mutableStateOf(listOf(texts.first())) }
-
-    val anim = remember { Animatable(0f) }
-
-    val density = LocalDensity.current
-    val shiftPx = with(density) { shift.toPx() }
-
-    LaunchedEffect(Unit) {
-        // ✅ 마지막 텍스트가 중앙에 올 때까지만 반복
-        while (index < texts.lastIndex) {
-            delay(stayMs)
-
-            // 1) 기존 텍스트들 위로 이동
-            anim.snapTo(0f)
-            anim.animateTo(
-                targetValue = 1f,
-                animationSpec = tween(
-                    durationMillis = moveMs,
-                    easing = FastOutSlowInEasing
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(24.dp)) // 카드 모양
+    ) {
+        // [Layer 1] 배경 블러 & 그라데이션
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .blur(30.dp) // 유리 뒤를 흐리게
+                .background(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            Color.White.copy(alpha = 0.15f), // 위쪽 하이라이트
+                            Color.White.copy(alpha = 0.05f)  // 아래쪽 그림자
+                        )
+                    )
                 )
-            )
+                .border(
+                    width = 1.dp,
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            Color.White.copy(alpha = 0.4f), // 테두리 위쪽 (빛남)
+                            Color.Transparent,             // 테두리 중간 (투명)
+                            Color.White.copy(alpha = 0.1f)  // 테두리 아래쪽 (은은함)
+                        )
+                    ),
+                    shape = RoundedCornerShape(24.dp)
+                )
+        )
 
-            // 2) 다음 텍스트를 중앙에 추가
-            index += 1
-            stack = (stack + texts[index]).takeLast(maxLines)
-
-            // 3) 오프셋 리셋
-            anim.snapTo(0f)
-        }
-        // 👉 여기 도달하면 3번째 텍스트가 중앙에 있고 그대로 멈춤
-    }
-
-    Box(modifier = modifier, contentAlignment = Alignment.Center) {
-        stack.forEachIndexed { i, s ->
-            val fromBottom = stack.lastIndex - i // 최신=0, 이전=1, ...
-            val baseY = -shiftPx * fromBottom
-            val animY = -shiftPx * anim.value
-
-            // ✅ "현재 줄이 중앙에서 얼마나 멀어졌는지" (0: 중앙, 1: 한 칸 위, 2: 두 칸 위...)
-            val effectiveLevel = fromBottom + anim.value
-
-            // ✅ 레벨이 올라갈수록 작아짐 (원하는 만큼 숫자 조절)
-            val minScale = 0.78f
-            val perLevelShrink = 0.10f // 한 칸 위로 갈 때마다 10%씩 축소
-            val scale = (1f - perLevelShrink * effectiveLevel).coerceIn(minScale, 1f)
-
-            // (옵션) 위로 갈수록 옅게
-            val alpha = (1f - 0.18f * effectiveLevel).coerceIn(0.55f, 1f)
-
-            Text(
-                text = s,
-                style = MaterialTheme.typography.titleLarge,
-                modifier = Modifier.graphicsLayer {
-                    translationY = baseY + animY
-                    scaleX = scale
-                    scaleY = scale
-                    this.alpha = alpha
-                }
-            )
-        }
-    }
-}
-
-@Composable
-fun StackedRollingTextsOnly(
-    texts: List<String>,
-    modifier: Modifier = Modifier,
-    stayMs: Long = 1200L,
-    moveMs: Int = 320,
-    shift: Dp = 18.dp,
-    maxLines: Int = 2,          // 여기서는 2번/3번만이라 2가 딱 좋음
-) {
-    require(texts.isNotEmpty())
-
-    var index by remember { mutableIntStateOf(0) }
-    var stack by remember { mutableStateOf(listOf(texts.first())) }
-
-    val anim = remember { Animatable(0f) }
-    val shiftPx = with(LocalDensity.current) { shift.toPx() }
-
-    LaunchedEffect(Unit) {
-        // 마지막 텍스트가 중앙에 오면 멈춤
-        while (index < texts.lastIndex) {
-            delay(stayMs)
-
-            anim.snapTo(0f)
-            anim.animateTo(
-                targetValue = 1f,
-                animationSpec = tween(moveMs, easing = FastOutSlowInEasing)
-            )
-
-            index += 1
-            stack = (stack + texts[index]).takeLast(maxLines)
-
-            anim.snapTo(0f)
-        }
-    }
-
-    Box(modifier = modifier, contentAlignment = Alignment.Center) {
-        stack.forEachIndexed { i, s ->
-            val fromBottom = stack.lastIndex - i
-            val baseY = -shiftPx * fromBottom
-            val animY = -shiftPx * anim.value
-
-            // ✅ 위로 밀릴 때 작아지는 효과(스케일)
-            val effectiveLevel = fromBottom + anim.value
-            val minScale = 0.82f
-            val perLevelShrink = 0.10f
-            val scale = (1f - perLevelShrink * effectiveLevel).coerceIn(minScale, 1f)
-
-            Text(
-                text = s,
-                style = MaterialTheme.typography.bodyLarge,
-                modifier = Modifier.graphicsLayer {
-                    translationY = baseY + animY
-                    scaleX = scale
-                    scaleY = scale
-                    alpha = (1f - 0.15f * effectiveLevel).coerceIn(0.6f, 1f)
-                }
-            )
+        // [Layer 2] 실제 내용물 (선명함 유지)
+        Box(modifier = Modifier.padding(24.dp)) {
+            content()
         }
     }
 }
 
 @Composable
 fun ExperimentScreen() {
+// 애니메이션을 위한 무한 반복 상태
+    val infiniteTransition = rememberInfiniteTransition(label = "background")
+    val offset by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1000f,
+        animationSpec = infiniteRepeatable(tween(20000, easing = LinearEasing)),
+        label = "offset"
+    )
 
-    val list = listOf("알람을 설정해볼까요?", "오늘도 화이팅!", "기상 시간을 지켜드릴게요")
-    var i by remember { mutableIntStateOf(0) }
-/*
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(1800)
-            i = (i + 1) % list.size
+    Box(modifier = Modifier.fillMaxSize().background(Color(0xFF050C16))) {
+
+
+        /*
+        // [배경] 움직이는 빛 덩어리들 (Canvas 활용)
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            drawCircle(
+                brush = Brush.radialGradient(listOf(Color(0xFF5A4BFF), Color.Transparent)),
+                radius = 400f,
+                center = Offset(offset % size.width, size.height * 0.2f)
+            )
+            drawCircle(
+                brush = Brush.radialGradient(listOf(Color(0xFF3A7DFF), Color.Transparent)),
+                radius = 600f,
+                center = Offset(size.width - (offset % size.width), size.height * 0.7f)
+            )
+        }
+
+         */
+
+
+        // [중앙 카드]
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Spacer(modifier = Modifier.height(100.dp))
+
+            Box(
+                modifier = Modifier
+                    .size(320.dp, 260.dp)
+                    .drawBehind {
+                        // 흰색 그림자
+                        val highlightColor1 = Color(0xFFB9C8DF).copy(alpha = 0.15f)
+                        val blurRadius1 = 20.dp.toPx()
+                        val offsetX1 = (-5).dp.toPx()
+                        val offsetY1 = (-5).dp.toPx()
+
+                        drawIntoCanvas { canvas ->
+                            val paint = Paint().asFrameworkPaint().apply {
+                                color = highlightColor1.toArgb()
+                                maskFilter = BlurMaskFilter(blurRadius1, BlurMaskFilter.Blur.NORMAL)
+                            }
+
+                            canvas.nativeCanvas.drawRoundRect(
+                                offsetX1, offsetY1,
+                                size.width + offsetX1, size.height + offsetY1,
+                                30.dp.toPx(), 30.dp.toPx(),
+                                paint
+                            )
+                        }
+
+                        // 검은색 그림자
+                        val highlightColor2 = Color(0xFF020710).copy(alpha = 0.9f)
+                        val blurRadius2 = 15.dp.toPx()
+                        val offsetX2 = (8).dp.toPx()
+                        val offsetY2 = (8).dp.toPx()
+
+                        drawIntoCanvas { canvas ->
+                            val paint = Paint().asFrameworkPaint().apply {
+                                color = highlightColor2.toArgb()
+                                maskFilter = BlurMaskFilter(blurRadius2, BlurMaskFilter.Blur.NORMAL)
+                            }
+
+                            canvas.nativeCanvas.drawRoundRect(
+                                offsetX2, offsetY2,
+                                size.width + offsetX2, size.height + offsetY2,
+                                30.dp.toPx(), 30.dp.toPx(),
+                                paint
+                            )
+                        }
+
+                        val gradient = Brush.linearGradient(
+                            colors = listOf(
+                                Color(0xFF07101E),
+                                Color(0xFF101A2A)
+                            ),
+                            // 시작점을 박스의 정중앙(Center)으로 설정
+                            start = Offset(size.width/2, size.height/2),
+                            // 끝점을 박스의 우측 하단(BottomEnd)으로 설정
+                            end = Offset(size.width, size.height * 2 / 3)
+                        )
+                        drawRoundRect(
+                            brush = gradient,
+                            cornerRadius = CornerRadius(30.dp.toPx(), 30.dp.toPx()) // 30dp만큼 둥글게
+                        )
+                    }
+                    // Inner shadow
+                    .innerShadow(
+                        shape = RoundedCornerShape(30.dp),
+                        shadow = Shadow(
+                            radius = 25.dp,
+                            spread = (-12).dp,
+                            color = Color(0xFF030E1E).copy(0.8f),
+                            offset = DpOffset(x = 5.dp, 6.dp)
+                        )
+                    ),
+                contentAlignment = Alignment.Center
+
+            ){
+                var h = 0
+                var m = 0
+                var isAm = true
+
+                CustomTimePicker(
+                    onTimeChange = { hour12, minute, isAm1 ->
+                        h = hour12
+                        m = minute
+                        isAm = isAm1},
+
+                )
+            }
+
+
+
+            Spacer(Modifier.height(30.dp))
+
+            Box(
+                modifier = Modifier
+                    .size(320.dp, 56.dp)
+                    .drawBehind {
+                        // 흰색 그림자
+                        val highlightColor1 = Color(0xFFB9C8DF).copy(alpha = 0.15f)
+                        val blurRadius1 = 20.dp.toPx()
+                        val offsetX1 = (-5).dp.toPx()
+                        val offsetY1 = (-5).dp.toPx()
+
+                        drawIntoCanvas { canvas ->
+                            val paint = Paint().asFrameworkPaint().apply {
+                                color = highlightColor1.toArgb()
+                                maskFilter = BlurMaskFilter(blurRadius1, BlurMaskFilter.Blur.NORMAL)
+                            }
+
+                            canvas.nativeCanvas.drawRoundRect(
+                                offsetX1, offsetY1,
+                                size.width + offsetX1, size.height + offsetY1,
+                                // 여기
+                                100.dp.toPx(), 100.dp.toPx(),
+                                paint
+                            )
+                        }
+
+                        // 검은색 그림자
+                        // 여기
+                        val highlightColor2 = Color(0xFF020710).copy(alpha = 0.7f)
+                        val blurRadius2 = 15.dp.toPx()
+                        val offsetX2 = (8).dp.toPx()
+                        val offsetY2 = (8).dp.toPx()
+
+                        drawIntoCanvas { canvas ->
+                            val paint = Paint().asFrameworkPaint().apply {
+                                color = highlightColor2.toArgb()
+                                maskFilter = BlurMaskFilter(blurRadius2, BlurMaskFilter.Blur.NORMAL)
+                            }
+
+                            canvas.nativeCanvas.drawRoundRect(
+                                offsetX2, offsetY2,
+                                size.width + offsetX2, size.height + offsetY2,
+                                // 여기
+                                100.dp.toPx(), 100.dp.toPx(),
+                                paint
+                            )
+                        }
+
+                        val gradient = Brush.linearGradient(
+                            colors = listOf(
+                                Color(0xFF07101E),
+                                Color(0xFF101A2A)
+                            ),
+                            // 시작점을 박스의 정중앙(Center)으로 설정
+                            start = Offset(size.width/2, size.height/2),
+                            // 끝점을 박스의 우측 상단으로부터 2/3 지점 설정
+                            end = Offset(size.width, size.height * 2 / 3)
+                        )
+                        drawRoundRect(
+                            brush = gradient,
+                            cornerRadius = CornerRadius(30.dp.toPx(), 30.dp.toPx()) // 30dp만큼 둥글게
+                        )
+                    }
+                    // Inner shadow
+                    .innerShadow(
+                        shape = RoundedCornerShape(30.dp),
+                        shadow = Shadow(
+                            radius = 25.dp,
+                            spread = (-12).dp,
+                            color = Color(0xFF030E1E).copy(0.8f),
+                            offset = DpOffset(x = 5.dp, 6.dp)
+                        )
+                    )
+            ){
+
+            }
+            /* dropShadow는 밤티인듯
+            Box(
+                modifier = Modifier
+                    .size(320.dp, 260.dp)
+                    .dropShadow(
+                        shape = RoundedCornerShape(30.dp),
+                        shadow = Shadow(
+                            radius = 15.dp,
+                            spread = 5.dp,
+                            color = Color(0xFF020710).copy(0.9f),
+                            offset = DpOffset(x = 8.dp, 8.dp)
+                        )
+                    )
+                    .dropShadow(
+                        shape = RoundedCornerShape(30.dp),
+                        shadow = Shadow(
+                            radius = 20.dp,
+                            spread = 0.dp,
+                            color = Color(0xFFB9C8DF).copy(0.15f),
+                            offset = DpOffset(x = (-5).dp, (-5).dp)
+                        )
+                    )
+                    .drawBehind {
+                        val gradient = Brush.linearGradient(
+                            colors = listOf(
+                                Color(0xFF07101E),
+                                Color(0xFF101A2A)
+                            ),
+                            // 시작점을 박스의 정중앙(Center)으로 설정
+                            start = Offset(size.width/2, size.height/2),
+                            // 끝점을 박스의 우측 하단(BottomEnd)으로 설정
+                            end = Offset(size.width, size.height * 2 / 3)
+                        )
+                        drawRoundRect(
+                            brush = gradient,
+                            cornerRadius = CornerRadius(30.dp.toPx(), 30.dp.toPx()) // 30dp만큼 둥글게
+                        )
+                    }
+                    .innerShadow(
+                        shape = RoundedCornerShape(30.dp),
+                        shadow = Shadow(
+                            radius = 25.dp,
+                            spread = (-12).dp,
+                            color = Color(0xFF030E1E).copy(0.8f),
+                            offset = DpOffset(x = 5.dp, 6.dp)
+                        )
+                    )
+            )
+             */
         }
     }
-*/
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-
-        Spacer(modifier = Modifier.height(100.dp))
-
-        StackedRollingText(
-            texts = list,
-            modifier = Modifier.fillMaxWidth(),
-            stayMs = 1200L,
-            moveMs = 320,
-            shift = 18.dp,
-            maxLines = 3
-        )
-        /*
-        RollingTextNoDisappear(
-            text = list[i],
-            modifier = Modifier.fillMaxWidth()
-        )
-        */
-    }
-
 }

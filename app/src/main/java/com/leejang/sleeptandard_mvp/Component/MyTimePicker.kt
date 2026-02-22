@@ -54,11 +54,11 @@ fun WheelPicker(
     selectedIndex: Int,
     onSelectedIndexChange: (Int) -> Unit,
     textStyle: TextStyle = MaterialTheme.typography.bodyLarge.copy(
-        fontSize = 45.sp
+        fontSize = 40.sp
     ),
     fadedTextStyle: TextStyle = MaterialTheme.typography.bodyLarge.copy(
         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f),
-        fontSize = 43.sp
+        fontSize = 38.sp
     ),
     scrollEnable: Boolean = true
 ) {
@@ -250,20 +250,20 @@ fun CustomTimePicker(
     Row(
         modifier = modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center
     ) {
+        Spacer(Modifier.weight(1f))
         WheelPicker(
-            modifier = Modifier.width(90.dp),
+            modifier = Modifier.width(36.dp),
             items = ampmItems,
             itemHeight = itemHeightAmPm,
             selectedIndex = ampmIndex,
             onSelectedIndexChange = { ampmIndex = it },
             textStyle = MaterialTheme.typography.bodyLarge.copy(
-                fontSize = 27.sp
+                fontSize = 20.sp
             ),
             fadedTextStyle = MaterialTheme.typography.bodyLarge.copy(
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f),
-                fontSize = 25.sp
+                fontSize = 19.sp
             ),
             state = ampmState,
             scrollEnable = scrollEnable
@@ -272,7 +272,7 @@ fun CustomTimePicker(
         Spacer(Modifier.width(12.dp))
 
         WheelPicker(
-            modifier = Modifier.width(90.dp),
+            modifier = Modifier.width(60.dp),
             items = hourItems,
             selectedIndex = hourIndex,
             onSelectedIndexChange = { hourIndex = it },
@@ -282,16 +282,20 @@ fun CustomTimePicker(
             itemHeight = itemHeight
         )
 
+        Spacer(Modifier.width(10.dp))
+
         Text(
             text = ":",
             style = MaterialTheme.typography.bodyLarge.copy(
-                fontSize = 45.sp
+                fontSize = 40.sp
             ),
             modifier = Modifier.padding(horizontal = 8.dp)
         )
 
+        Spacer(Modifier.width(10.dp))
+
         WheelPicker(
-            modifier = Modifier.width(90.dp),
+            modifier = Modifier.width(60.dp),
             items = minuteItems,
             selectedIndex = minuteIndex,
             onSelectedIndexChange = { minuteIndex = it },
@@ -300,6 +304,7 @@ fun CustomTimePicker(
             scrollEnable = scrollEnable,
             itemHeight = itemHeight
         )
+        Spacer(Modifier.weight(1f))
     }
 
 }

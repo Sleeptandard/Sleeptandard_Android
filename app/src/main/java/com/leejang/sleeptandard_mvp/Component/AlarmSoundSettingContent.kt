@@ -33,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -365,13 +366,13 @@ private fun ToneRow(
 
 @Composable
 fun CustomVolumeSlider(
+    modifier: Modifier = Modifier,
     value: Float,
     onValueChange: (Float) -> Unit,
     enabled: Boolean = true, // ✅ 비활성화 여부 추가
-    modifier: Modifier = Modifier,
     valueRange: ClosedFloatingPointRange<Float> = 0f..1f,
     activeColor: Color = Color(0xFFB9E0E3),
-    inactiveColor: Color = Color(0xFF858585)
+    inactiveColor: Color = Color(0xFF858585),
 ) {
     // ✅ 비활성화 시 색상 계산 (투명도 조절)
     val currentActiveColor = if (enabled) activeColor else activeColor.copy(alpha = 0.3f)
