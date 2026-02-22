@@ -121,7 +121,7 @@ fun HomeScreen(
     var selectedRingtoneUri by remember { mutableStateOf(alarmViewModel.alarm.ringtoneUri) }
     var selectedVibrationEnabled by remember { mutableStateOf(alarmViewModel.alarm.vibrationEnabled) }
     var selectedVolume by remember { mutableIntStateOf(alarmViewModel.alarm.volume) }
-
+    var earlyWakeUpMinutes by remember { mutableIntStateOf(alarmViewModel.alarm.earlyWakeUpMinutes) }
 
     // 옵션 컴포넌트에 띄울 알람음 이름
     var alarmName by remember { mutableStateOf("") }
@@ -190,8 +190,6 @@ fun HomeScreen(
     // 화면이 켜질 때마다 시스템 설정값 확인
     val lifecycleOwner = LocalLifecycleOwner.current
 
-    // 기상 윈도우 슬라이더 상태(기본값 30분)
-    var earlyWakeUpMinutes by remember { mutableIntStateOf(30) }
 
     // 화면이 다시 활성화될 때마다(Resume) 실행되는 로직
     DisposableEffect(lifecycleOwner) {
@@ -474,7 +472,8 @@ fun HomeScreen(
                                     isAm = selectedIsAm,
                                     ringtoneUri = uriStr,
                                     vibrationEnabled = selectedVibrationEnabled,
-                                    volume = selectedVolume
+                                    volume = selectedVolume,
+                                    earlyWakeUpMinutes = earlyWakeUpMinutes,
                                 )
                             },
                             defaultVolume = alarmViewModel.alarm.volume,
@@ -706,7 +705,8 @@ fun HomeScreen(
                                                     selectedIsAm,
                                                     selectedRingtoneUri,
                                                     selectedVibrationEnabled,
-                                                    selectedVolume
+                                                    selectedVolume,
+                                                    earlyWakeUpMinutes = earlyWakeUpMinutes
                                                 )
                                                 scheduler.schedule(alarmViewModel.alarm)
 
@@ -775,7 +775,8 @@ fun HomeScreen(
                                                     selectedIsAm,
                                                     selectedRingtoneUri,
                                                     selectedVibrationEnabled,
-                                                    selectedVolume
+                                                    selectedVolume,
+                                                    earlyWakeUpMinutes = earlyWakeUpMinutes
                                                 )
                                                 scheduler.schedule(alarmViewModel.alarm)
 
@@ -898,7 +899,8 @@ fun HomeScreen(
                                                         selectedIsAm,
                                                         selectedRingtoneUri,
                                                         selectedVibrationEnabled,
-                                                        selectedVolume
+                                                        selectedVolume,
+                                                        earlyWakeUpMinutes = earlyWakeUpMinutes
                                                     )
                                                     scheduler.schedule(alarmViewModel.alarm)
 

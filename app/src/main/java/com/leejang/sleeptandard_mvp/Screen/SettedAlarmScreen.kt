@@ -119,13 +119,13 @@ fun SettedAlarmScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ){
                             Text(
-                                text = getIsAm(alarm.isAm),
+                                text = getIsAm(alarm.hour, alarm.minute, alarm.isAm,alarm.earlyWakeUpMinutes),
                                 style = MaterialTheme.typography.bodyLarge.copy(
                                     fontSize = 16.sp
                                 )
                             )
                             Text(
-                                getWakeUpTimeRange(alarm.hour, alarm.minute),
+                                getWakeUpTimeRange(alarm.hour, alarm.minute, alarm.isAm,alarm.earlyWakeUpMinutes),
                                 style = MaterialTheme.typography.bodyLarge
                             )
                         }
@@ -275,8 +275,8 @@ private fun DelayedContentReserveSpace(
     }
 }
 
-fun getWakeUpTimeRange(hour:Int, minute: Int): String{
-    var earlyTotalMinute: Int = (hour * 60 + minute) - 30
+fun getWakeUpTimeRange(hour:Int, minute: Int, isAm: Boolean, earlyWakeUpMinutes: Int): String{
+    var earlyTotalMinute: Int = (hour * 60 + minute) - earlyWakeUpMinutes
 
     if(earlyTotalMinute < 0) earlyTotalMinute += 12 * 60
 
@@ -286,6 +286,12 @@ fun getWakeUpTimeRange(hour:Int, minute: Int): String{
         earlyTotalMinute/60, earlyTotalMinute%60, hour, minute)
 }
 
-fun getIsAm(isAm: Boolean): String{
+// TODO: 이거 고쳐야댐
+fun getIsAm(hour:Int, minute: Int, isAm: Boolean, earlyWakeUpMinutes: Int): String{
+    var earlyTotalMinute: Int = (hour * 60 + minute) - earlyWakeUpMinutes
+
+    if(earlyTotalMinute < 0)
+        !isAm
+
     if(isAm) return "오전" else return "오후"
 }
