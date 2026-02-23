@@ -71,8 +71,9 @@ class SmartAlarmService : Service(), SensorEventListener {
     private val FEATURE_INTERVAL_MS = 30000L
 
     private var targetAlarmTime: Long = 0L
+    private var smartWindowMs: Long = 30 * 60 * 1000L
     private var sessionStartTime: Long = 0L
-    private var situationLabel: String = "normal" // [추가] 특별 상황 라벨
+    private var situationLabel: String = "normal"
     private val inferenceHistory = Collections.synchronizedList(mutableListOf<StageEntry>())
     private var consecutiveRemCount = 0  // REM 수면 연속 카운트
     private var lastStage: SleepStage = SleepStage.UNKNOWN
@@ -88,9 +89,11 @@ class SmartAlarmService : Service(), SensorEventListener {
         when (intent?.action) {
             ACTION_START_TRACKING -> {
                 targetAlarmTime = intent.getLongExtra(EXTRA_TARGET_TIME, 0L)
-                situationLabel = intent.getStringExtra(EXTRA_SITUATION_LABEL) ?: "normal" // [추가] 라벨 받기
+                val earlyWakeUpMinutes = intent.getIntExtra(EXTRA_EARLY_WAKE_UP_MINUTES, 30)
+                smartWindowMs = earlyWakeUpMinutes * 60 * 1000L
+                situationLabel = intent.getStringExtra(EXTRA_SITUATION_LABEL) ?: "normal"
                 sessionStartTime = System.currentTimeMillis()
-                Log.i(TAG, "Service Started. Target Time: $targetAlarmTime, Label: $situationLabel")
+                Log.i(TAG, "Service Started. Target: $targetAlarmTime, SmartWindow: ${earlyWakeUpMinutes}min, Label: $situationLabel")
                 
                 // [핵심] Foreground Service는 가능한 빨리 startForeground 호출 필요
                 createNotificationChannel()
@@ -298,7 +301,7 @@ class SmartAlarmService : Service(), SensorEventListener {
     private fun checkSmartWindowAndTrigger(currentTime: Long, currentStage: SleepStage) {
         if (hasTriggered || targetAlarmTime == 0L) return
 
-        val windowStart = targetAlarmTime - SMART_WINDOW_MS
+        val windowStart = targetAlarmTime - smartWindowMs
 
         if (currentTime < windowStart) return
         
@@ -525,12 +528,11 @@ class SmartAlarmService : Service(), SensorEventListener {
         private const val NOTIFICATION_ID = 1001
         private const val CHANNEL_ID = "sleep_tracking_channel"
 
-        private const val SMART_WINDOW_MS = 30 * 60 * 1000L
-
         const val ACTION_START_TRACKING = "com.leejang.sleeptandard_mvp.START_TRACKING"
         const val ACTION_STOP_AND_SEND_RESULT = "com.leejang.sleeptandard_mvp.STOP_AND_SEND_RESULT"
         const val EXTRA_TARGET_TIME = "EXTRA_TARGET_TIME"
-        const val EXTRA_SITUATION_LABEL = "EXTRA_SITUATION_LABEL" // [추가] 라벨 Extra 키
+        const val EXTRA_EARLY_WAKE_UP_MINUTES = "EXTRA_EARLY_WAKE_UP_MINUTES"
+        const val EXTRA_SITUATION_LABEL = "EXTRA_SITUATION_LABEL"
 
         private const val PATH_SENSING_STARTED = "/WATCH_SENSING_STARTED"  // [신규] 센싱 시작 경로
         private const val PATH_TRIGGER_ALARM = "/TRIGGER_ALARM"

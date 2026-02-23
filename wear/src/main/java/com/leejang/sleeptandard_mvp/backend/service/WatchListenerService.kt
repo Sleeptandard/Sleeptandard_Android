@@ -37,15 +37,17 @@ class WatchListenerService : WearableListenerService() {
         try {
             if (data.size < 8) return
             
-            // [수정] targetAlarmTime (첫 8바이트) + situationLabel (나머지 바이트, optional)
-            val targetAlarmTime = ByteBuffer.wrap(data).long
-            val situationLabel = if (data.size > 8) {
-                String(data, 8, data.size - 8, Charsets.UTF_8)
+            // 메시지 구조: [8바이트 targetAlarmTime] + [4바이트 earlyWakeUpMinutes] + [나머지 바이트 label UTF-8]
+            val buffer = ByteBuffer.wrap(data)
+            val targetAlarmTime = buffer.long
+            val earlyWakeUpMinutes = if (data.size >= 12) buffer.int else 30
+            val situationLabel = if (data.size > 12) {
+                String(data, 12, data.size - 12, Charsets.UTF_8)
             } else {
-                "normal" // 기본값
+                "normal"
             }
             
-            Log.i(TAG, "START_TRACKING received. Target: $targetAlarmTime, Label: $situationLabel")
+            Log.i(TAG, "START_TRACKING received. Target: $targetAlarmTime, EarlyWakeUp: ${earlyWakeUpMinutes}min, Label: $situationLabel")
 
             // 1. 필수 권한 목록 확인
             val permissions = arrayOf(
@@ -64,7 +66,8 @@ class WatchListenerService : WearableListenerService() {
                 // 3-A. 권한이 다 있으면 -> 바로 서비스 시작
                 val intent = Intent(this, SmartAlarmService::class.java).apply {
                     putExtra(SmartAlarmService.EXTRA_TARGET_TIME, targetAlarmTime)
-                    putExtra(SmartAlarmService.EXTRA_SITUATION_LABEL, situationLabel) // [추가] 라벨 전달
+                    putExtra(SmartAlarmService.EXTRA_EARLY_WAKE_UP_MINUTES, earlyWakeUpMinutes)
+                    putExtra(SmartAlarmService.EXTRA_SITUATION_LABEL, situationLabel)
                     action = SmartAlarmService.ACTION_START_TRACKING
                 }
                 startForegroundService(intent)
@@ -72,11 +75,11 @@ class WatchListenerService : WearableListenerService() {
                 // 3-B. 권한이 없으면 -> PermissionActivity 실행하여 권한 요청
                 Log.w(TAG, "Permissions missing. Launching Activity.")
 
-                // (PermissionActivity import가 없으면 여기서 빨간줄이 뜹니다)
                 val intent = Intent(this, PermissionActivity::class.java).apply {
                     putExtra(SmartAlarmService.EXTRA_TARGET_TIME, targetAlarmTime)
-                    putExtra(SmartAlarmService.EXTRA_SITUATION_LABEL, situationLabel) // [추가] 라벨 전달
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) // 서비스에서 액티비티 켤 때 필수
+                    putExtra(SmartAlarmService.EXTRA_EARLY_WAKE_UP_MINUTES, earlyWakeUpMinutes)
+                    putExtra(SmartAlarmService.EXTRA_SITUATION_LABEL, situationLabel)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
                 startActivity(intent)
             }

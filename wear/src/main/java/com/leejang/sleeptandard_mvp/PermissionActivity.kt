@@ -13,7 +13,8 @@ import com.leejang.sleeptandard_mvp.service.SmartAlarmService
 class PermissionActivity : ComponentActivity() {
 
     private var targetAlarmTime: Long = 0L
-    private var situationLabel: String = "normal" // [추가] 특별 상황 라벨
+    private var earlyWakeUpMinutes: Int = 30
+    private var situationLabel: String = "normal"
 
     private val requiredPermissions = arrayOf(
         Manifest.permission.BODY_SENSORS,
@@ -36,9 +37,9 @@ class PermissionActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // 인텐트로 전달받은 목표 시간 및 라벨 저장
         targetAlarmTime = intent.getLongExtra(SmartAlarmService.EXTRA_TARGET_TIME, 0L)
-        situationLabel = intent.getStringExtra(SmartAlarmService.EXTRA_SITUATION_LABEL) ?: "normal" // [추가]
+        earlyWakeUpMinutes = intent.getIntExtra(SmartAlarmService.EXTRA_EARLY_WAKE_UP_MINUTES, 30)
+        situationLabel = intent.getStringExtra(SmartAlarmService.EXTRA_SITUATION_LABEL) ?: "normal"
 
         if (checkPermissions()) {
             startTrackingService()
@@ -56,10 +57,11 @@ class PermissionActivity : ComponentActivity() {
     private fun startTrackingService() {
         val serviceIntent = Intent(this, SmartAlarmService::class.java).apply {
             putExtra(SmartAlarmService.EXTRA_TARGET_TIME, targetAlarmTime)
-            putExtra(SmartAlarmService.EXTRA_SITUATION_LABEL, situationLabel) // [추가] 라벨 전달
+            putExtra(SmartAlarmService.EXTRA_EARLY_WAKE_UP_MINUTES, earlyWakeUpMinutes)
+            putExtra(SmartAlarmService.EXTRA_SITUATION_LABEL, situationLabel)
             action = SmartAlarmService.ACTION_START_TRACKING
         }
         startForegroundService(serviceIntent)
-        finish() // 역할 끝났으니 종료
+        finish()
     }
 }
