@@ -37,17 +37,18 @@ class WatchListenerService : WearableListenerService() {
         try {
             if (data.size < 8) return
             
-            // 메시지 구조: [8바이트 targetAlarmTime] + [4바이트 earlyWakeUpMinutes] + [나머지 바이트 label UTF-8]
+            // 메시지 구조: [8바이트 targetAlarmTime] + [4바이트 earlyWakeUpMinutes] + [1바이트 isRem] + [나머지 바이트 label UTF-8]
             val buffer = ByteBuffer.wrap(data)
             val targetAlarmTime = buffer.long
             val earlyWakeUpMinutes = if (data.size >= 12) buffer.int else 30
-            val situationLabel = if (data.size > 12) {
-                String(data, 12, data.size - 12, Charsets.UTF_8)
+            val isRem = if (data.size >= 13) data[12] == 1.toByte() else true
+            val situationLabel = if (data.size > 13) {
+                String(data, 13, data.size - 13, Charsets.UTF_8)
             } else {
                 "normal"
             }
             
-            Log.i(TAG, "START_TRACKING received. Target: $targetAlarmTime, EarlyWakeUp: ${earlyWakeUpMinutes}min, Label: $situationLabel")
+            Log.i(TAG, "START_TRACKING received. Target: $targetAlarmTime, EarlyWakeUp: ${earlyWakeUpMinutes}min, isRem: $isRem, Label: $situationLabel")
 
             // 1. 필수 권한 목록 확인
             val permissions = arrayOf(
@@ -67,6 +68,7 @@ class WatchListenerService : WearableListenerService() {
                 val intent = Intent(this, SmartAlarmService::class.java).apply {
                     putExtra(SmartAlarmService.EXTRA_TARGET_TIME, targetAlarmTime)
                     putExtra(SmartAlarmService.EXTRA_EARLY_WAKE_UP_MINUTES, earlyWakeUpMinutes)
+                    putExtra(SmartAlarmService.EXTRA_IS_REM, isRem)
                     putExtra(SmartAlarmService.EXTRA_SITUATION_LABEL, situationLabel)
                     action = SmartAlarmService.ACTION_START_TRACKING
                 }
@@ -78,6 +80,7 @@ class WatchListenerService : WearableListenerService() {
                 val intent = Intent(this, PermissionActivity::class.java).apply {
                     putExtra(SmartAlarmService.EXTRA_TARGET_TIME, targetAlarmTime)
                     putExtra(SmartAlarmService.EXTRA_EARLY_WAKE_UP_MINUTES, earlyWakeUpMinutes)
+                    putExtra(SmartAlarmService.EXTRA_IS_REM, isRem)
                     putExtra(SmartAlarmService.EXTRA_SITUATION_LABEL, situationLabel)
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }

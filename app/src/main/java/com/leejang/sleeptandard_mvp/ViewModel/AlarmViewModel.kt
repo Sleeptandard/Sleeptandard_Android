@@ -66,18 +66,20 @@ class AlarmViewModel(application: Application): AndroidViewModel(application) {
                     return@launch
                 }
                 
-                // 메시지 구조: [8바이트 targetTime] + [4바이트 earlyWakeUpMinutes] + [나머지 바이트 label UTF-8]
+                // 메시지 구조: [8바이트 targetTime] + [4바이트 earlyWakeUpMinutes] + [1바이트 isRem] + [나머지 바이트 label UTF-8]
                 val watchNodeId = connectedNodes.first().id
                 val earlyWakeUpMinutes = _alarm.earlyWakeUpMinutes
+                val isRem = _alarm.isRem
                 val labelBytes = situationLabel.toByteArray(Charsets.UTF_8)
-                val payload = ByteBuffer.allocate(8 + 4 + labelBytes.size)
+                val payload = ByteBuffer.allocate(8 + 4 + 1 + labelBytes.size)
                     .putLong(targetTime)
                     .putInt(earlyWakeUpMinutes)
+                    .put(if (isRem) 1.toByte() else 0.toByte())
                     .put(labelBytes)
                     .array()
                 
                 Tasks.await(messageClient.sendMessage(watchNodeId, PATH_START_TRACKING, payload))
-                Log.i(TAG, "START_TRACKING sent to Watch. Target: $targetTime, EarlyWakeUp: ${earlyWakeUpMinutes}min, Label: $situationLabel")
+                Log.i(TAG, "START_TRACKING sent to Watch. Target: $targetTime, EarlyWakeUp: ${earlyWakeUpMinutes}min, isRem: $isRem, Label: $situationLabel")
                 
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to start sleep tracking", e)

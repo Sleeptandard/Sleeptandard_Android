@@ -72,10 +72,11 @@ class SmartAlarmService : Service(), SensorEventListener {
 
     private var targetAlarmTime: Long = 0L
     private var smartWindowMs: Long = 30 * 60 * 1000L
+    private var isRem: Boolean = true
     private var sessionStartTime: Long = 0L
     private var situationLabel: String = "normal"
     private val inferenceHistory = Collections.synchronizedList(mutableListOf<StageEntry>())
-    private var consecutiveRemCount = 0  // REM 수면 연속 카운트
+    private var consecutiveTriggerCount = 0
     private var lastStage: SleepStage = SleepStage.UNKNOWN
     private var hasTriggered = false
     private var hasNotifiedSensingStart = false  // [신규] 첫 센싱 감지 알림 플래그
@@ -91,9 +92,10 @@ class SmartAlarmService : Service(), SensorEventListener {
                 targetAlarmTime = intent.getLongExtra(EXTRA_TARGET_TIME, 0L)
                 val earlyWakeUpMinutes = intent.getIntExtra(EXTRA_EARLY_WAKE_UP_MINUTES, 30)
                 smartWindowMs = earlyWakeUpMinutes * 60 * 1000L
+                isRem = intent.getBooleanExtra(EXTRA_IS_REM, true)
                 situationLabel = intent.getStringExtra(EXTRA_SITUATION_LABEL) ?: "normal"
                 sessionStartTime = System.currentTimeMillis()
-                Log.i(TAG, "Service Started. Target: $targetAlarmTime, SmartWindow: ${earlyWakeUpMinutes}min, Label: $situationLabel")
+                Log.i(TAG, "Service Started. Target: $targetAlarmTime, SmartWindow: ${earlyWakeUpMinutes}min, TriggerStage: ${if (isRem) "REM" else "N1"}, Label: $situationLabel")
                 
                 // [핵심] Foreground Service는 가능한 빨리 startForeground 호출 필요
                 createNotificationChannel()
@@ -311,21 +313,21 @@ class SmartAlarmService : Service(), SensorEventListener {
         var shouldTrigger = false
         var triggerReason = ""
 
-        // REM 수면 3번 연속 감지 시 알람 트리거
-        if (currentStage == SleepStage.REM) {
-            if (lastStage == SleepStage.REM) {
-                consecutiveRemCount++
+        val targetStage = if (isRem) SleepStage.REM else SleepStage.LIGHT
+
+        if (currentStage == targetStage) {
+            if (lastStage == targetStage) {
+                consecutiveTriggerCount++
             } else {
-                consecutiveRemCount = 1
+                consecutiveTriggerCount = 1
             }
 
-            if (consecutiveRemCount >= 3) {
+            if (consecutiveTriggerCount >= 3) {
                 shouldTrigger = true
-                triggerReason = "3 consecutive REM Sleep"
+                triggerReason = "3 consecutive ${targetStage.name} Sleep"
             }
         } else {
-            // REM이 아닌 경우 (WAKE, LIGHT, DEEP, UNKNOWN) 카운트 초기화
-            consecutiveRemCount = 0
+            consecutiveTriggerCount = 0
         }
 
         // [핵심] 트리거 조건 충족 시 자동 종료 시퀀스 실행
@@ -532,6 +534,7 @@ class SmartAlarmService : Service(), SensorEventListener {
         const val ACTION_STOP_AND_SEND_RESULT = "com.leejang.sleeptandard_mvp.STOP_AND_SEND_RESULT"
         const val EXTRA_TARGET_TIME = "EXTRA_TARGET_TIME"
         const val EXTRA_EARLY_WAKE_UP_MINUTES = "EXTRA_EARLY_WAKE_UP_MINUTES"
+        const val EXTRA_IS_REM = "EXTRA_IS_REM"
         const val EXTRA_SITUATION_LABEL = "EXTRA_SITUATION_LABEL"
 
         private const val PATH_SENSING_STARTED = "/WATCH_SENSING_STARTED"  // [신규] 센싱 시작 경로
