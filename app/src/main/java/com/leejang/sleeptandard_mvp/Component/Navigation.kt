@@ -43,8 +43,8 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.createGraph
 import com.leejang.sleeptandard_mvp.backend.manager.SupabaseManager
-import io.github.jan.supabase.gotrue.gotrue
-import io.github.jan.supabase.gotrue.providers.builtin.Email
+import io.github.jan.supabase.auth.auth
+import io.github.jan.supabase.auth.providers.builtin.Email
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -191,20 +191,20 @@ fun AppNav(
                         try {
                             // 1단계: 로그인 시도
                             try {
-                                SupabaseManager.client.gotrue.loginWith(Email) {
+                                SupabaseManager.client.auth.signInWith(Email) {
                                     email = "test@sleep.com"
                                     password = "testpassword123!"
                                 }
                             } catch (loginEx: Exception) {
                                 // 로그인 실패 시 회원가입 시도 (계정 없음으로 간주)
-                                SupabaseManager.client.gotrue.signUpWith(Email) {
+                                SupabaseManager.client.auth.signUpWith(Email) {
                                     email = "test@sleep.com"
                                     password = "testpassword123!"
                                 }
                             }
 
                             // 2단계: user_id 추출
-                            val userId = SupabaseManager.client.gotrue.currentUserOrNull()?.id
+                            val userId = SupabaseManager.client.auth.currentUserOrNull()?.id
                                 ?: throw Exception("user_id를 가져올 수 없습니다.")
 
                             // 3단계: SharedPreferences에 user_id 저장
