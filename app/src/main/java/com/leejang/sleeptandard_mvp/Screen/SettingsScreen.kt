@@ -34,7 +34,8 @@ fun SettingsScreen(
     onClickQnA: ()-> Unit,
     onClickPermission: ()-> Unit,
     onClickTutorial: ()-> Unit,
-    onClickSendingData: ()-> Unit
+    onClickSendingData: ()-> Unit,
+    onClickTestLogin: ()-> Unit
 ){
 
     Column(
@@ -291,6 +292,69 @@ fun SettingsScreen(
 
                     Text(
                         "수면데이터 보내기",
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontSize = 11.sp,
+                            lineHeight = 20.sp,
+                            color = Color(0x99F1F1F1),
+                        )
+                    )
+                }
+            }
+
+        }
+
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(71.dp),
+            shape = RoundedCornerShape(20.dp),
+            color = Color(0x26F1F1F1),
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp
+        ) {
+
+            Row(
+                modifier = Modifier
+                    .padding(vertical = 16.dp, horizontal = 20.dp)
+                    .clickable { onClickTestLogin() }
+            ) {
+                Column(
+                    modifier = Modifier
+                        .padding(vertical = 5.dp)
+                        .fillMaxHeight()
+                        .background(Color.Transparent),
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(28.dp)
+                            .background(color = Color(0xFF465467), shape = CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            modifier = Modifier
+                                .size(18.dp),
+                            painter = painterResource(AppIcons.SettingsMail),
+                            contentDescription = "테스트 로그인"
+                        )
+                    }
+                }
+
+                Spacer(Modifier.width(16.dp))
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                ) {
+                    Text(
+                        "테스트 로그인",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+
+                    Spacer(Modifier.height(2.dp))
+
+                    Text(
+                        "Supabase 계정 인증",
                         style = MaterialTheme.typography.bodyMedium.copy(
                             fontSize = 11.sp,
                             lineHeight = 20.sp,

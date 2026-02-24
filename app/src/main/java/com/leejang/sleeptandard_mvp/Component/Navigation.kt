@@ -1,8 +1,10 @@
 package com.leejang.sleeptandard_mvp.Component
 
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,6 +27,7 @@ import com.leejang.sleeptandard_mvp.Screen.HomeScreen
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -39,6 +42,12 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.createGraph
+import com.leejang.sleeptandard_mvp.backend.manager.SupabaseManager
+import io.github.jan.supabase.gotrue.gotrue
+import io.github.jan.supabase.gotrue.providers.builtin.Email
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.leejang.sleeptandard_mvp.AlarmRingScreen
 
 import com.leejang.sleeptandard_mvp.ClassFile.Alarm
@@ -164,6 +173,8 @@ fun AppNav(
 
         composable(Screen.Settings.route) {
 
+            val scope = rememberCoroutineScope()
+
             SettingsScreen(
                 onClickQnA = {
                     rememberNavController.navigate(Screen.QnA.route)
@@ -174,7 +185,45 @@ fun AppNav(
                     data = Uri.fromParts("package", context.packageName, null)
                 }
                     context.startActivity(intent)},
-                onClickSendingData = {rememberNavController.navigate(Screen.SendingData.route)}
+                onClickSendingData = {rememberNavController.navigate(Screen.SendingData.route)},
+                onClickTestLogin = {
+                    scope.launch(Dispatchers.IO) {
+                        try {
+                            // 1단계: 로그인 시도
+                            try {
+                                SupabaseManager.client.gotrue.loginWith(Email) {
+                                    email = "test@sleep.com"
+                                    password = "testpassword123!"
+                                }
+                            } catch (loginEx: Exception) {
+                                // 로그인 실패 시 회원가입 시도 (계정 없음으로 간주)
+                                SupabaseManager.client.gotrue.signUpWith(Email) {
+                                    email = "test@sleep.com"
+                                    password = "testpassword123!"
+                                }
+                            }
+
+                            // 2단계: user_id 추출
+                            val userId = SupabaseManager.client.gotrue.currentUserOrNull()?.id
+                                ?: throw Exception("user_id를 가져올 수 없습니다.")
+
+                            // 3단계: SharedPreferences에 user_id 저장
+                            context.getSharedPreferences("sleep_prefs", Context.MODE_PRIVATE)
+                                .edit()
+                                .putString("user_id", userId)
+                                .apply()
+
+                            // 4단계: 성공 Toast
+                            withContext(Dispatchers.Main) {
+                                Toast.makeText(context, "테스트 로그인 성공!\nID: $userId", Toast.LENGTH_LONG).show()
+                            }
+                        } catch (e: Exception) {
+                            withContext(Dispatchers.Main) {
+                                Toast.makeText(context, "로그인 실패: ${e.message}", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
+                }
             )
         }
 

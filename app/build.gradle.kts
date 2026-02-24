@@ -83,6 +83,12 @@ dependencies {
     // Coroutines support for Play Services (await() 사용)
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3")
 
+    // Supabase Auth (gotrue-kt) — 테스트 로그인용
+    implementation(platform("io.github.jan-tennert.supabase:bom:2.6.1"))
+    implementation("io.github.jan-tennert.supabase:gotrue-kt")
+    // Ktor OkHttp engine (Supabase 내부 HTTP 통신에 필요)
+    implementation("io.ktor:ktor-client-okhttp:2.3.12")
+
     // 앱 시작 화면
     implementation("androidx.core:core-splashscreen:1.0.1")
 
