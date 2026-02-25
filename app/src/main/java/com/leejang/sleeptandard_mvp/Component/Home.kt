@@ -369,7 +369,7 @@ fun DiamondStepSlider(
     onValueChange: (Int) -> Unit,
     modifier: Modifier = Modifier,
     valueRange: IntRange = 10..30,
-    step: Int = 5
+    step: Int = 1
 ) {
     val steps = remember { valueRange.step(step).toList() }
     val density = LocalDensity.current
@@ -386,7 +386,7 @@ fun DiamondStepSlider(
                     // ✅ 터치 좌표에서 여유 공간을 뺀 값을 기준으로 비율 계산
                     val usableWidth = size.width - (2 * sideMarginPx)
                     val ratio = ((offset.x - sideMarginPx) / usableWidth).coerceIn(0f, 1f)
-                    val rawValue = valueRange.first + (valueRange.last - valueRange.first) * ratio
+                    val rawValue = valueRange.last + (valueRange.first - valueRange.last) * ratio
                     val snappedValue = steps.minByOrNull { abs(it - rawValue) } ?: value
                     onValueChange(snappedValue)
                 }
@@ -395,7 +395,7 @@ fun DiamondStepSlider(
                 detectDragGestures { change, _ ->
                     val usableWidth = size.width - (2 * sideMarginPx)
                     val ratio = ((change.position.x - sideMarginPx) / usableWidth).coerceIn(0f, 1f)
-                    val rawValue = valueRange.first + (valueRange.last - valueRange.first) * ratio
+                    val rawValue = valueRange.last + (valueRange.first - valueRange.last) * ratio
                     val snappedValue = steps.minByOrNull { abs(it - rawValue) } ?: value
                     onValueChange(snappedValue)
                 }
@@ -404,7 +404,8 @@ fun DiamondStepSlider(
         val fullWidth = constraints.maxWidth.toFloat()
         val usableWidth = fullWidth - (2 * sideMarginPx)
 
-        val fraction = (value - valueRange.first).toFloat() / (valueRange.last - valueRange.first)
+        /** 실험중 **/
+        val fraction = (value - valueRange.last).toFloat() / (valueRange.first - valueRange.last)
         // ✅ 손잡이 중심점이 sideMarginPx부터 시작하도록 설정
         val thumbCenterX = sideMarginPx + (usableWidth * fraction)
 

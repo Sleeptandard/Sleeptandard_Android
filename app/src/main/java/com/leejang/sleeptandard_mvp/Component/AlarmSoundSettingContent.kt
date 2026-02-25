@@ -172,6 +172,7 @@ fun AlarmSoundSettingContent(
                     .size(32.dp),
                 onClick = {
                     stopPreview()
+
                     onClose()
                 }) {
                 Icon(
@@ -377,6 +378,7 @@ fun AlarmSoundSettingContent(
                                 selected = (selectedUri == tone.uri),
                                 onClick = {
                                     selectedUri = tone.uri
+                                    /** 실험중 **/
                                     onSelectUriString(tone.uri.toString())
                                     playPreview(tone.uri)
                                 }
@@ -401,6 +403,7 @@ fun AlarmSoundSettingContent(
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
+
                     .align(Alignment.BottomCenter), // 바닥에 붙임
                 color = Color(0xFF060D17)
             ) {
@@ -578,6 +581,7 @@ private fun ToneRow(
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
+                .height(70.dp)
                 .clip(RoundedCornerShape(100.dp))
                 .clickable(onClick = {
                     onClick()
