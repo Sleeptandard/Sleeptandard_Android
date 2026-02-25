@@ -47,6 +47,6 @@
 }
 
 # Keep backend model classes (sleep stage prediction)
--keep class com.leejang.sleeptandard_mvp.backend.model.** { *; }
--keep class com.leejang.sleeptandard_mvp.backend.processing.** { *; }
+-keep class com.leejang.sleeptandard.backend.model.** { *; }
+-keep class com.leejang.sleeptandard.backend.processing.** { *; }
 
