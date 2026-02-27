@@ -45,9 +45,18 @@ import androidx.navigation.createGraph
 import com.leejang.sleeptandard_mvp.backend.manager.SupabaseManager
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.providers.builtin.Email
+import io.github.jan.supabase.storage.storage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import kotlin.random.Random
 import com.leejang.sleeptandard_mvp.AlarmRingScreen
 
 import com.leejang.sleeptandard_mvp.ClassFile.Alarm
@@ -220,6 +229,85 @@ fun AppNav(
                         } catch (e: Exception) {
                             withContext(Dispatchers.Main) {
                                 Toast.makeText(context, "로그인 실패: ${e.message}", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
+                },
+                onClickAiServerTest = {
+                    scope.launch(Dispatchers.IO) {
+                        try {
+                            // 시작 Toast
+                            withContext(Dispatchers.Main) {
+                                Toast.makeText(context, "서버 파이프라인 테스트 시작...", Toast.LENGTH_SHORT).show()
+                            }
+
+                            // 1단계: user_id 확인
+                            val userId = context
+                                .getSharedPreferences("sleep_prefs", Context.MODE_PRIVATE)
+                                .getString("user_id", null)
+                            if (userId.isNullOrBlank()) {
+                                withContext(Dispatchers.Main) {
+                                    Toast.makeText(context, "먼저 테스트 로그인을 진행해주세요.", Toast.LENGTH_SHORT).show()
+                                }
+                                return@launch
+                            }
+
+                            // 2단계: 더미 CSV 생성
+                            val csvFile = java.io.File(context.cacheDir, "pipeline_test_data.csv")
+                            csvFile.bufferedWriter().use { writer ->
+                                writer.write("timestamp,acc_mean,acc_std,acc_max,acc_min,hr_mean,hr_rmssd_approx\n")
+                                repeat(5) {
+                                    val row = listOf(
+                                        System.currentTimeMillis(),
+                                        Random.nextFloat() * 2f,
+                                        Random.nextFloat() * 0.5f,
+                                        Random.nextFloat() * 3f,
+                                        Random.nextFloat() * 0.1f,
+                                        (55 + Random.nextInt(30)).toFloat(),
+                                        Random.nextFloat() * 50f
+                                    ).joinToString(",")
+                                    writer.write("$row\n")
+                                }
+                            }
+
+                            // 3단계: Supabase Storage 업로드
+                            val dateStr = SimpleDateFormat("yyyy_MM_dd", Locale.getDefault()).format(Date())
+                            val filePath = "$userId/${dateStr}_test.csv"
+                            SupabaseManager.client.storage
+                                .from("raw-data")
+                                .upload(filePath, csvFile.readBytes()) {
+                                    upsert = true
+                                }
+
+                            // 4단계: Modal API POST 요청
+                            val currentDate = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+                            val jsonPayload = """
+                                {
+                                  "user_id": "$userId",
+                                  "date": "$currentDate",
+                                  "file_path": "$filePath"
+                                }
+                            """.trimIndent()
+
+                            val httpClient = OkHttpClient()
+                            val requestBody = jsonPayload.toRequestBody("application/json".toMediaType())
+                            val request = Request.Builder()
+                                .url("https://devkashu0623--sleep-alarm-trainer-trigger-training.modal.run")
+                                .post(requestBody)
+                                .build()
+
+                            val response = httpClient.newCall(request).execute()
+                            if (!response.isSuccessful) {
+                                throw Exception("Modal 서버 응답 오류: ${response.code}")
+                            }
+
+                            // 5단계: 성공 Toast
+                            withContext(Dispatchers.Main) {
+                                Toast.makeText(context, "테스트 성공: 업로드 및 파인튜닝 요청 완료!", Toast.LENGTH_LONG).show()
+                            }
+                        } catch (e: Exception) {
+                            withContext(Dispatchers.Main) {
+                                Toast.makeText(context, "테스트 실패: ${e.message}", Toast.LENGTH_LONG).show()
                             }
                         }
                     }

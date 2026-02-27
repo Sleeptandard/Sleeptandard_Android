@@ -2,6 +2,7 @@ package com.leejang.sleeptandard_mvp.backend.manager
 
 import io.github.jan.supabase.auth.Auth
 import io.github.jan.supabase.createSupabaseClient
+import io.github.jan.supabase.storage.Storage
 
 /**
  * Supabase 클라이언트 싱글톤.
@@ -22,5 +23,6 @@ object SupabaseManager {
         supabaseKey = SUPABASE_ANON_KEY
     ) {
         install(Auth)
+        install(Storage)
     }
 }

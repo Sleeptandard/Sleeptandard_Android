@@ -35,7 +35,8 @@ fun SettingsScreen(
     onClickPermission: ()-> Unit,
     onClickTutorial: ()-> Unit,
     onClickSendingData: ()-> Unit,
-    onClickTestLogin: ()-> Unit
+    onClickTestLogin: ()-> Unit,
+    onClickAiServerTest: ()-> Unit
 ){
 
     Column(
@@ -355,6 +356,69 @@ fun SettingsScreen(
 
                     Text(
                         "Supabase 계정 인증",
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontSize = 11.sp,
+                            lineHeight = 20.sp,
+                            color = Color(0x99F1F1F1),
+                        )
+                    )
+                }
+            }
+
+        }
+
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(71.dp),
+            shape = RoundedCornerShape(20.dp),
+            color = Color(0x26F1F1F1),
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp
+        ) {
+
+            Row(
+                modifier = Modifier
+                    .padding(vertical = 16.dp, horizontal = 20.dp)
+                    .clickable { onClickAiServerTest() }
+            ) {
+                Column(
+                    modifier = Modifier
+                        .padding(vertical = 5.dp)
+                        .fillMaxHeight()
+                        .background(Color.Transparent),
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(28.dp)
+                            .background(color = Color(0xFF465467), shape = CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            modifier = Modifier
+                                .size(18.dp),
+                            painter = painterResource(AppIcons.SettingsMail),
+                            contentDescription = "AI 서버 연동 테스트"
+                        )
+                    }
+                }
+
+                Spacer(Modifier.width(16.dp))
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                ) {
+                    Text(
+                        "AI 서버 연동 테스트",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+
+                    Spacer(Modifier.height(2.dp))
+
+                    Text(
+                        "업로드 및 파인튜닝 요청",
                         style = MaterialTheme.typography.bodyMedium.copy(
                             fontSize = 11.sp,
                             lineHeight = 20.sp,

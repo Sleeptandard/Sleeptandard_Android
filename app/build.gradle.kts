@@ -83,11 +83,14 @@ dependencies {
     // Coroutines support for Play Services (await() 사용)
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3")
 
-    // Supabase Auth — 테스트 로그인용
+    // Supabase Auth & Storage — 테스트 로그인 + 파일 업로드용
     implementation(platform("io.github.jan-tennert.supabase:bom:3.1.4"))
     implementation("io.github.jan-tennert.supabase:auth-kt")
+    implementation("io.github.jan-tennert.supabase:storage-kt")
     // Ktor OkHttp engine (Supabase 내부 HTTP 통신에 필요, supabase-kt 3.x 는 Ktor 3.x 사용)
     implementation("io.ktor:ktor-client-okhttp:3.0.3")
+    // OkHttp (Modal 서버 직접 POST 요청용)
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
     // 앱 시작 화면
     implementation("androidx.core:core-splashscreen:1.0.1")
