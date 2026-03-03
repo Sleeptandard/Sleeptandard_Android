@@ -581,7 +581,7 @@ private fun ToneRow(
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(70.dp)
+                .height(60.dp)
                 .clip(RoundedCornerShape(100.dp))
                 .clickable(onClick = {
                     onClick()
