@@ -31,6 +31,7 @@ object AppIcons {
 
     // 알람 설정 완료 화면
     @DrawableRes val SettedActivityDark = R.drawable.ic_setted_activity_dark
+    @DrawableRes val SettedActivityGraph = R.drawable.ic_setted_graph
 
     // 일지 화면
     @DrawableRes val JournalSmile = R.drawable.ic_journal_smile
