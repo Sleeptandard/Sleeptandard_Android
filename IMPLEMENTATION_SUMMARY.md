@@ -351,10 +351,10 @@ adb -s [PHONE_SERIAL] logcat | grep -E "PhoneListenerService|SendingDataScreen"
 
 ```bash
 # Wear OS
-adb -s [WATCH_SERIAL] shell ls -lh /data/data/com.leejang.sleeptandard_mvp/files/
+adb -s [WATCH_SERIAL] shell ls -lh /data/data/sleeptandardes/
 
 # Mobile
-adb -s [PHONE_SERIAL] shell ls -lh /data/data/com.leejang.sleeptandard_mvp/files/
+adb -s [PHONE_SERIAL] shell ls -lh /data/data/sleeptandardes/
 ```
 
 ### 연결 확인
