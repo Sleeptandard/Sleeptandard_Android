@@ -417,7 +417,7 @@ fun OptionsSection(
                         )
                     )
                     .clickable {
-                        onVibrationClick()
+                        onRemCheckedChange(!isRem)
                     }
             ) {
                 Column(
