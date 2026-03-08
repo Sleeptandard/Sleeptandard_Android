@@ -88,5 +88,6 @@ dependencies {
 
     implementation(libs.coil.compose)
 
-    wearApp(project(":wear"))
+    // 워치앱 선언 (현재  비활성화 중)
+    // wearApp(project(":wear"))
 }

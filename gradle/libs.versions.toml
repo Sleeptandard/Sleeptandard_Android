@@ -16,7 +16,7 @@ uiText = "1.10.0"
 animationCore = "1.10.0"
 coil = "2.7.0"
 wearToolingPreview = "1.0.0"
-project-versionCode = "5"
+project-versionCode = "6"
 project-versionName = "1.1.1"
 
 [libraries]
