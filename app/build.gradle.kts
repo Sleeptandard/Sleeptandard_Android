@@ -5,13 +5,13 @@ plugins {
 }
 
 android {
-    namespace = "com.leejang.sleeptandard_mvp"
+    namespace = "com.leejang.sleeptandard"
     compileSdk {
         version = release(36)
     }
 
     defaultConfig {
-        applicationId = "com.leejang.sleeptandard_mvp"
+        applicationId = "com.leejang.sleeptandard"
         minSdk = 26
         targetSdk = 35
         versionCode = libs.versions.project.versionCode.get().toInt()
@@ -88,5 +88,6 @@ dependencies {
 
     implementation(libs.coil.compose)
 
-    wearApp(project(":wear"))
+    // 워치앱 선언 (현재  비활성화 중)
+    // wearApp(project(":wear"))
 }
