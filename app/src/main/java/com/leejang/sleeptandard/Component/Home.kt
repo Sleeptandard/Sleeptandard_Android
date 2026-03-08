@@ -883,7 +883,7 @@ fun DiamondStepSlider(
     onValueChange: (Int) -> Unit,
     modifier: Modifier = Modifier,
     valueRange: IntRange = 10..30,
-    step: Int = 5
+    step: Int = 1
 ) {
     val steps = remember { valueRange.step(step).toList() }
     val density = LocalDensity.current
