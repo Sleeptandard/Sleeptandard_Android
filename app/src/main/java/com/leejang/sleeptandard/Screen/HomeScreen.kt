@@ -354,8 +354,8 @@ fun HomeScreen(
                         .padding(horizontal = 15.dp),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text("최소 10분", color = Color(0xFFAFF4F9), fontSize = 13.sp)
                     Text("최대 30분", color = Color(0xFFAFF4F9), fontSize = 13.sp)
+                    Text("최소 10분", color = Color(0xFFAFF4F9), fontSize = 13.sp)
                 }
                 Column(
                     modifier = Modifier
@@ -433,14 +433,14 @@ fun HomeScreen(
                     onClick = { showSituationModal = true }
                 )
 
-                /*
+
                 Button(
                     onClick = goExperimentScreen
                 ) {
                     Text(text = "goExperimentScreen")
                 }
 
-                 */
+
 
                 /***사운드 선택 모달***/
                 if (showSoundSheet) {
@@ -464,6 +464,8 @@ fun HomeScreen(
                             onClose = { showSoundSheet = false },
                             onSelectUriString = { uriStr ->
                                 // ViewModel에 저장 (그리고 prefs 저장)
+                                /** 실험중 **/
+                                /*
                                 alarmViewModel.saveAlarm(
                                     hour = selectedHour,
                                     minute = selectedMinute,
@@ -473,6 +475,11 @@ fun HomeScreen(
                                     volume = selectedVolume,
                                     earlyWakeUpMinutes = earlyWakeUpMinutes,
                                     isRem = isRem,
+                                )
+
+                                 */
+                                alarmViewModel.editUriString(
+                                    ringtoneUri = uriStr
                                 )
                             },
                             defaultVolume = alarmViewModel.alarm.volume,

@@ -2,12 +2,14 @@ package com.leejang.sleeptandard.Component
 
 
 import android.content.Context
+import android.graphics.BlurMaskFilter
 import android.media.AudioManager
 import android.media.Ringtone
 import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Build
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -30,20 +32,33 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.innerShadow
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Paint
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.shadow.Shadow
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
 import com.leejang.sleeptandard.ui.theme.AppIcons
-import com.leejang.sleeptandard.ui.theme.DarkBackground
-
+import com.leejang.sleeptandard.ui
+.theme.DarkBackground
 private data class SystemTone(
     val title: String,
     val uri: Uri
@@ -169,13 +184,79 @@ fun AlarmSoundSettingContent(
         Spacer(Modifier.weight(24f))
 
         // 상단 토글 바
-        Surface(
+        Box(
             modifier = Modifier
                 .fillMaxWidth(5 / 6f)
-                .height(50.dp),
-            shape = RoundedCornerShape(100.dp),
-            color = card,
-            tonalElevation = 0.dp
+                .height(56.dp)
+                .drawBehind {
+                    // 흰색 그림자
+                    val highlightColor1 = Color(0xFFB9C8DF).copy(alpha = 0.15f)
+                    val blurRadius1 = 20.dp.toPx()
+                    val offsetX1 = (-5).dp.toPx()
+                    val offsetY1 = (-5).dp.toPx()
+
+                    drawIntoCanvas { canvas ->
+                        val paint = Paint().asFrameworkPaint().apply {
+                            color = highlightColor1.toArgb()
+                            maskFilter = BlurMaskFilter(blurRadius1, BlurMaskFilter.Blur.NORMAL)
+                        }
+
+                        canvas.nativeCanvas.drawRoundRect(
+                            offsetX1, offsetY1,
+                            size.width + offsetX1, size.height + offsetY1,
+                            // 여기
+                            100.dp.toPx(), 100.dp.toPx(),
+                            paint
+                        )
+                    }
+
+                    // 검은색 그림자
+                    // 여기
+                    val highlightColor2 = Color(0xFF020710).copy(alpha = 0.7f)
+                    val blurRadius2 = 15.dp.toPx()
+                    val offsetX2 = (8).dp.toPx()
+                    val offsetY2 = (8).dp.toPx()
+
+                    drawIntoCanvas { canvas ->
+                        val paint = Paint().asFrameworkPaint().apply {
+                            color = highlightColor2.toArgb()
+                            maskFilter = BlurMaskFilter(blurRadius2, BlurMaskFilter.Blur.NORMAL)
+                        }
+
+                        canvas.nativeCanvas.drawRoundRect(
+                            offsetX2, offsetY2,
+                            size.width + offsetX2, size.height + offsetY2,
+                            // 여기
+                            100.dp.toPx(), 100.dp.toPx(),
+                            paint
+                        )
+                    }
+
+                    val gradient = Brush.linearGradient(
+                        colors = listOf(
+                            Color(0xFF07101E),
+                            Color(0xFF101A2A)
+                        ),
+                        // 시작점을 박스의 정중앙(Center)으로 설정
+                        start = Offset(size.width/2, size.height/2),
+                        // 끝점을 박스의 우측 상단으로부터 2/3 지점 설정
+                        end = Offset(size.width, size.height * 2 / 3)
+                    )
+                    drawRoundRect(
+                        brush = gradient,
+                        cornerRadius = CornerRadius(100.dp.toPx(), 100.dp.toPx()) // 30dp만큼 둥글게
+                    )
+                }
+                // Inner shadow
+                .innerShadow(
+                    shape = RoundedCornerShape(30.dp),
+                    shadow = Shadow(
+                        radius = 25.dp,
+                        spread = (-12).dp,
+                        color = Color(0xFF030E1E).copy(0.8f),
+                        offset = DpOffset(x = 5.dp, 6.dp)
+                    )
+                )
         ) {
             Row(
                 modifier = Modifier
@@ -223,31 +304,79 @@ fun AlarmSoundSettingContent(
                 .fillMaxWidth()
                 .padding(top = 16.dp)
                 .weight(620f) // ✅ 남은 공간을 전부 차지하게
+
         ) {
 
 
             if (soundEnabled) {
                 // ✅ 리스트가 토글 밑으로 쫙 깔리게
                 Surface(
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .drawBehind {
+                            // 흰색 그림자
+                            val highlightColor1 = Color(0xFFB9C8DF).copy(alpha = 0.15f)
+                            val blurRadius1 = 20.dp.toPx()
+                            val offsetX1 = (-5).dp.toPx()
+                            val offsetY1 = (-5).dp.toPx()
+
+                            drawIntoCanvas { canvas ->
+                                val paint = Paint().asFrameworkPaint().apply {
+                                    color = highlightColor1.toArgb()
+                                    maskFilter = BlurMaskFilter(blurRadius1, BlurMaskFilter.Blur.NORMAL)
+                                }
+
+                                canvas.nativeCanvas.drawRoundRect(
+                                    offsetX1, offsetY1,
+                                    size.width + offsetX1, size.height + offsetY1,
+                                    30.dp.toPx(), 30.dp.toPx(),
+                                    paint
+                                )
+                            }
+
+                        }
+                    ,
                     shape = RoundedCornerShape(40.dp),
                     color = card,
                     tonalElevation = 0.dp
                 ) {
                     LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .drawBehind {
+                                val gradient = Brush.linearGradient(
+                                    colors = listOf(
+                                        Color(0xFF07101E),
+                                        Color(0xFF101A2A)
+                                    ),
+                                    // 시작점을 박스의 정중앙(Center)으로 설정
+                                    start = Offset(size.width / 2, size.height / 2),
+                                    // 끝점을 박스의 우측 하단(BottomEnd)으로 설정
+                                    end = Offset(size.width, size.height * 2 / 3)
+                                )
+                                drawRoundRect(
+                                    brush = gradient,
+                                    cornerRadius = CornerRadius(
+                                        30.dp.toPx(),
+                                        30.dp.toPx()
+                                    ) // 30dp만큼 둥글게
+                                )
+                            }
+                        ,
                         contentPadding = PaddingValues(
-                            top = 10.dp,
+                            top = 20.dp,
                             bottom = sliderHeight + sliderPaddingBottom + 10.dp
                         ),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                        verticalArrangement = Arrangement.spacedBy(20.dp)
                     ) {
                         items(tones) { tone ->
+
                             ToneRow(
                                 title = tone.title,
                                 selected = (selectedUri == tone.uri),
                                 onClick = {
                                     selectedUri = tone.uri
+                                    /** 실험중 **/
                                     onSelectUriString(tone.uri.toString())
                                     playPreview(tone.uri)
                                 }
@@ -272,6 +401,7 @@ fun AlarmSoundSettingContent(
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
+
                     .align(Alignment.BottomCenter), // 바닥에 붙임
                 color = Color(0xFF060D17)
             ) {
@@ -323,43 +453,170 @@ private fun ToneRow(
     onClick: () -> Unit
 ) {
     val line = Color(0xFFD4DCE4)
-
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 20.dp)
-            .clickable(onClick = onClick)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            RadioButton(
-                modifier = Modifier.scale(1.25f),
-                selected = selected,
-                onClick = onClick,
-                colors = RadioButtonDefaults.colors().copy(
-                    selectedColor = Color(0xFFAAEDF2),
-                    unselectedColor = Color(0xFFD4DCE4)
+            //.clickable(onClick = onClick)
+            .toneDrawBehind(selected)
+            /*
+            .drawBehind{
+                // 흰색 그림자
+                val highlightColor1 = Color(0xFFFAFAFA).copy(alpha = 0.1f)
+                val blurRadius1 = 20.dp.toPx()
+                val offsetX1 = (-1).dp.toPx()
+                val offsetY1 = (-2).dp.toPx()
+
+                drawIntoCanvas { canvas ->
+                    val paint = Paint().asFrameworkPaint().apply {
+                        color = highlightColor1.toArgb()
+                        maskFilter = BlurMaskFilter(blurRadius1, BlurMaskFilter.Blur.NORMAL)
+                    }
+
+                    canvas.nativeCanvas.drawRoundRect(
+                        offsetX1, offsetY1,
+                        size.width + offsetX1, size.height + offsetY1,
+                        // 여기
+                        100.dp.toPx(), 100.dp.toPx(),
+                        paint
+                    )
+                }
+
+                val gradient = Brush.linearGradient(
+                    colors = listOf(
+                        Color(0xFF07101E),
+                        Color(0xFF101A2A)
+                    ),
+                    // 시작점을 박스의 정중앙(Center)으로 설정
+                    start = Offset(size.width / 2, size.height / 2),
+                    // 끝점을 박스의 우측 하단(BottomEnd)으로 설정
+                    end = Offset(size.width, size.height * 2 / 3)
+                )
+                drawRoundRect(
+                    brush = gradient,
+                    cornerRadius = CornerRadius(
+                        100.dp.toPx(),
+                        100.dp.toPx()
+                    ) // 30dp만큼 둥글게
+                )
+            }
+
+
+             */
+            // 안쪽 흰그림자
+            .then(
+                if (selected) {
+                    Modifier
+                } else {
+                    // ✅ 선택되지 않았을 때는 빈 모디파이어 반환
+                    // ✅ 선택되었을 때만 innerShadow 적용
+                    Modifier.innerShadow(
+                        shape = RoundedCornerShape(100.dp),
+                        shadow = Shadow(
+                            radius = 25.dp,
+                            color = Color(0xFFFFFFFF).copy(0.20f),
+                            offset = DpOffset(x = (-5).dp, (-5).dp),
+                            spread = (-12).dp
+                        )
+                    )
+                    Modifier.innerShadow(
+                        shape = RoundedCornerShape(100.dp),
+                        shadow = Shadow(
+                            radius = 12.dp,
+                            color = Color(0xFF020710).copy(alpha = 0.9f),
+                            offset = DpOffset(x = 6.dp, 8.dp),
+                            spread = 6.dp
+                        )
+                    )
+                    Modifier.innerShadow(
+                        shape = RoundedCornerShape(100.dp),
+                        shadow = Shadow(
+                            radius = 4.dp,
+                            color = Color(0xFF000000),
+                            offset = DpOffset(x = 0.dp, 1.dp),
+
+                            )
+                    )
+                }
+            )
+            /*
+            .innerShadow(
+                shape = RoundedCornerShape(100.dp),
+                shadow = Shadow(
+                    radius = 25.dp,
+                    color = Color(0xFFFFFFFF).copy(0.20f),
+                    offset = DpOffset(x = (-5).dp, (-5).dp),
+                    spread = (-12).dp
                 )
             )
-            Spacer(Modifier.width(10.dp))
-            Text(
-                text = title,
-                style = MaterialTheme.typography.bodySmall.copy(
-                    fontSize = 18.sp
-                ),
+
+
+
+            // 안쪽 검정 그림자
+            .innerShadow(
+                shape = RoundedCornerShape(100.dp),
+                shadow = Shadow(
+                    radius = 12.dp,
+                    color = Color(0xFF020710).copy(alpha = 0.9f),
+                    offset = DpOffset(x = 6.dp, 8.dp),
+                    spread = 6.dp
+                )
             )
-        }
-        HorizontalDivider(
+
+            // 안에 테두리
+
+            .innerShadow(
+                shape = RoundedCornerShape(100.dp),
+                shadow = Shadow(
+                    radius = 4.dp,
+                    color = Color(0xFF000000),
+                    offset = DpOffset(x = 0.dp, 1.dp),
+
+                )
+            )
+             */
+    ) {
+        Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 52.dp, end = 10.dp),
-            thickness = 0.6.dp,
-            color = line
-        )
+                .height(60.dp)
+                .clip(RoundedCornerShape(100.dp))
+                .clickable(onClick = {
+                    onClick()
+
+                })
+
+        ) {
+
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                /*
+                RadioButton(
+                    modifier = Modifier.scale(1.25f),
+                    selected = selected,
+                    onClick = onClick,
+                    colors = RadioButtonDefaults.colors().copy(
+                        selectedColor = Color(0xFFAAEDF2),
+                        unselectedColor = Color(0xFFD4DCE4)
+                    )
+                )
+
+                 */
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        fontSize = 18.sp,
+                        color = Color.White
+                    ),
+                )
+            }
+        }
     }
 }
 
@@ -445,4 +702,88 @@ private fun loadAlarmTones(context: Context): List<SystemTone> {
         }
     }
     return list
+}
+
+fun Modifier.toneDrawBehind(
+    selected: Boolean,
+) = this.drawBehind(){
+    if(selected){
+        // 흰색 그림자
+        val highlightColor1 = Color(0xFF020710).copy(alpha = 0.8f)
+        val blurRadius1 = 15.dp.toPx()
+        val offsetX1 = (8).dp.toPx()
+        val offsetY1 = (8).dp.toPx()
+
+        drawIntoCanvas { canvas ->
+            val paint = Paint().asFrameworkPaint().apply {
+                color = highlightColor1.toArgb()
+                maskFilter = BlurMaskFilter(blurRadius1, BlurMaskFilter.Blur.NORMAL)
+            }
+
+            canvas.nativeCanvas.drawRoundRect(
+                offsetX1, offsetY1,
+                size.width + offsetX1, size.height + offsetY1,
+                // 여기
+                100.dp.toPx(), 100.dp.toPx(),
+                paint
+            )
+        }
+
+        val gradient = Brush.linearGradient(
+            colors = listOf(
+                Color(0xFF8BC6CA),
+                Color(0xFF568284)
+            ),
+            // 시작점을 박스의 정중앙(Center)으로 설정
+            start = Offset(0f, 0f),
+            // 끝점을 박스의 우측 하단(BottomEnd)으로 설정
+            end = Offset(0f, size.height)
+        )
+        drawRoundRect(
+            brush = gradient,
+            cornerRadius = CornerRadius(
+                100.dp.toPx(),
+                100.dp.toPx()
+            ) // 30dp만큼 둥글게
+        )
+    }else{
+        // 흰색 그림자
+        val highlightColor1 = Color(0xFFFAFAFA).copy(alpha = 0.1f)
+        val blurRadius1 = 20.dp.toPx()
+        val offsetX1 = (-1).dp.toPx()
+        val offsetY1 = (-2).dp.toPx()
+
+        drawIntoCanvas { canvas ->
+            val paint = Paint().asFrameworkPaint().apply {
+                color = highlightColor1.toArgb()
+                maskFilter = BlurMaskFilter(blurRadius1, BlurMaskFilter.Blur.NORMAL)
+            }
+
+            canvas.nativeCanvas.drawRoundRect(
+                offsetX1, offsetY1,
+                size.width + offsetX1, size.height + offsetY1,
+                // 여기
+                100.dp.toPx(), 100.dp.toPx(),
+                paint
+            )
+        }
+
+        val gradient = Brush.linearGradient(
+            colors = listOf(
+                Color(0xFF07101E),
+                Color(0xFF101A2A)
+            ),
+            // 시작점을 박스의 정중앙(Center)으로 설정
+            start = Offset(size.width / 2, size.height / 2),
+            // 끝점을 박스의 우측 하단(BottomEnd)으로 설정
+            end = Offset(size.width, size.height * 2 / 3)
+        )
+        drawRoundRect(
+            brush = gradient,
+            cornerRadius = CornerRadius(
+                100.dp.toPx(),
+                100.dp.toPx()
+            ) // 30dp만큼 둥글게
+        )
+    }
 }

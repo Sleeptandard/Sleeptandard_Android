@@ -29,6 +29,11 @@ class AlarmViewModel(application: Application): AndroidViewModel(application) {
         return true
     }
 
+    /**  실험중  **/
+    fun editUriString(ringtoneUri: String){
+        _alarm.ringtoneUri = ringtoneUri
+    }
+
     // 외부에서 Alarm 객체를 통째로 넣어줄 수 있게
     fun copyAlarm(alarm: Alarm) {
         _alarm = alarm
