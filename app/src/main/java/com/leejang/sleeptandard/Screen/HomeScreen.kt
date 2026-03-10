@@ -354,8 +354,8 @@ fun HomeScreen(
                         .padding(horizontal = 15.dp),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text("최소 10분", color = Color(0xFFAFF4F9), fontSize = 13.sp)
                     Text("최대 30분", color = Color(0xFFAFF4F9), fontSize = 13.sp)
+                    Text("최소 10분", color = Color(0xFFAFF4F9), fontSize = 13.sp)
                 }
                 Column(
                     modifier = Modifier
