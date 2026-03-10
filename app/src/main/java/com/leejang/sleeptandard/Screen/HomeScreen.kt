@@ -240,7 +240,7 @@ fun HomeScreen(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Spacer(
-            modifier = Modifier.height(74.dp)
+            modifier = Modifier.weight(74f)
         )
         Box(
             modifier = Modifier
@@ -325,9 +325,9 @@ fun HomeScreen(
                     selectedIsAm = isAm
                 },
             )
-        }
+        } 
 
-        Spacer(Modifier.height(30.dp))
+        Spacer(Modifier.weight(15f))
 
         Box(
             modifier = Modifier
@@ -380,7 +380,7 @@ fun HomeScreen(
                     fontSize = 15.sp
                 )
 
-                Spacer(Modifier.height(15.dp))
+                // Spacer(Modifier.height(15.dp))
 
                 OptionsSection(
                     modifier = Modifier
@@ -550,14 +550,19 @@ fun HomeScreen(
                                                         } else {
                                                             // ✅ 삭제 실행
                                                             if (selectedCustomForDelete.isNotEmpty()) {
-                                                                val updated = customOptions.filterNot { it.id in selectedCustomForDelete }
+                                                                val updated =
+                                                                    customOptions.filterNot { it.id in selectedCustomForDelete }
 
                                                                 customOptions = updated
-                                                                selectedSituation = selectedSituation - selectedCustomForDelete
+                                                                selectedSituation =
+                                                                    selectedSituation - selectedCustomForDelete
 
                                                                 customSituationPrefs.save(
                                                                     updated.map { option ->
-                                                                        CustomSituationItem(id = option.id, label = option.label)
+                                                                        CustomSituationItem(
+                                                                            id = option.id,
+                                                                            label = option.label
+                                                                        )
                                                                     }
                                                                 )
                                                             }
@@ -739,7 +744,11 @@ fun HomeScreen(
                                             modifier = Modifier
                                                 .weight(1f)
                                                 .height(48.dp)
-                                                .border(width = 1.dp, color = Color(0xFF2A2D32), shape = RoundedCornerShape(size = 100.dp)),
+                                                .border(
+                                                    width = 1.dp,
+                                                    color = Color(0xFF2A2D32),
+                                                    shape = RoundedCornerShape(size = 100.dp)
+                                                ),
                                             shape = RoundedCornerShape(100.dp),
                                             colors = ButtonDefaults.buttonColors(
                                                 containerColor = MaterialTheme.colorScheme.onPrimary.copy(
@@ -958,6 +967,7 @@ fun HomeScreen(
 
             }
         }
+        Spacer(Modifier.weight(32f))
     }
 }
 

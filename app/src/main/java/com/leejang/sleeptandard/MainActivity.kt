@@ -15,7 +15,7 @@ import com.leejang.sleeptandard.Permission.checkFullScreenIntentPermission
 import com.leejang.sleeptandard.Permission.checkNotificationPermission
 import com.leejang.sleeptandard.Permission.checkSetExactAlarms
 import com.leejang.sleeptandard.Prefs.AlarmPreferences
-
+// 마이크 테스트
 class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {

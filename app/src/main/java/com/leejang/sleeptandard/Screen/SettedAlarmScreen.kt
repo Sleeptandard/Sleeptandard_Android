@@ -381,7 +381,7 @@ private fun DelayedContentReserveSpace(
 
 fun getWakeUpTimeRange(hour:Int, minute: Int, isAm: Boolean, earlyWakeUpMinutes: Int): String{
     var earlyTotalMinute: Int = (hour * 60 + minute) - earlyWakeUpMinutes
-    val ampm = true
+    val ampm = if(isAm) "오전" else "오후"
     if(earlyTotalMinute < 0) earlyTotalMinute += 12 * 60
 
     return String.format(
