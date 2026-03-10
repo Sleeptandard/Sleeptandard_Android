@@ -433,13 +433,15 @@ fun HomeScreen(
                     onClick = { showSituationModal = true }
                 )
 
-
+/*
                 Button(
                     onClick = goExperimentScreen
                 ) {
                     Text(text = "goExperimentScreen")
                 }
 
+
+ */
 
 
                 /***사운드 선택 모달***/
