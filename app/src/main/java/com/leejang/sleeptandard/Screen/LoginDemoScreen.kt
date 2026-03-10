@@ -59,13 +59,22 @@ class AuthViewModel : ViewModel() {
 
     // 이메일 확인 API 호출 로직
     // 1단계: 이메일 확인 로직
-    fun checkEmail(email: String) {
+    fun checkEmail(
+        email: String
+        // exist: Boolean
+    ) {
         viewModelScope.launch {
             // 더미 서버에서 확인
             val exists = AuthRepository.isEmailExists(email)
             currentStep = if (exists) AuthStep.LoginPassword(email)
             else AuthStep.SignupPassword(email)
         }
+
+        //TODO: 백엔드 통신받은 사인으로 분기
+        /*
+        cureentStep = if (exist) AuthStep.LoginPassword(email)
+            else AuthStep.SignupPassword(email)
+         */
     }
 
     // 2단계(경로A): 로그인 실행
