@@ -43,6 +43,7 @@ import kotlinx.coroutines.launch
 
 
 // 유저의 로그인/회원가입 진행 단계 정의 및 email + 비번 저장 클래스
+// TODO: 여기서 정보 뺴가야될듯?
 sealed class AuthStep {
     object EmailInput : AuthStep()                          // 1단계: 이메일 입력
     data class LoginPassword(val email: String) : AuthStep() // 2단계(경로A): 로그인 비밀번호
@@ -55,7 +56,6 @@ sealed class AuthStep {
 class AuthViewModel : ViewModel() {
     var currentStep by mutableStateOf<AuthStep>(AuthStep.EmailInput)
         private set
-    val currentStepRead: AuthStep = currentStep
 
     // 이메일 확인 API 호출 로직
     // 1단계: 이메일 확인 로직
@@ -116,14 +116,14 @@ fun LoginDemoScreen(
 
     Column(
         modifier = Modifier
-            .fillMaxWidth(),
+            .fillMaxSize(),
         horizontalAlignment = Alignment.CenterHorizontally
     ){
         Spacer(Modifier.weight(1f))
 
         // 현재 스텝에 따른 UI 출력 with animation
         AnimatedContent(
-            targetState = authViewModel.currentStepRead,
+            targetState = authViewModel.currentStep,
             transitionSpec = {
                 fadeIn(animationSpec = tween(400)).togetherWith(fadeOut(animationSpec = tween(400)))
             },
@@ -222,7 +222,7 @@ fun EmailInputStep(onConfirm: (String) -> Unit) {
             placeholder = "이메일" //
         )
 
-        Spacer(Modifier.weight(1f)) // 버튼을 하단으로 밀어냄
+        Spacer(Modifier.height(100.dp)) // 버튼을 하단으로 밀어냄
 
         Button(
             enabled = email.contains("@"), // 간단한 유효성 검사
