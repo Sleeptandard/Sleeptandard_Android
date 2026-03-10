@@ -3,6 +3,7 @@ package com.leejang.sleeptandard.Component
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -48,6 +49,7 @@ import com.leejang.sleeptandard.Prefs.AlarmPreferences
 import com.leejang.sleeptandard.Screen.ExperimentScreen
 import com.leejang.sleeptandard.Screen.InquireScreen
 import com.leejang.sleeptandard.Screen.JournalScreen
+import com.leejang.sleeptandard.Screen.LoginDemoScreen
 import com.leejang.sleeptandard.Screen.QnAScreen
 import com.leejang.sleeptandard.Screen.QnADetailScreen
 import com.leejang.sleeptandard.Screen.ReviewAlarmScreen
@@ -78,6 +80,9 @@ sealed class Screen(val route: String, val showBottomBar: Boolean = true) {
 
 
     object Experiment : Screen("experiment", showBottomBar = false)
+
+    /** 로그인 데모 **/
+    object LoginDemo : Screen("loginDemo", showBottomBar = false)
 }
 
 @Composable
@@ -104,6 +109,7 @@ fun AppNav(
     val alarmPrefs = AlarmPreferences(context)
     val isAlarmSetted = alarmPrefs.isAlarmSet()
 
+
     val navGraph = rememberNavController.createGraph(startDestination = startDestination){
 
         /* 컴포즈 스플래시
@@ -117,6 +123,15 @@ fun AppNav(
             SplashScreen()
         }
          */
+        /** 로그인 데모 **/
+        composable(Screen.LoginDemo.route){
+            LoginDemoScreen(
+                onComplete = { greeting ->
+                    rememberNavController.navigate(Screen.Home.route)
+                    Toast.makeText(context, greeting, Toast.LENGTH_SHORT).show()
+                }
+            )
+        }
 
         composable(Screen.Home.route){
             HomeScreen(
