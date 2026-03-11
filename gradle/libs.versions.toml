@@ -16,6 +16,7 @@ uiText = "1.10.0"
 animationCore = "1.10.0"
 coil = "2.7.0"
 wearToolingPreview = "1.0.0"
+animation = "1.10.4"
 project-versionCode = "7"
 project-versionName = "1.1.2"
 
@@ -42,6 +43,7 @@ androidx-compose-ui-text = { group = "androidx.compose.ui", name = "ui-text", ve
 androidx-compose-animation-core = { group = "androidx.compose.animation", name = "animation-core", version.ref = "animationCore" }
 coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
 androidx-wear-tooling-preview = { group = "androidx.wear", name = "wear-tooling-preview", version.ref = "wearToolingPreview" }
+androidx-compose-animation = { group = "androidx.compose.animation", name = "animation", version.ref = "animation" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
