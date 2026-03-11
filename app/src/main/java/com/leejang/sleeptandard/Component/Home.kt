@@ -21,7 +21,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
@@ -35,7 +34,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.SwitchDefaults
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.innerShadow
 import androidx.compose.ui.draw.scale
@@ -829,28 +832,6 @@ fun OptionsSection(
     }
 }
 
-// ✅ 중복되는 그림자 및 배경 로직을 위한 공통 컴포넌트
-@Composable
-fun OptionBox(
-    height: androidx.compose.ui.unit.Dp = 56.dp,
-    onClick: () -> Unit,
-    content: @Composable () -> Unit
-) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth(0.95f)
-            .height(height)
-            .drawBehind {
-                // 그림자 및 그라데이션 로직 (기존 코드와 동일)
-                // ... (생략: 기존의 drawBehind 및 innerShadow 로직)
-            }
-            .clickable { onClick() },
-        contentAlignment = Alignment.Center
-    ) {
-        content()
-    }
-}
-
 @Composable
 fun ConfirmButton(
     modifier: Modifier = Modifier,
@@ -889,7 +870,7 @@ fun DiamondStepSlider(
     val density = LocalDensity.current
 
     // ✅ 양옆 터치 여유 공간 (20dp 정도 주면 아주 넉넉합니다)
-    val sideMarginPx = with(density) { 20.dp.toPx() }
+    val sideMarginPx = with(density) { 15.dp.toPx() }
 
     BoxWithConstraints(
         modifier = modifier
@@ -900,7 +881,7 @@ fun DiamondStepSlider(
                     // ✅ 터치 좌표에서 여유 공간을 뺀 값을 기준으로 비율 계산
                     val usableWidth = size.width - (2 * sideMarginPx)
                     val ratio = ((offset.x - sideMarginPx) / usableWidth).coerceIn(0f, 1f)
-                    val rawValue = valueRange.last + (valueRange.first - valueRange.last) * ratio
+                    val rawValue = valueRange.first + (valueRange.last - valueRange.first) * ratio
                     val snappedValue = steps.minByOrNull { abs(it - rawValue) } ?: value
                     onValueChange(snappedValue)
                 }
@@ -909,7 +890,7 @@ fun DiamondStepSlider(
                 detectDragGestures { change, _ ->
                     val usableWidth = size.width - (2 * sideMarginPx)
                     val ratio = ((change.position.x - sideMarginPx) / usableWidth).coerceIn(0f, 1f)
-                    val rawValue = valueRange.last + (valueRange.first - valueRange.last) * ratio
+                    val rawValue = valueRange.first + (valueRange.last - valueRange.first) * ratio
                     val snappedValue = steps.minByOrNull { abs(it - rawValue) } ?: value
                     onValueChange(snappedValue)
                 }
@@ -918,7 +899,7 @@ fun DiamondStepSlider(
         val fullWidth = constraints.maxWidth.toFloat()
         val usableWidth = fullWidth - (2 * sideMarginPx)
 
-        val fraction = (value - valueRange.last).toFloat() / (valueRange.first - valueRange.last)
+        val fraction = (value - valueRange.first).toFloat() / (valueRange.last - valueRange.first)
         // ✅ 손잡이 중심점이 sideMarginPx부터 시작하도록 설정
         val thumbCenterX = sideMarginPx + (usableWidth * fraction)
 
@@ -950,12 +931,113 @@ fun DiamondStepSlider(
         // 3. 마름모 손잡이
         Box(
             modifier = Modifier
+
                 .offset { IntOffset(thumbCenterX.toInt() - 9.dp.toPx().toInt(), 0) }
                 .align(Alignment.CenterStart)
+                .drawBehind {
+                    // 검은색 그림자
+                    val highlightColor2 = Color(0xFF020710).copy(alpha = 0.9f)
+                    val blurRadius2 = 15.dp.toPx()
+                    val offsetX2 = (-5).dp.toPx()
+                    val offsetY2 = (0).dp.toPx()
+
+                    drawIntoCanvas { canvas ->
+                        val paint = Paint().asFrameworkPaint().apply {
+                            color = highlightColor2.toArgb()
+                            maskFilter = BlurMaskFilter(blurRadius2, BlurMaskFilter.Blur.NORMAL)
+                        }
+
+                        canvas.nativeCanvas.drawRoundRect(
+                            offsetX2, offsetY2,
+                            size.width + offsetX2, size.height + offsetY2,
+                            15.dp.toPx(), 15.dp.toPx(),
+                            paint
+                        )
+                    }
+                }
                 .size(18.dp)
                 .graphicsLayer(rotationZ = 45f)
                 .background(Color.White, RoundedCornerShape(2.dp))
+
         )
+    }
+}
+
+@Composable
+fun WakeUpWindow(
+    modifier: Modifier = Modifier,
+    onValueChange: (Int) -> Unit,
+    selectedHour: Int,
+    selectedMinute: Int,
+    selectedIsAm: Boolean,
+    earlyWakeUpMinutes: Int,
+){
+    var isNarrow: Boolean by remember {mutableStateOf(false)}
+
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ){
+        // 기상 윈도우 슬라이더 부분
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 15.dp),
+            horizontalArrangement = Arrangement.SpaceAround,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "10분",
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    color = Color(0xFFAFF4F9),
+                    fontSize = 13.sp
+                )
+            )
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth(0.8f) // 슬라이더의 전체 길이
+                    .padding(end = 4.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                DiamondStepSlider(
+                    value = earlyWakeUpMinutes,
+                    onValueChange = onValueChange,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+
+            Text("30분", style = MaterialTheme.typography.bodyMedium.copy(
+                color = Color(0xFFAFF4F9),
+                fontSize = 13.sp
+            )
+            )
+        }
+
+        Text(
+            text = calculateWakeUpRangeText(
+                selectedHour,
+                selectedMinute,
+                selectedIsAm,
+                earlyWakeUpMinutes
+            ),
+            style = MaterialTheme.typography.bodyMedium.copy(
+                fontSize = 15.sp,
+            )
+        )
+
+        Spacer(Modifier.height(8.dp))
+
+        if(earlyWakeUpMinutes < 20){
+            Text(
+                text = "윈도우가 좁으면 적절한 기상 타이밍이 없을 수 있어요",
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontSize = 13.sp,
+                    color = Color(0xFFFF9F0A)
+                )
+            )
+        }
+
     }
 }
 

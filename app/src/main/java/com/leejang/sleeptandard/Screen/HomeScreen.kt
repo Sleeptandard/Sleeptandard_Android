@@ -21,7 +21,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.LaunchedEffect
 
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.Color
@@ -58,6 +57,7 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.innerShadow
 import androidx.compose.ui.geometry.CornerRadius
@@ -82,6 +82,7 @@ import com.leejang.sleeptandard.Component.ConfirmButton
 import com.leejang.sleeptandard.Component.CustomTimePicker
 import com.leejang.sleeptandard.Component.DiamondStepSlider
 import com.leejang.sleeptandard.Component.OptionsSection
+import com.leejang.sleeptandard.Component.WakeUpWindow
 import com.leejang.sleeptandard.Component.calculateWakeUpRangeText
 import com.leejang.sleeptandard.Permission.isAllEssentialPermissionsGranted
 import com.leejang.sleeptandard.Permission.openAppSettings
@@ -329,6 +330,9 @@ fun HomeScreen(
 
         Spacer(Modifier.weight(15f))
 
+        /********    타임피커 밑    ********/
+
+        // 밑을 전부 박스로 감싸서 버튼을 눌렀을때 타임피커 휠의 움직임을 멈추게 함
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -347,28 +351,42 @@ fun HomeScreen(
                     .fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-
+                WakeUpWindow(
+                    modifier = Modifier
+                        .fillMaxWidth(),
+                    onValueChange = {earlyWakeUpMinutes = it},
+                    selectedHour = selectedHour,
+                    selectedMinute = selectedMinute,
+                    selectedIsAm = selectedIsAm,
+                    earlyWakeUpMinutes = earlyWakeUpMinutes
+                )
+                /*
+                // 기상 윈도우 슬라이더 부분
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 15.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("최대 30분", color = Color(0xFFAFF4F9), fontSize = 13.sp)
-                    Text("최소 10분", color = Color(0xFFAFF4F9), fontSize = 13.sp)
+                    Text("10분", color = Color(0xFFAFF4F9), fontSize = 13.sp)
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth(0.85f) // 슬라이더의 전체 길이
+                            .padding(vertical = 4.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        DiamondStepSlider(
+                            value = earlyWakeUpMinutes,
+                            onValueChange = { earlyWakeUpMinutes = it },
+                            modifier = Modifier.fillMaxWidth(9f/10f)
+                        )
+                    }
+
+                    Text("30분", color = Color(0xFFAFF4F9), fontSize = 13.sp)
                 }
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth(0.85f) // ✅ 여기서 슬라이더의 전체 길이를 조절하세요! (0.7 = 70%)
-                        .padding(vertical = 4.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    DiamondStepSlider(
-                        value = earlyWakeUpMinutes,
-                        onValueChange = { earlyWakeUpMinutes = it },
-                        modifier = Modifier.fillMaxWidth(9f/10f)
-                    )
-                }
+
                 Text(
                     text = calculateWakeUpRangeText(
                         selectedHour,
@@ -379,6 +397,8 @@ fun HomeScreen(
                     color = Color.White,
                     fontSize = 15.sp
                 )
+
+                 */
 
                 // Spacer(Modifier.height(15.dp))
 
@@ -442,6 +462,7 @@ fun HomeScreen(
 
 
  */
+/************************       이 밑으로 모달 창          *********************************/
 
 
                 /***사운드 선택 모달***/
@@ -969,6 +990,7 @@ fun HomeScreen(
 
             }
         }
+        // TODO: dp로 바꿔라
         Spacer(Modifier.weight(32f))
     }
 }
