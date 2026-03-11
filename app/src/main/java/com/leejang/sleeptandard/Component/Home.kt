@@ -1,6 +1,7 @@
 package com.leejang.sleeptandard.Component
 
 import android.graphics.BlurMaskFilter
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -960,6 +961,28 @@ fun DiamondStepSlider(
                 .background(Color.White, RoundedCornerShape(2.dp))
 
         )
+
+        Box(
+            modifier = Modifier
+            .offset { IntOffset(thumbCenterX.toInt() - 42.dp.toPx().toInt(), (-(32)).dp.toPx().toInt()) },
+            contentAlignment = Alignment.Center
+            ){
+            Image(
+                modifier = Modifier
+                    .size(84.dp,45.dp),
+                painter = painterResource(AppIcons.HomeWindowIndicator),
+                contentDescription = "windowIndicator",
+            )
+            Text(
+                modifier = Modifier
+                    .offset(y = (-3).dp),
+                text = String.format("%d분 전", value),
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontSize = 14.sp
+                ),
+
+            )
+        }
     }
 }
 
