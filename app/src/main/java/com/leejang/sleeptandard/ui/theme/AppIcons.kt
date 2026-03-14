@@ -15,6 +15,8 @@ object AppIcons {
     @DrawableRes val HomeVibrate = R.drawable.ic_home_vibrate
     @DrawableRes val HomeVolume = R.drawable.ic_home_volume
     @DrawableRes val HomeWindowIndicator = R.drawable.image_home_window_indicator
+    @DrawableRes val HomeSwitch = R.drawable.ic_home_switch
+    @DrawableRes val HomeArrowRight = R.drawable.ic_home_arrow_right
 
     @DrawableRes val SettedActivity = R.drawable.ic_setted_activity
 

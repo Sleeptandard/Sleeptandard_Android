@@ -465,7 +465,7 @@ fun HomeScreen(
 /************************       이 밑으로 모달 창          *********************************/
 
 
-                /***사운드 선택 모달***/
+                /*** 사운드 선택 모달 ***/
                 if (showSoundSheet) {
                     val soundSheetState =
                         rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -488,7 +488,7 @@ fun HomeScreen(
                             onSelectUriString = { uriStr ->
                                 // ViewModel에 저장 (그리고 prefs 저장)
                                 /** 실험중 **/
-                                /*
+
                                 alarmViewModel.saveAlarm(
                                     hour = selectedHour,
                                     minute = selectedMinute,
@@ -500,10 +500,13 @@ fun HomeScreen(
                                     isRem = isRem,
                                 )
 
-                                 */
+
+                                /*
                                 alarmViewModel.editUriString(
                                     ringtoneUri = uriStr
                                 )
+
+                                 */
                             },
                             defaultVolume = alarmViewModel.alarm.volume,
                         )
