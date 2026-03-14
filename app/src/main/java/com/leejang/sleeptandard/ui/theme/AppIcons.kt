@@ -13,6 +13,7 @@ object AppIcons {
 
     // 홈 화면
     @DrawableRes val HomeVibrate = R.drawable.ic_home_vibrate
+    @DrawableRes val HomeNoVibrate = R.drawable.ic_home_no_vibrate
     @DrawableRes val HomeVolume = R.drawable.ic_home_volume
     @DrawableRes val HomeWindowIndicator = R.drawable.image_home_window_indicator
     @DrawableRes val HomeSwitch = R.drawable.ic_home_switch

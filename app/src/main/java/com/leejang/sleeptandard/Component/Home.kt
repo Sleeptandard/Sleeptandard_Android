@@ -428,11 +428,16 @@ fun OptionsSection(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Icon(
-                            painter = painterResource(AppIcons.HomeVibrate),
-                            contentDescription = "진동 설정",
-                            tint = MaterialTheme.colorScheme.tertiary
-                        )
+                        Box(
+                            modifier = Modifier.size(22.dp),
+                            contentAlignment = Alignment.Center
+                        ){
+                            Icon(
+                                painter = painterResource(if(vibTogglechecked) AppIcons.HomeVibrate else AppIcons.HomeNoVibrate),
+                                contentDescription = "진동 설정",
+                                tint = MaterialTheme.colorScheme.tertiary
+                            )
+                        }
                         Spacer(Modifier.weight(1f))
                         Switch(
                             modifier = Modifier
@@ -1087,6 +1092,7 @@ fun DiamondStepSlider(
 
         )
 
+        // indicator
         Box(
             modifier = Modifier
             .offset { IntOffset(thumbCenterX.toInt() - 42.dp.toPx().toInt(), (-(32)).dp.toPx().toInt()) },
