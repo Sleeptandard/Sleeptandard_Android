@@ -63,8 +63,6 @@ import androidx.compose.ui.unit.sp
 import com.leejang.sleeptandard.ui.theme.AppIcons
 import kotlin.math.roundToInt
 
-enum class WakeCondition { BAD, SOSO, GOOD }
-
 @Composable
 fun ReviewAlarmScreen(
     onSubmit: () -> Unit = {}   // 선택값 전달 콜백
@@ -82,23 +80,24 @@ fun ReviewAlarmScreen(
             Color(0xFFAFF4F9))
     )
 
-
+    var feedbackScore by remember { mutableFloatStateOf(0.5f) } // 0.0f ~ 1.0f
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(linearGradation),
+            .background(linearGradation)
+            .padding(horizontal = 20.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        var varue by remember { mutableFloatStateOf(0.5f) }
+
 
         Spacer(Modifier.weight(100f))
 
         Text(
             text = "오늘 기상 점수는 몇 점인가요?",
             style = MaterialTheme.typography.bodyMedium.copy(
-                fontSize = 20.sp,
+                fontSize = 25.sp,
                 color = Color.White
             )
         )
@@ -108,16 +107,16 @@ fun ReviewAlarmScreen(
         Text(
             text = "얼마나 개운하게 일어났는지 알려주세요",
             style = MaterialTheme.typography.bodyMedium.copy(
-                fontSize = 16.sp,
+                fontSize = 18.sp,
                 color = Color.White.copy(alpha = 0.7f)
             )
         )
 
         Spacer(Modifier.weight(104f))
 
-        SemiCircularSliderEX(
-            value = varue,
-            onValueChange = { f -> varue = f }
+        SemiCircularSlider(
+            value = feedbackScore,
+            onValueChange = { score -> feedbackScore = score }
         )
 
         Spacer(Modifier.weight(104f))
@@ -138,7 +137,7 @@ fun ReviewAlarmScreen(
                     .background(brush = buttonGradient)
                     .blur(30.dp)
                     .border(
-                        width = 1.dp,
+                        width = 2.dp,
                         brush = Brush.verticalGradient(
                             colors = listOf(
                                 Color.White.copy(alpha = 0.4f), // 테두리 위쪽 (빛남)
@@ -170,6 +169,175 @@ fun ReviewAlarmScreen(
 
 }
 
+@Composable
+fun SemiCircularSlider(
+    value: Float, // 0.0f ~ 1.0f
+    onValueChange: (Float) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val strokeWidth = 24.dp
+    val density = LocalDensity.current
+
+    // 점수에 따른 광원 색상
+    val glowColor = when {
+        value < 0.33f -> Color(0xFFFF5967)
+        value < 0.66f -> Color(0xFFFFE359)
+        else -> Color(0xFF59FF85)
+    }
+
+    val sliderGradient = horizontalGradient(
+        listOf(
+            Color(0xFF1C447C),
+            Color(0xFF050C16),
+
+            )
+    )
+
+    Box(
+        modifier = Modifier
+            .size(300.dp)
+            .clip(shape = CircleShape)
+            .background(color = Color.White)
+        ,
+        contentAlignment = Alignment.Center
+    ){
+        BoxWithConstraints(
+            modifier = modifier.size(265.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            val width = constraints.maxWidth.toFloat()
+            val strokeWidthPx = with(density) { strokeWidth.toPx() }
+
+            // ✅ 1. 조작 가능한 실제 가로 길이 및 마진 계산
+            // 트랙의 두께 절반 지점부터 반대쪽 두께 절반 지점까지를 100% 범위로 잡습니다.
+            val sideMarginPx = strokeWidthPx / 2
+            val usableWidth = width - (2 * sideMarginPx)
+
+            // ✅ 2. 트랙 중앙선 반지름 계산 (손잡이 정렬용)
+            val centerRadius = (width - strokeWidthPx) / 2f
+            val centerOffset = Offset(width / 2, width / 2)
+
+            Canvas(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(Unit) {
+                        detectDragGestures { change, _ ->
+                            // ✅ 3. x축 변화값만 사용하여 비율 계산
+                            val touchX = change.position.x
+                            val normalized =
+                                ((touchX - sideMarginPx) / usableWidth).coerceIn(0f, 1f)
+                            onValueChange(normalized)
+                        }
+                    }
+            ) {
+                // A. 배경 트랙
+                drawArc(
+                    color = Color(0xFF050C16).copy(alpha = 0.1f),
+                    startAngle = 180f,
+                    sweepAngle = 180f,
+                    useCenter = false,
+                    topLeft = Offset(sideMarginPx, sideMarginPx),
+                    size = Size(centerRadius * 2, centerRadius * 2),
+                    style = Stroke(width = strokeWidthPx, cap = StrokeCap.Round)
+                )
+
+                // B. 활성 트랙 (애니메이션 없이 즉각 반응)
+                drawArc(
+                    brush = sliderGradient,
+                    startAngle = 180f,
+                    sweepAngle = 180f * value,
+                    useCenter = false,
+                    topLeft = Offset(sideMarginPx, sideMarginPx),
+                    size = Size(centerRadius * 2, centerRadius * 2),
+                    style = Stroke(width = strokeWidthPx, cap = StrokeCap.Round)
+                )
+
+                // C. ✅ 손잡이 좌표: 중앙선 반지름(centerRadius)을 기준으로 계산
+                val thumbAngle = Math.toRadians(180.0 + (180.0 * value))
+                val thumbX = centerOffset.x + centerRadius * kotlin.math.cos(thumbAngle).toFloat()
+                val thumbY = centerOffset.y + centerRadius * kotlin.math.sin(thumbAngle).toFloat()
+
+                // 손잡이 그림자
+                drawIntoCanvas { canvas ->
+                    val shadowPaint = Paint().asFrameworkPaint().apply {
+                        color = Color.Black.copy(alpha = 0.3f).toArgb()
+                        maskFilter = BlurMaskFilter(8.dp.toPx(), BlurMaskFilter.Blur.NORMAL)
+                    }
+                    canvas.nativeCanvas.drawCircle(thumbX, thumbY, 14.dp.toPx(), shadowPaint)
+                }
+
+                // 손잡이 본체
+                drawCircle(
+                    color = Color.White,
+                    radius = 12.dp.toPx(),
+                    center = Offset(thumbX, thumbY)
+                )
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 50.dp, start = 5.dp, end = 5.dp),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ){
+                Text(
+                    text = "-",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        color = Color(0xFF1C447C),
+                        fontSize = 25.sp
+                    )
+                )
+
+                Text(
+                    text = "+",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        color = Color(0xFF1C447C),
+                        fontSize = 25.sp
+                    )
+                )
+            }
+
+
+
+            // 5. 중앙 텍스트 (0 ~ 100점)
+            Row(
+                verticalAlignment = Alignment.Bottom) {
+                Text(
+                    modifier = Modifier.alignByBaseline(),
+                    text = "${(value * 100).toInt()}",
+                    style = MaterialTheme.typography.bodyLarge.copy(
+                        fontSize = 50.sp,
+                        color = Color.Black,
+                    ),
+
+                    )
+                Text(
+                    modifier = Modifier.alignByBaseline(),
+                    text = "점",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        color = Color.Black,
+                        fontSize = 25.sp,
+
+                        ))
+            }
+        }
+        // 4. 하단 광원 효과 (Glow)
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .height(60.dp)
+                .blur(10.dp)
+                .background(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(Color.Transparent, glowColor),
+                    )
+                )
+        )
+    }
+}
+
+/* R.I.P
 @Composable
 fun DifficultySelectorCustomDraggable(
     value: Int, // -1=무응답 0=쉬움, 1=보통, 2=어려움
@@ -343,174 +511,4 @@ fun DifficultySelectorCustomDraggable(
     }
 }
 
-@Composable
-fun SemiCircularSlider(
-    value: Float, // 0.0f ~ 1.0f
-    onValueChange: (Float) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val strokeWidth = 24.dp
-    val density = LocalDensity.current
-
-    // 점수에 따른 광원 색상
-    val glowColor = when {
-        value < 0.33f -> Color(0xFFFF5967)
-        value < 0.66f -> Color(0xFFFFE359)
-        else -> Color(0xFF59FF85)
-    }
-
-    val sliderGradient = horizontalGradient(
-        listOf(
-            Color(0xFF1C447C),
-            Color(0xFF050C16),
-
-            )
-    )
-
-
-
-    Box(
-        modifier = Modifier
-            .size(286.dp)
-            .clip(shape = CircleShape)
-            .background(color = Color.White)
-        ,
-        contentAlignment = Alignment.Center
-    ){
-        BoxWithConstraints(
-            modifier = modifier.size(252.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            val width = constraints.maxWidth.toFloat()
-            val strokeWidthPx = with(density) { strokeWidth.toPx() }
-
-            // ✅ 1. 조작 가능한 실제 가로 길이 및 마진 계산
-            // 트랙의 두께 절반 지점부터 반대쪽 두께 절반 지점까지를 100% 범위로 잡습니다.
-            val sideMarginPx = strokeWidthPx / 2
-            val usableWidth = width - (2 * sideMarginPx)
-
-            // ✅ 2. 트랙 중앙선 반지름 계산 (손잡이 정렬용)
-            val centerRadius = (width - strokeWidthPx) / 2f
-            val centerOffset = Offset(width / 2, width / 2)
-
-            Canvas(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .pointerInput(Unit) {
-                        detectDragGestures { change, _ ->
-                            // ✅ 3. x축 변화값만 사용하여 비율 계산
-                            val touchX = change.position.x
-                            val normalized =
-                                ((touchX - sideMarginPx) / usableWidth).coerceIn(0f, 1f)
-                            onValueChange(normalized)
-                        }
-                    }
-            ) {
-                // A. 배경 트랙
-                drawArc(
-                    color = Color(0xFF050C16).copy(alpha = 0.1f),
-                    startAngle = 180f,
-                    sweepAngle = 180f,
-                    useCenter = false,
-                    topLeft = Offset(sideMarginPx, sideMarginPx),
-                    size = Size(centerRadius * 2, centerRadius * 2),
-                    style = Stroke(width = strokeWidthPx, cap = StrokeCap.Round)
-                )
-
-                // B. 활성 트랙 (애니메이션 없이 즉각 반응)
-                drawArc(
-                    brush = sliderGradient,
-                    startAngle = 180f,
-                    sweepAngle = 180f * value,
-                    useCenter = false,
-                    topLeft = Offset(sideMarginPx, sideMarginPx),
-                    size = Size(centerRadius * 2, centerRadius * 2),
-                    style = Stroke(width = strokeWidthPx, cap = StrokeCap.Round)
-                )
-
-                // C. ✅ 손잡이 좌표: 중앙선 반지름(centerRadius)을 기준으로 계산
-                val thumbAngle = Math.toRadians(180.0 + (180.0 * value))
-                val thumbX = centerOffset.x + centerRadius * kotlin.math.cos(thumbAngle).toFloat()
-                val thumbY = centerOffset.y + centerRadius * kotlin.math.sin(thumbAngle).toFloat()
-
-                // 손잡이 그림자
-                drawIntoCanvas { canvas ->
-                    val shadowPaint = Paint().asFrameworkPaint().apply {
-                        color = Color.Black.copy(alpha = 0.3f).toArgb()
-                        maskFilter = BlurMaskFilter(8.dp.toPx(), BlurMaskFilter.Blur.NORMAL)
-                    }
-                    canvas.nativeCanvas.drawCircle(thumbX, thumbY, 14.dp.toPx(), shadowPaint)
-                }
-
-                // 손잡이 본체
-                drawCircle(
-                    color = Color.White,
-                    radius = 12.dp.toPx(),
-                    center = Offset(thumbX, thumbY)
-                )
-            }
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 50.dp, start = 5.dp, end = 5.dp),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ){
-                Text(
-                    text = "-",
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        color = Color(0xFF1C447C),
-                        fontSize = 25.sp
-                    )
-                )
-
-                Text(
-                    text = "+",
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        color = Color(0xFF1C447C),
-                        fontSize = 25.sp
-                    )
-                )
-            }
-
-
-
-            // 5. 중앙 텍스트 (0 ~ 100점)
-            Row(
-                verticalAlignment = Alignment.Bottom) {
-                Text(
-                    modifier = Modifier.alignByBaseline(),
-                    text = "${(value * 100).toInt()}",
-                    style = MaterialTheme.typography.bodyLarge.copy(
-                        fontSize = 50.sp,
-                        color = Color.Black,
-                    ),
-
-                    )
-                Text(
-                    modifier = Modifier.alignByBaseline(),
-                    text = "점",
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        color = Color.Black,
-                        fontSize = 25.sp,
-
-                        ))
-            }
-        }
-        // 4. 하단 광원 효과 (Glow)
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .height(60.dp)
-                .blur(10.dp)
-                .background(
-                    brush = Brush.verticalGradient(
-                        colors = listOf(Color.Transparent, glowColor),
-                    )
-                )
-        )
-    }
-
-
-}
+ */
