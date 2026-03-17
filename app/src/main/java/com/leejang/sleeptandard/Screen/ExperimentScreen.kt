@@ -94,20 +94,20 @@ fun SemiCircularSlider(
     // 점수에 따른 광원 색상
     val glowColor = when {
         value < 0.33f -> Color(0xFFFF5967)
-        value < 0.66f -> Color(0xFFFFD740)
-        else -> Color(0xFF69F0AE)
+        value < 0.66f -> Color(0xFFFFE359)
+        else -> Color(0xFF59FF85)
     }
 
     Box(
         modifier = Modifier
-            .size(300.dp)
+            .size(286.dp)
             .clip(shape = CircleShape)
             .background(color = Color.White)
             ,
         contentAlignment = Alignment.Center
     ){
         BoxWithConstraints(
-            modifier = modifier.size(280.dp),
+            modifier = modifier.size(252.dp),
             contentAlignment = Alignment.Center
         ) {
             val width = constraints.maxWidth.toFloat()
@@ -178,6 +178,29 @@ fun SemiCircularSlider(
                 )
             }
 
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 50.dp, start = 5.dp, end = 5.dp),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ){
+                Text(
+                    text = "-",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        color = Color(0xFF1C447C),
+                        fontSize = 25.sp
+                    )
+                )
+
+                Text(
+                    text = "+",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        color = Color(0xFF1C447C),
+                        fontSize = 25.sp
+                    )
+                )
+            }
+
 
 
             // 5. 중앙 텍스트 (0 ~ 100점)
@@ -187,7 +210,7 @@ fun SemiCircularSlider(
                     modifier = Modifier.alignByBaseline(),
                     text = "${(value * 100).toInt()}",
                     style = MaterialTheme.typography.bodyLarge.copy(
-                        fontSize = 64.sp,
+                        fontSize = 50.sp,
                         color = Color.Black,
                     ),
 
