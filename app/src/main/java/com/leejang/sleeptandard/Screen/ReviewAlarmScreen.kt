@@ -263,13 +263,13 @@ fun SemiCircularSlider(
                         color = Color.Black.copy(alpha = 0.3f).toArgb()
                         maskFilter = BlurMaskFilter(8.dp.toPx(), BlurMaskFilter.Blur.NORMAL)
                     }
-                    canvas.nativeCanvas.drawCircle(thumbX, thumbY, 14.dp.toPx(), shadowPaint)
+                    canvas.nativeCanvas.drawCircle(thumbX, thumbY, 24.dp.toPx(), shadowPaint)
                 }
 
                 // 손잡이 본체
                 drawCircle(
                     color = Color.White,
-                    radius = 12.dp.toPx(),
+                    radius = 20.dp.toPx(),
                     center = Offset(thumbX, thumbY)
                 )
             }
