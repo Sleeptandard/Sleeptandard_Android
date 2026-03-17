@@ -11,6 +11,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,6 +26,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -43,6 +46,8 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Brush.Companion.horizontalGradient
+import androidx.compose.ui.graphics.Brush.Companion.linearGradient
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.StrokeCap
@@ -55,6 +60,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.BaselineShift
+import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
@@ -65,6 +71,15 @@ import com.leejang.sleeptandard.Component.CustomTimePicker
 @Composable
 fun ExperimentScreen() {
 
+    fun onSubmit(){
+
+    }
+
+    val buttonGradient = linearGradient(
+        listOf(Color(0xFF437AC7),
+            Color(0xFFAFF4F9))
+    )
+
     Column(
         modifier = Modifier.fillMaxSize(),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -72,18 +87,85 @@ fun ExperimentScreen() {
     )
     {
 
-        var varue by remember { mutableFloatStateOf(0f) }
+        var varue by remember { mutableFloatStateOf(0.5f) }
+        
+        Spacer(Modifier.weight(100f))
 
-        SemiCircularSlider(
+        Text(
+            text = "오늘 기상 점수는 몇 점인가요?",
+            style = MaterialTheme.typography.bodyMedium.copy(
+                fontSize = 20.sp,
+                color = Color.White
+            )
+        )
+
+        Spacer(Modifier.height(10.dp))
+
+        Text(
+            text = "얼마나 개운하게 일어났는지 알려주세요",
+            style = MaterialTheme.typography.bodyMedium.copy(
+                fontSize = 16.sp,
+                color = Color.White.copy(alpha = 0.7f)
+            )
+        )
+        
+        Spacer(Modifier.weight(104f))
+
+        SemiCircularSliderEX(
             value = varue,
             onValueChange = { f -> varue = f }
         )
+
+        Spacer(Modifier.weight(104f))
+
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(100.dp))
+                .clickable{
+                    onSubmit()
+                },
+            contentAlignment = Alignment.Center
+        ){
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(60.dp)
+                    .background(brush = buttonGradient)
+                    .blur(30.dp)
+                    .border(
+                        width = 1.dp,
+                        brush = Brush.verticalGradient(
+                            colors = listOf(
+                                Color.White.copy(alpha = 0.4f), // 테두리 위쪽 (빛남)
+                                Color.Transparent,             // 테두리 중간 (투명)
+                                Color.White.copy(alpha = 0.1f)  // 테두리 아래쪽 (은은함)
+                            )
+                        ),
+                        shape = RoundedCornerShape(24.dp)
+                    ),
+                contentAlignment = Alignment.Center
+            ){
+
+            }
+
+            Text(
+                text = "제출",
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontSize = 18.sp,
+                    color = Color.White
+                )
+            )
+
+        }
+
+
+        Spacer(Modifier.height(90.dp))
 
     }
 }
 
 @Composable
-fun SemiCircularSlider(
+fun SemiCircularSliderEX(
     value: Float, // 0.0f ~ 1.0f
     onValueChange: (Float) -> Unit,
     modifier: Modifier = Modifier
@@ -97,6 +179,16 @@ fun SemiCircularSlider(
         value < 0.66f -> Color(0xFFFFE359)
         else -> Color(0xFF59FF85)
     }
+
+    val sliderGradient = horizontalGradient(
+        listOf(
+            Color(0xFF1C447C),
+            Color(0xFF050C16),
+
+        )
+    )
+
+
 
     Box(
         modifier = Modifier
@@ -129,7 +221,8 @@ fun SemiCircularSlider(
                         detectDragGestures { change, _ ->
                             // ✅ 3. x축 변화값만 사용하여 비율 계산
                             val touchX = change.position.x
-                            val normalized = ((touchX - sideMarginPx) / usableWidth).coerceIn(0f, 1f)
+                            val normalized =
+                                ((touchX - sideMarginPx) / usableWidth).coerceIn(0f, 1f)
                             onValueChange(normalized)
                         }
                     }
@@ -147,7 +240,7 @@ fun SemiCircularSlider(
 
                 // B. 활성 트랙 (애니메이션 없이 즉각 반응)
                 drawArc(
-                    brush = Brush.horizontalGradient(listOf(Color(0xFF1A3D6B), Color(0xFFAAEDF2))),
+                    brush = sliderGradient,
                     startAngle = 180f,
                     sweepAngle = 180f * value,
                     useCenter = false,
@@ -234,7 +327,7 @@ fun SemiCircularSlider(
                 .blur(10.dp)
                 .background(
                     brush = Brush.verticalGradient(
-                        colors = listOf(Color.Transparent,glowColor),
+                        colors = listOf(Color.Transparent, glowColor),
                     )
                 )
         )
