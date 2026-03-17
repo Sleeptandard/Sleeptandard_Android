@@ -11,6 +11,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -35,6 +36,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -164,7 +166,7 @@ class AlarmRingActivity : ComponentActivity() {
 @Composable
 fun AlarmRingScreen(
     // label: String,
-    sleepStage: String = "N1",
+    sleepStage: String = "기상 골든타임에서",
     onStop: () -> Unit
 ) {
     val currentTime = remember {
@@ -182,11 +184,11 @@ fun AlarmRingScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(linearGradation)
-            .padding(12.dp),
+            .padding(horizontal = 20.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
 
-        Spacer(modifier = Modifier.height(238.dp))
+        Spacer(modifier = Modifier.height(240.dp))
 
         Column(
             modifier = Modifier
@@ -196,50 +198,42 @@ fun AlarmRingScreen(
             Text(
                 text = currentTime,
                 style = MaterialTheme.typography.bodyMedium.copy(
-                    fontSize = 80.sp,
-                    lineHeight = 28.sp,
-                    fontWeight = FontWeight(500),
+                    fontSize = 100.sp,
+                    fontWeight = FontWeight(600),
                     color = Color.White
                 )
             )
-            Icon(
-                painter = painterResource(AppIcons.RingBar),
-                contentDescription = "",
-                tint = Color.White
-            )
 
-            Spacer(Modifier.height(18.dp ))
+            Spacer(Modifier.height(18.dp))
 
             Text(
-                text = "${sleepStage} 단계에서 깨워드렸어요.",
+                text = "${sleepStage} 깨워드렸어요.",
                 style = MaterialTheme.typography.bodyMedium.copy(
                     fontSize = 16.sp,
-                    color = MaterialTheme.colorScheme.onPrimary
+                    color = Color(0xFFAFF4F9)
                 )
             )
         }
 
-        Spacer(modifier = Modifier.height(250.dp))
+        Spacer(modifier = Modifier.height(222.dp))
 
 
         SwipeToStopButton(
-            text = "피드백",
             onComplete = {
                 onStop() },
             modifier = Modifier
-                .fillMaxWidth(0.6f)
-                .height(56.dp)
+                .fillMaxWidth()
         )
     }
 }
 
 @Composable
 fun SwipeToStopButton(
-    text: String,
+    text: String = "피드백 하러가기",
     onComplete: () -> Unit,
     modifier: Modifier = Modifier,
-    height: Dp = 56.dp, // 디자인에 맞춰 조정
-    thumbSize: Dp = 48.dp, // 트랙 높이보다 약간 작게 설정하면 예쁩니다
+    height: Dp = 80.dp, // 디자인에 맞춰 조정
+    thumbSize: Dp = 72.dp, // 트랙 높이보다 약간 작게 설정하면 예쁩니다
     horizontalPadding: Dp = 4.dp, // 왼쪽 끝과의 간격
     completeThreshold: Float = 0.85f, // 85% 이상 밀면 성공
 ) {
@@ -249,6 +243,20 @@ fun SwipeToStopButton(
 
     var dragX by remember { mutableFloatStateOf(0f) }
     var completed by remember { mutableStateOf(false) }
+
+    val trackGradient = Brush.horizontalGradient(
+        listOf(
+            Color(0xFF437AC7),
+            Color(0xFFAFF4F9)
+        )
+    )
+
+    val textGradient = Brush.horizontalGradient(
+        listOf(
+            Color(0xFFFFFFFF),
+            Color(0xFF83B1BB)
+        )
+    )
 
     BoxWithConstraints(modifier = modifier) {
         val trackWidthPx = with(density) { maxWidth.toPx() }
@@ -262,62 +270,82 @@ fun SwipeToStopButton(
             animationSpec = androidx.compose.animation.core.spring()
         )
 
-        // 트랙 (배경)
         Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .height(height)
-                .clip(RoundedCornerShape(height / 2))
-                .background(Color.White.copy(alpha = 0.18f))
-                .pointerInput(maxDrag, completed) {
-                    if (completed) return@pointerInput
-                    detectHorizontalDragGestures(
-                        onDragEnd = {
-                            if (dragX >= maxDrag * completeThreshold) {
-                                dragX = maxDrag
-                                completed = true
-                                onComplete()
-                            } else {
-                                dragX = 0f // 실패 시 왼쪽으로 복귀
-                            }
-                        },
-                        onHorizontalDrag = { change, dragAmount ->
-                            change.consume()
-                            // 0부터 maxDrag 사이로 드래그 제한
-                            dragX = (dragX + dragAmount).coerceIn(0f, maxDrag)
-                        }
-                    )
-                },
-            contentAlignment = Alignment.CenterStart // 기본 정렬을 왼쪽 시작으로 고정
+                .fillMaxWidth(),
+            contentAlignment = Alignment.Center
         ) {
-            // "피드백" 텍스트 (중앙 배치)
-            Text(
-                text = text,
-                modifier = Modifier.fillMaxWidth(),
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    fontSize = 18.sp,
-                    color = Color.White
-                )
-            )
-
-            // Thumb (움직이는 흰 원)
             Box(
                 modifier = Modifier
-                    .padding(start = horizontalPadding) // 초기 고정 위치
-                    .offset { IntOffset(animatedX.roundToInt(), 0) } // 드래그 시 이동량
-                    .size(thumbSize)
-                    .clip(CircleShape)
-                    .background(Color.White),
-                contentAlignment = Alignment.Center
+                    .fillMaxWidth()
+                    .height(height)
+                    .clip(RoundedCornerShape(100.dp))
+                    .background(trackGradient)
+                    .blur(30.dp)
+                    .border(
+                        width = 2.dp,
+                        brush = Brush.verticalGradient(
+                            colors = listOf(
+                                Color.White.copy(alpha = 0.4f), // 테두리 위쪽 (빛남)
+                                Color.Transparent,             // 테두리 중간 (투명)
+                                Color.White.copy(alpha = 0.1f)  // 테두리 아래쪽 (은은함)
+                            )
+                        ),
+                        shape = RoundedCornerShape(24.dp)
+                    )
+            ){}
+            // 트랙 (배경)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(height)
+                    .clip(RoundedCornerShape(100.dp))
+                    .pointerInput(maxDrag, completed) {
+                        if (completed) return@pointerInput
+                        detectHorizontalDragGestures(
+                            onDragEnd = {
+                                if (dragX >= maxDrag * completeThreshold) {
+                                    dragX = maxDrag
+                                    completed = true
+                                    onComplete()
+                                } else {
+                                    dragX = 0f // 실패 시 왼쪽으로 복귀
+                                }
+                            },
+                            onHorizontalDrag = { change, dragAmount ->
+                                change.consume()
+                                // 0부터 maxDrag 사이로 드래그 제한
+                                dragX = (dragX + dragAmount).coerceIn(0f, maxDrag)
+                            }
+                        )
+                    },
+                contentAlignment = Alignment.CenterStart // 기본 정렬을 왼쪽 시작으로 고정
             ) {
-                Icon(
-                    painter = painterResource(AppIcons.ArrowRight),
-                    contentDescription = null,
-                    tint = Color.Black,
-                    modifier = Modifier.size(24.dp)
+                Text(
+                    text = text,
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 18.sp,
+                        brush = textGradient
+                    )
                 )
+
+                // Thumb (움직이는 흰 원)
+                Box(
+                    modifier = Modifier
+                        .padding(start = horizontalPadding) // 초기 고정 위치
+                        .offset { IntOffset(animatedX.roundToInt(), 0) } // 드래그 시 이동량
+                        .size(thumbSize)
+                        .clip(CircleShape)
+                        .background(Color.White),
+                    contentAlignment = Alignment.Center
+                ) {}
             }
         }
+
+
+
+
     }
 }
