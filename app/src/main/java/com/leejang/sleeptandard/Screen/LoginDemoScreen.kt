@@ -39,64 +39,127 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.leejang.sleeptandard.backend.SupabaseClientProvider
+import io.github.jan.supabase.auth.auth
+import io.github.jan.supabase.auth.exception.AuthRestException
+import io.github.jan.supabase.auth.providers.builtin.Email
+import io.github.jan.supabase.postgrest.postgrest
 import kotlinx.coroutines.launch
+import kotlinx.serialization.Serializable
 
 
 // 유저의 로그인/회원가입 진행 단계 정의 및 email + 비번 저장 클래스
-// TODO: 여기서 정보 뺴가야될듯?
 sealed class AuthStep {
-    object EmailInput : AuthStep()                          // 1단계: 이메일 입력
+    object EmailInput : AuthStep()                           // 1단계: 이메일 입력
     data class LoginPassword(val email: String) : AuthStep() // 2단계(경로A): 로그인 비밀번호
     data class SignupPassword(val email: String) : AuthStep() // 2단계(경로B): 회원가입 비밀번호
     data class SignupNickname(val email: String, val pw: String) : AuthStep() // 3단계: 닉네임
 }
 
-/**** 1.이메일 체크, 2. 이메일 비번 (로그인)검증, 3.회원가입 처리 더미 로직 ****/
-// 로그인/회원가입 진행을 맡는 역할
+// profiles 테이블에 INSERT 할 때 사용하는 데이터 클래스
+@Serializable
+data class ProfileInsert(
+    val id: String,
+    val nickname: String
+)
+
+// Supabase Auth 실제 연동 ViewModel
 class AuthViewModel : ViewModel() {
     var currentStep by mutableStateOf<AuthStep>(AuthStep.EmailInput)
         private set
 
-    // 이메일 확인 API 호출 로직
-    // 1단계: 이메일 확인 로직
-    fun checkEmail(
-        email: String
-        // exist: Boolean
+    private val supabase = SupabaseClientProvider.client
+
+    // 1단계: 이메일로 신규/기존 유저 구분
+    // 빈 비밀번호로 signIn 시도 → WrongPassword 예외 → 기존 유저 (로그인 화면으로)
+    //                           → UserNotFound 예외 → 신규 유저 (회원가입 화면으로)
+    fun checkEmail(email: String) {
+        viewModelScope.launch {
+            try {
+                supabase.auth.signInWith(Email) {
+                    this.email = email
+                    this.password = ""
+                }
+                // 이 줄까지 오는 경우는 없지만, 안전망으로 로그인 화면으로
+                currentStep = AuthStep.LoginPassword(email)
+            } catch (e: AuthRestException) {
+                val msg = e.message ?: ""
+                currentStep = when {
+                    // 비밀번호가 틀렸다는 뜻 → 이미 가입된 이메일
+                    msg.contains("Invalid login credentials", ignoreCase = true) ||
+                    msg.contains("invalid_credentials", ignoreCase = true) ->
+                        AuthStep.LoginPassword(email)
+                    // 유저를 찾을 수 없다 → 신규 가입
+                    msg.contains("user not found", ignoreCase = true) ||
+                    msg.contains("Email not confirmed", ignoreCase = true) ->
+                        AuthStep.SignupPassword(email)
+                    else ->
+                        // 그 외(네트워크 오류 등)는 일단 로그인 화면으로 fallback
+                        AuthStep.LoginPassword(email)
+                }
+            } catch (e: Exception) {
+                // 네트워크 등 기타 오류 → 로그인 화면으로 fallback
+                currentStep = AuthStep.LoginPassword(email)
+            }
+        }
+    }
+
+    // 2단계(경로A): 실제 로그인
+    fun performLogin(
+        email: String,
+        pw: String,
+        onSuccess: (String) -> Unit,
+        onError: () -> Unit
     ) {
         viewModelScope.launch {
-            // 더미 서버에서 확인
-            val exists = AuthRepository.isEmailExists(email)
-            currentStep = if (exists) AuthStep.LoginPassword(email)
-            else AuthStep.SignupPassword(email)
-        }
-
-        //TODO: 백엔드 통신받은 사인으로 분기
-        /*
-        cureentStep = if (exist) AuthStep.LoginPassword(email)
-            else AuthStep.SignupPassword(email)
-         */
-    }
-
-    // 2단계(경로A): 로그인 실행
-    fun performLogin(email: String, pw: String, onSuccess: (String) -> Unit, onError: () -> Unit) {
-        val user = AuthRepository.verifyLogin(email, pw)
-        if (user != null) {
-            onSuccess(user.nickname)
-        } else {
-            onError() // 비밀번호 틀림
+            try {
+                supabase.auth.signInWith(Email) {
+                    this.email = email
+                    this.password = pw
+                }
+                // 로그인 성공 → profiles 테이블에서 닉네임 조회
+                val uid = supabase.auth.currentUserOrNull()?.id ?: ""
+                val profile = supabase.postgrest["profiles"]
+                    .select { filter { eq("id", uid) } }
+                    .decodeSingle<ProfileInsert>()
+                onSuccess(profile.nickname)
+            } catch (e: Exception) {
+                onError()
+            }
         }
     }
 
-    // 2단계(경로B): 회원가입 비번 설정 후 이동
+    // 2단계(경로B): 회원가입 비번 설정 후 닉네임 단계로 이동
     fun setSignupPassword(email: String, pw: String) {
         currentStep = AuthStep.SignupNickname(email, pw)
     }
 
-    // 3단계: 회원가입 완료 및 가입 처리
-    fun completeSignup(email: String, pw: String, nickname: String, onComplete: (String) -> Unit) {
-        val newUser = User(email, pw, nickname)
-        AuthRepository.addUser(newUser)
-        onComplete(nickname)
+    // 3단계: 회원가입 완료 (Supabase Auth signUp + profiles 테이블 INSERT)
+    fun completeSignup(
+        email: String,
+        pw: String,
+        nickname: String,
+        onComplete: (String) -> Unit
+    ) {
+        viewModelScope.launch {
+            try {
+                // 1) Supabase Auth 가입
+                supabase.auth.signUpWith(Email) {
+                    this.email = email
+                    this.password = pw
+                }
+                // 2) 방금 발급된 UID 가져오기
+                val uid = supabase.auth.currentUserOrNull()?.id ?: ""
+                // 3) profiles 테이블에 닉네임 저장
+                supabase.postgrest["profiles"].insert(
+                    ProfileInsert(id = uid, nickname = nickname)
+                )
+                onComplete(nickname)
+            } catch (e: Exception) {
+                // 이미 가입된 이메일인 경우 등 예외 처리
+                onComplete("오류: ${e.message}")
+            }
+        }
     }
 
     fun goToNicknameStep(email: String, pw: String) {
@@ -111,7 +174,6 @@ fun LoginDemoScreen(
     authViewModel: AuthViewModel = viewModel(),
     onComplete: (String) -> Unit
 ){
-
     val context = LocalContext.current
 
     Column(
@@ -132,14 +194,10 @@ fun LoginDemoScreen(
             when (step) {
 
                 is AuthStep.EmailInput -> EmailInputStep(
-                    // TODO: 이메일 탐색 백엔드 통신
-                    // AuthViewModel의 이메일 탐색 더미 로직
                     onConfirm = { authViewModel.checkEmail(it) })
 
                 is AuthStep.LoginPassword -> LoginPasswordStep(
                     email = step.email,
-                    // TODO: 로그인 검증 백엔드 통신
-                    // AuthViewModel의 로그인 검증 더미 로직
                     onLogin = { pw ->
                         authViewModel.performLogin(
                             email = step.email,
@@ -158,8 +216,6 @@ fun LoginDemoScreen(
                 is AuthStep.SignupNickname -> NicknameStep(
                     email = step.email,
                     pw = step.pw,
-                    // TODO: 회원가입 백엔드 통신
-                    // AuthViewModel의 회원가입 더미 로직
                     onComplete = { nickname ->
                         authViewModel.completeSignup(step.email, step.pw, nickname) {
                             onComplete("$nickname 님, 가입을 축하합니다!")
@@ -190,7 +246,6 @@ fun GlassyTextField(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(60.dp)
-                    // ✅ 기존에 정의한 innerShadow 적용
                     .background(Color.White.copy(0.05f), RoundedCornerShape(30.dp))
                     .padding(horizontal = 24.dp),
                 contentAlignment = Alignment.CenterStart
@@ -210,7 +265,7 @@ fun EmailInputStep(onConfirm: (String) -> Unit) {
         .fillMaxSize()
         .padding(horizontal = 24.dp)) {
         Text(
-            text = "이메일을 입력해주세요 🌇", //
+            text = "이메일을 입력해주세요 🌇",
             style = MaterialTheme.typography.titleLarge,
             color = Color.White
         )
@@ -219,13 +274,13 @@ fun EmailInputStep(onConfirm: (String) -> Unit) {
         GlassyTextField(
             value = email,
             onValueChange = { email = it },
-            placeholder = "이메일" //
+            placeholder = "이메일"
         )
 
-        Spacer(Modifier.height(100.dp)) // 버튼을 하단으로 밀어냄
+        Spacer(Modifier.height(100.dp))
 
         Button(
-            enabled = email.contains("@"), // 간단한 유효성 검사
+            enabled = email.contains("@"),
             onClick = { onConfirm(email) }
         ){
             Text("확인")
@@ -242,7 +297,7 @@ fun LoginPasswordStep(email: String, onLogin: (String) -> Unit) {
         .fillMaxSize()
         .padding(horizontal = 24.dp)) {
         Text(
-            text = "비밀번호를 입력해주세요 🔒", //
+            text = "비밀번호를 입력해주세요 🔒",
             style = MaterialTheme.typography.titleLarge,
             color = Color.White
         )
@@ -251,11 +306,10 @@ fun LoginPasswordStep(email: String, onLogin: (String) -> Unit) {
         GlassyTextField(
             value = password,
             onValueChange = { password = it },
-            placeholder = "8자리 이상 입력해주세요", //
+            placeholder = "8자리 이상 입력해주세요",
             visualTransformation = PasswordVisualTransformation()
         )
 
-        // 비밀번호 찾기
         Text(
             text = "비밀번호 찾기",
             modifier = Modifier
@@ -271,7 +325,6 @@ fun LoginPasswordStep(email: String, onLogin: (String) -> Unit) {
         Spacer(Modifier.weight(1f))
 
         Button(
-
             onClick = { onLogin(password) }
         ){
             Text("확인")
@@ -289,7 +342,7 @@ fun SignupPasswordStep(email: String, onNext: (String) -> Unit) {
         .fillMaxSize()
         .padding(horizontal = 24.dp)) {
         Text(
-            text = "비밀번호를 설정해주세요 🔐", //
+            text = "비밀번호를 설정해주세요 🔐",
             style = MaterialTheme.typography.titleLarge,
             color = Color.White
         )
@@ -298,14 +351,14 @@ fun SignupPasswordStep(email: String, onNext: (String) -> Unit) {
         GlassyTextField(
             value = password,
             onValueChange = { password = it },
-            placeholder = "8자리 이상 입력해주세요", //
+            placeholder = "8자리 이상 입력해주세요",
             visualTransformation = PasswordVisualTransformation()
         )
         Spacer(Modifier.height(16.dp))
         GlassyTextField(
             value = passwordConfirm,
             onValueChange = { passwordConfirm = it },
-            placeholder = "비밀번호 확인", //
+            placeholder = "비밀번호 확인",
             visualTransformation = PasswordVisualTransformation()
         )
 
@@ -329,7 +382,7 @@ fun NicknameStep(email: String, pw: String, onComplete: (String) -> Unit) {
         .fillMaxSize()
         .padding(horizontal = 24.dp)) {
         Text(
-            text = "닉네임을 설정해주세요 🌙", //
+            text = "닉네임을 설정해주세요 🌙",
             style = MaterialTheme.typography.titleLarge,
             color = Color.White
         )
@@ -338,7 +391,7 @@ fun NicknameStep(email: String, pw: String, onComplete: (String) -> Unit) {
         GlassyTextField(
             value = nickname,
             onValueChange = { nickname = it },
-            placeholder = "닉네임" //
+            placeholder = "닉네임"
         )
 
         Spacer(Modifier.weight(1f))
@@ -350,40 +403,5 @@ fun NicknameStep(email: String, pw: String, onComplete: (String) -> Unit) {
             Text("확인")
         }
         Spacer(Modifier.height(20.dp))
-    }
-}
-
-
-/******* 백엔드가 처다볼 필요도 없는 테스트용 더미 서버, 리포지토리 ******/
-
-// 사용자 정보를 담는 데이터 클래스
-data class User(
-    val email: String,
-    val pw: String,
-    val nickname: String
-)
-
-// 서버 DB 역할을 하는 싱글톤 객체
-object AuthRepository {
-    // 더미 사용자 리스트
-    private val dummyUsers = mutableListOf(
-        User("test@test.com", "12345678", "테스터"),
-        User("admin@sleeptandard.com", "admin123", "관리자")
-    )
-
-    // 1. 이메일 존재 여부 확인 (api.checkEmail 역할)
-    fun isEmailExists(email: String): Boolean {
-        return dummyUsers.any { it.email == email }
-    }
-
-    // 2. 로그인 확인 (onLogin 역할)
-    fun verifyLogin(email: String, pw: String): User? {
-        return dummyUsers.find { it.email == email && it.pw == pw }
-    }
-
-    // 3. 회원가입 완료 및 정보 추가 (onComplete 역할)
-    fun addUser(user: User) {
-        dummyUsers.add(user)
-        println("📦 새로운 사용자 추가됨: $user") // 로그 확인용
     }
 }
