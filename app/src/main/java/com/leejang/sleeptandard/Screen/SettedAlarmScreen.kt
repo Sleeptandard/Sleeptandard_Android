@@ -83,12 +83,49 @@ fun SettedAlarmScreen(
         horizontalAlignment = Alignment.CenterHorizontally
     ){
         Spacer(Modifier.weight(124f))
-        Text(
-            text = getWakeUpTimeRange(alarm.hour, alarm.minute, alarm.isAm, alarm.earlyWakeUpMinutes),
-            style = MaterialTheme.typography.bodyMedium.copy(
-                fontSize = 16.sp
+
+        Column(
+            modifier = Modifier
+        ) {
+            Text(
+                text = earlyWakeUpText(alarm.hour, alarm.minute, alarm.isAm, alarm.earlyWakeUpMinutes),
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontSize = 16.sp,
+                    color = Color(0xCCF1F4F9)
+                )
             )
-        )
+
+            Spacer(Modifier.height(8.dp))
+
+            Row(
+                modifier = Modifier,
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ){
+                Text(
+                    text = "~",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 48.sp,
+                        color = Color(0xCCF1F4F9)
+                    )
+                )
+                Text(
+                    text = "${alarm.hour}:${alarm.minute}",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 48.sp,
+                        color = Color(0xCCF1F4F9)
+                    )
+                )
+                Text(
+                    text = "사이 알람",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 16.sp,
+                        color = Color(0xCCF1F4F9)
+                    )
+                )
+            }
+        }
+
         Spacer(Modifier.weight(28f))
 
         Box(
@@ -390,7 +427,19 @@ fun getWakeUpTimeRange(hour:Int, minute: Int, isAm: Boolean, earlyWakeUpMinutes:
         ampm, earlyTotalMinute/60, earlyTotalMinute%60, hour, minute)
 }
 
-/* fuck you 0303
+fun earlyWakeUpText(hour:Int, minute: Int, isAm: Boolean, earlyWakeUpMinutes: Int): String{
+    var earlyTotalMinute: Int = (hour * 60 + minute) - earlyWakeUpMinutes
+    val ampm = if(isAm) "오전" else "오후"
+    if(earlyTotalMinute < 0) earlyTotalMinute += 12 * 60
+
+    return String.format(
+        Locale.getDefault(),
+        "%s  %d:%02d",
+        ampm, earlyTotalMinute/60, earlyTotalMinute%60
+    )
+}
+
+/* fuck you 0303 
 
 val context = LocalContext.current   // ✨ 추가
 

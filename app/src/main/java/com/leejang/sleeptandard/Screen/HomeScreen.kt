@@ -764,7 +764,12 @@ fun HomeScreen(
                                             // 선택한 아이템이 있으면 비활성화.
                                             enabled = selectedSituation.isEmpty()
                                         ) {
-                                            Text("없어요")
+                                            Text(
+                                                text = "없어요",
+                                                style = MaterialTheme.typography.bodyLarge.copy(
+                                                    fontSize = 18.sp,
+                                                    color = Color.Black)
+                                            )
                                         }
 
                                         /*** 상황선택 확인 ***/
@@ -843,10 +848,16 @@ fun HomeScreen(
                                             // 선택한 아이템이 없다면 비활성화.
                                             enabled = selectedSituation.isNotEmpty()
                                         ) {
-                                            Text("완료")
+                                            Text(
+                                                text = "완료",
+                                                style = MaterialTheme.typography.bodyLarge.copy(
+                                                    fontSize = 18.sp,
+                                                    color = Color.Black)
+                                            )
                                         }
 
                                     }
+                                    Spacer(Modifier.height(30.dp))
                                 }
 
                                 // 직접 추가시 모달
@@ -863,7 +874,9 @@ fun HomeScreen(
                                             value = customText,
                                             onValueChange = { customText = it },
                                             modifier = Modifier
-                                                .fillMaxWidth(),
+                                                .fillMaxWidth()
+                                                .height(180.dp)
+                                                .clip(RoundedCornerShape(20.dp)),
                                             textStyle = MaterialTheme.typography.bodyMedium.copy(
                                                 color = Color.Black,
                                                 fontSize = 14.sp
@@ -889,7 +902,7 @@ fun HomeScreen(
                                             )
                                         )
 
-                                        Spacer(Modifier.height(14.dp))
+                                        Spacer(Modifier.height(52.dp))
 
                                         Row(
                                             modifier = Modifier
@@ -899,7 +912,7 @@ fun HomeScreen(
                                             Button(
                                                 modifier = Modifier
                                                     .weight(1f)
-                                                    .height(48.dp),
+                                                    .height(56.dp),
                                                 onClick = {
                                                     isCustomMode = false
                                                 },
@@ -985,7 +998,7 @@ fun HomeScreen(
                                                 },
                                                 modifier = Modifier
                                                     .weight(1f)
-                                                    .height(48.dp),
+                                                    .height(56.dp),
                                                 shape = RoundedCornerShape(100.dp),
                                                 colors = ButtonDefaults.buttonColors(
                                                     containerColor = Color(0xFFAFF4F9),
@@ -1002,8 +1015,9 @@ fun HomeScreen(
                                                         color = Color.Black)
                                                 )
                                             }
-                                        }
 
+                                        }
+                                        Spacer(Modifier.height(30.dp))
 
                                     }
                                 }
