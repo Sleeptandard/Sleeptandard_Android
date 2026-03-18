@@ -6,6 +6,7 @@ import android.media.RingtoneManager
 import android.util.Log
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
@@ -21,7 +22,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.LaunchedEffect
 
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.Color
@@ -42,6 +42,10 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.BottomSheetDefaults
 
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Button
@@ -56,8 +60,11 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.innerShadow
 import androidx.compose.ui.geometry.CornerRadius
@@ -82,6 +89,7 @@ import com.leejang.sleeptandard.Component.ConfirmButton
 import com.leejang.sleeptandard.Component.CustomTimePicker
 import com.leejang.sleeptandard.Component.DiamondStepSlider
 import com.leejang.sleeptandard.Component.OptionsSection
+import com.leejang.sleeptandard.Component.WakeUpWindow
 import com.leejang.sleeptandard.Component.calculateWakeUpRangeText
 import com.leejang.sleeptandard.Permission.isAllEssentialPermissionsGranted
 import com.leejang.sleeptandard.Permission.openAppSettings
@@ -133,16 +141,12 @@ fun HomeScreen(
     data class SituationOption(
         val id: String,
         val label: String,
-        val iconRes: Int?
     )
     // 기본 상태
     var situationOptions = listOf(
-        SituationOption("custom", "직접 추가", AppIcons.MemoPencil),
-        SituationOption("sick", "아픔", AppIcons.MemoAid),
-        SituationOption("drink", "과음", AppIcons.MemoDrink),
-        SituationOption("nap", "낮잠", AppIcons.MemoNap),
-        SituationOption("eat", "과식", AppIcons.MemoHamburger),
-        SituationOption("pill", "수면제", AppIcons.MemoPill),
+        SituationOption("drink", "술 한 잔 했어요"),
+        SituationOption("tired", "활동량이 많았어요 (운동/업무 등)"),
+        SituationOption("sick", "몸이 좋지 않아요"),
     )
 
     // "직접추가" 모드 트리거
@@ -153,8 +157,9 @@ fun HomeScreen(
     var customText by remember { mutableStateOf("") }
 
     // "직접추가"에서 체크박스 상태
-    var customChecked by remember { mutableStateOf(false) }
+    // var customChecked by remember { mutableStateOf(false) }
 
+    /*
     // 커스텀으로 추가된 옵션들
     var customOptions by remember { mutableStateOf(listOf<SituationOption>()) }
     val customIdSet = remember(customOptions) { customOptions.map { it.id }.toSet() }   // id만 따로 모아놓음
@@ -172,10 +177,14 @@ fun HomeScreen(
     val hasCustom = customOptions.isNotEmpty()
     // 모달창에서 추가한 아이템이 있다면 4행을 보여주고 없다면 3행을 보여줌
     val visibleRows = if (hasCustom) 4 else 3
+
+
     // 모달창 lazycolumn 크기 수치
     val itemHeight = 88.dp
     val spacing = 12.dp
     val gridHeight = itemHeight * visibleRows + spacing * (visibleRows - 1)
+
+     */
 
     /** 사운드 설정창 띄우는 트리거 **/
     var showSoundSheet by remember { mutableStateOf(false) }
@@ -205,6 +214,7 @@ fun HomeScreen(
         }
     }
 
+    /*
     // CustomSituationPrefs 불러오기
     LaunchedEffect(Unit) {
         val loaded = customSituationPrefs.load()
@@ -216,6 +226,8 @@ fun HomeScreen(
             )
         }
     }
+
+     */
 
     // 알람뷰모델에 저장되어 있는 알람 설정값들과 화면 상태 동기화
     LaunchedEffect(alarmViewModel.alarm) { // alarm 객체 전체를 관찰
@@ -329,6 +341,9 @@ fun HomeScreen(
 
         Spacer(Modifier.weight(15f))
 
+        /********    타임피커 밑    ********/
+
+        // 밑을 전부 박스로 감싸서 버튼을 눌렀을때 타임피커 휠의 움직임을 멈추게 함
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -347,28 +362,42 @@ fun HomeScreen(
                     .fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-
+                WakeUpWindow(
+                    modifier = Modifier
+                        .fillMaxWidth(),
+                    onValueChange = {earlyWakeUpMinutes = it},
+                    selectedHour = selectedHour,
+                    selectedMinute = selectedMinute,
+                    selectedIsAm = selectedIsAm,
+                    earlyWakeUpMinutes = earlyWakeUpMinutes
+                )
+                /*
+                // 기상 윈도우 슬라이더 부분
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 15.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("최대 30분", color = Color(0xFFAFF4F9), fontSize = 13.sp)
-                    Text("최소 10분", color = Color(0xFFAFF4F9), fontSize = 13.sp)
+                    Text("10분", color = Color(0xFFAFF4F9), fontSize = 13.sp)
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth(0.85f) // 슬라이더의 전체 길이
+                            .padding(vertical = 4.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        DiamondStepSlider(
+                            value = earlyWakeUpMinutes,
+                            onValueChange = { earlyWakeUpMinutes = it },
+                            modifier = Modifier.fillMaxWidth(9f/10f)
+                        )
+                    }
+
+                    Text("30분", color = Color(0xFFAFF4F9), fontSize = 13.sp)
                 }
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth(0.85f) // ✅ 여기서 슬라이더의 전체 길이를 조절하세요! (0.7 = 70%)
-                        .padding(vertical = 4.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    DiamondStepSlider(
-                        value = earlyWakeUpMinutes,
-                        onValueChange = { earlyWakeUpMinutes = it },
-                        modifier = Modifier.fillMaxWidth(9f/10f)
-                    )
-                }
+
                 Text(
                     text = calculateWakeUpRangeText(
                         selectedHour,
@@ -379,6 +408,8 @@ fun HomeScreen(
                     color = Color.White,
                     fontSize = 15.sp
                 )
+
+                 */
 
                 // Spacer(Modifier.height(15.dp))
 
@@ -442,15 +473,21 @@ fun HomeScreen(
 
 
  */
+/************************       이 밑으로 모달 창          *********************************/
 
 
-                /***사운드 선택 모달***/
+                /*** 사운드 선택 모달 ***/
                 if (showSoundSheet) {
                     val soundSheetState =
                         rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
                     ModalBottomSheet(
-                        onDismissRequest = { showSoundSheet = false },
+                        onDismissRequest = {
+                            // ✅ 핵심: 모달이 어떤 방식으로든 닫힐 때 모든 입력 상태를 초기화합니다.
+                            showSituationModal = false
+                            isCustomMode = false  // 다음번 열 때 리스트가 보이도록 리셋
+                            customText = ""       // 입력하던 텍스트도 비워줌
+                        },
                         sheetState = soundSheetState,
                         containerColor = DarkBackground,
                         scrimColor = Color.Black.copy(alpha = 0.55f),
@@ -467,7 +504,7 @@ fun HomeScreen(
                             onSelectUriString = { uriStr ->
                                 // ViewModel에 저장 (그리고 prefs 저장)
                                 /** 실험중 **/
-                                /*
+
                                 alarmViewModel.saveAlarm(
                                     hour = selectedHour,
                                     minute = selectedMinute,
@@ -479,26 +516,20 @@ fun HomeScreen(
                                     isRem = isRem,
                                 )
 
-                                 */
+
+                                /*
                                 alarmViewModel.editUriString(
                                     ringtoneUri = uriStr
                                 )
+
+                                 */
                             },
                             defaultVolume = alarmViewModel.alarm.volume,
                         )
                     }
                 }
 
-                /*** 상황 설정 모달 ***/
-                if (showSituationModal) {
 
-                    val sheetState = rememberModalBottomSheetState(
-                        skipPartiallyExpanded = true
-                    )
-
-                    val allOptions = situationOptions + customOptions
-
-                    // 여기 glass 바텀 쓋
                     /*** 상황 설정 모달 ***/
                     if (showSituationModal) {
 
@@ -506,194 +537,158 @@ fun HomeScreen(
                             skipPartiallyExpanded = true
                         )
 
-                        val allOptions = situationOptions + customOptions
+                        val allOptions = situationOptions
 
 
                         ModalBottomSheet(
                             onDismissRequest = { showSituationModal = false },
                             sheetState = sheetState,
-                            containerColor = Color(0xFF1B2432),
+                            containerColor = Color(0xFF050C16),
                             // 밖 영역은 어두워지고 클릭 막힘(scrim)
                             scrimColor = Color.Black.copy(alpha = 0.55f),
-                            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+                            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+                            dragHandle = {BottomSheetDefaults.DragHandle(width = 126.dp)}
                         ) {
                             // 내용
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(horizontal = 20.dp)
-                                    .padding(bottom = 20.dp)
+                                    .padding(bottom = 20.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
                             ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Text(
-                                        text = "특별한 상황이 있나요?",
+
+                                Text(
+                                    text = "수면에 영향을 줄 상황이 있었나요?",
+                                    style = MaterialTheme.typography.bodyMedium.copy(
                                         color = Color.White,
-                                        style = MaterialTheme.typography.titleMedium
+                                        fontSize = 20.sp
                                     )
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-
-                                        // ✅ 커스텀 옵션이 있을 때만 보이게 (+ 직접추가 입력모드 아닐 때만)
-                                        if (customOptions.isNotEmpty() && !isCustomMode) {
-
-                                            Text(
-                                                text = if (!isEditMode) "편집" else "삭제",
-                                                color = if (!isEditMode) Color.White.copy(alpha = 0.7f) else Color(0xFFFF5A5A),
-                                                modifier = Modifier
-                                                    .padding(end = 8.dp)
-                                                    .clickable {
-                                                        if (!isEditMode) {
-                                                            // 편집 시작
-                                                            isEditMode = true
-                                                            selectedCustomForDelete = emptySet()
-                                                        } else {
-                                                            // ✅ 삭제 실행
-                                                            if (selectedCustomForDelete.isNotEmpty()) {
-                                                                val updated =
-                                                                    customOptions.filterNot { it.id in selectedCustomForDelete }
-
-                                                                customOptions = updated
-                                                                selectedSituation =
-                                                                    selectedSituation - selectedCustomForDelete
-
-                                                                customSituationPrefs.save(
-                                                                    updated.map { option ->
-                                                                        CustomSituationItem(
-                                                                            id = option.id,
-                                                                            label = option.label
-                                                                        )
-                                                                    }
-                                                                )
-                                                            }
-
-                                                            // 편집 종료 + 원래 선택창으로
-                                                            isEditMode = false
-                                                            selectedCustomForDelete = emptySet()
-                                                        }
-                                                    }
-                                            )
-                                        }
-
-                                        IconButton(onClick = {
-                                            // 닫을 때 편집모드도 같이 종료
-                                            isEditMode = false
-                                            selectedCustomForDelete = emptySet()
-                                            isCustomMode = false
-                                            showSituationModal = false
-                                        }) {
-                                            Text("✕", color = Color.White)
-                                        }
-                                    }
-                                }
-
-                                Spacer(Modifier.height(16.dp))
+                                )
 
                                 // 커스텀 메모 모드인지 아닌지에 따른 UI 분기
                                 if (!isCustomMode) {
-                                    LazyVerticalGrid(
-                                        columns = GridCells.Fixed(2),
-                                        modifier = Modifier.height(gridHeight),
-                                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                    ) {
-                                        items(allOptions) { option ->
-                                            val isCustom = option.id in customIdSet
 
-                                            // 일반 선택 상태(기존)
-                                            val isSelected = selectedSituation.contains(option.id)
+                                    Spacer(Modifier.height(8 .dp))
 
-                                            // 편집(삭제선택) 상태
-                                            val isMarkedForDelete = selectedCustomForDelete.contains(option.id)
+                                    Text(
+                                        text = "해당되는 항목을 모두 선택하세요",
+                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                            color = Color.White.copy(alpha = 0.7f),
+                                            fontSize = 14.sp
+                                        )
+                                    )
 
-                                            // ✅ 편집모드면 커스텀만 클릭 가능
-                                            val enabledClick = !isEditMode || isCustom
 
-                                            Surface(
+                                    Spacer(Modifier.height(36.dp))
+
+                                    LazyColumn(
+                                        modifier = Modifier
+                                            .fillMaxWidth(),
+                                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                                    ){
+                                        items(items = situationOptions) { situation->
+
+                                            // ✅ 별도의 isSelected 상태를 만들지 않고, 전체 세트에 포함되어 있는지 직접 확인합니다.
+                                            val isSelected = selectedSituation.contains(situation.id)
+                                            val backgroundColor = if (isSelected)  Color(0xFFAFF4F9) else Color(0xFFF1F4F9)
+
+                                            Box(
                                                 modifier = Modifier
                                                     .fillMaxWidth()
-                                                    .height(88.dp)
-                                                    .clickable(enabled = enabledClick) {
-                                                        when {
-                                                            // 편집 모드: 커스텀만 삭제 선택 토글
-                                                            isEditMode && isCustom -> {
-                                                                selectedCustomForDelete =
-                                                                    if (isMarkedForDelete) selectedCustomForDelete - option.id
-                                                                    else selectedCustomForDelete + option.id
-                                                            }
-
-                                                            // 일반 모드: 직접추가면 입력 모드로
-                                                            !isEditMode && option.id == "custom" -> {
-                                                                isCustomMode = true
-                                                                customText = ""
-                                                                customChecked = false
-                                                            }
-
-                                                            // 일반 모드: 선택 토글(기본+커스텀 모두 가능)
-                                                            else -> {
-                                                                selectedSituation =
-                                                                    if (isSelected) selectedSituation - option.id
-                                                                    else selectedSituation + option.id
-                                                            }
-                                                        }
-                                                    },
-                                                shape = RoundedCornerShape(20.dp),
-
-                                                // ✅ 편집모드에서 기본 옵션은 흐리게 보여주기
-                                                color = when {
-                                                    isEditMode && !isCustom -> Color(0xFF121A26).copy(alpha = 0.35f)
-                                                    isEditMode && isCustom -> Color(0xFF121A26)
-                                                    // isSelected -> Color(0xFF2D3B52)
-                                                    else -> Color(0xFF121A26)
-                                                },
-
-                                                // ✅ 테두리: 편집모드에서 삭제 선택되면 빨간 border, 일반 선택은 흰 border(원하면)
-                                                border = when {
-                                                    isEditMode && isCustom && isMarkedForDelete -> BorderStroke(1.dp, Color(0xFFFF5A5A))
-                                                    (!isEditMode && isSelected) -> BorderStroke(1.dp, Color.White) // 네가 원한 선택 테두리
-                                                    else -> null
-                                                }
-                                            ) {
-                                                Column(
+                                                    .height(48.dp)
+                                                    .background(
+                                                        color = backgroundColor,
+                                                        shape = RoundedCornerShape(size = 20.dp)
+                                                    ),
+                                                contentAlignment = Alignment.Center
+                                            ){
+                                                Box(
                                                     modifier = Modifier
                                                         .fillMaxSize()
-                                                        .padding(vertical = 14.dp),
-                                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                                    verticalArrangement = Arrangement.Center
+                                                        .clip(RoundedCornerShape(size = 20.dp))
+                                                        .clickable(
+                                                            onClick = {
+                                                                if (isSelected) {
+                                                                    selectedSituation = selectedSituation - situation.id
+                                                                } else {
+                                                                    selectedSituation = selectedSituation + situation.id
+                                                                }
+                                                            }
+                                                        ),
+                                                    contentAlignment = Alignment.Center
                                                 ) {
-                                                    if(option.iconRes != null){
-                                                        Icon(
-                                                            painter = painterResource(option.iconRes),
-                                                            contentDescription = option.label,
-                                                            modifier = Modifier.size(24.dp)
-                                                        )
-
-                                                        Spacer(Modifier.height(8.dp))
-                                                    }
-
                                                     Text(
-                                                        text = option.label,
-                                                        color = Color.White,
-                                                        style = MaterialTheme.typography.bodyMedium
+                                                        text = situation.label,
+                                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                                            color = Color.Black,
+                                                            fontSize = 16.sp
+                                                        )
                                                     )
                                                 }
+
+                                            }
+
+                                        }
+
+
+
+                                    }
+
+                                    Spacer(Modifier.height(36.dp))
+
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(48.dp)
+                                            .border(
+                                                width = 2.dp,
+                                                color = Color.White,
+                                                shape = RoundedCornerShape(size = 20.dp)
+                                            )
+                                    ){
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .clip(RoundedCornerShape(size = 20.dp))
+                                                .clickable(
+                                                    onClick = {
+                                                        isCustomMode = true
+                                                    }
+                                                ),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Row(
+                                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                            ){
+                                                Icon(
+                                                    painter = painterResource(AppIcons.HomeInputPencil),
+                                                    contentDescription = "직접 입력 아이콘"
+                                                )
+
+                                                Text(
+                                                    text = "직접 입력하기",
+                                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                                        color = Color.White,
+                                                        fontSize = 16.sp
+                                                    )
+                                                )
                                             }
                                         }
                                     }
 
-                                    Spacer(Modifier.height(18.dp))
+                                    Spacer(Modifier.height(36.dp))
 
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                    ){
+                                        horizontalArrangement = Arrangement.spacedBy(20.dp)
+                                    ) {
+                                        /** 건너뛰기 **/
                                         Button(
                                             onClick = {
 
-                                                if(!isAllEssentialPermissionsGranted(context)){
+                                                if (!isAllEssentialPermissionsGranted(context)) {
 
                                                     android.widget.Toast.makeText(
                                                         context,
@@ -727,14 +722,22 @@ fun HomeScreen(
                                                 val triggerTime = scheduler.getTriggerTime()
 
                                                 // [추가] 선택된 상황을 라벨 문자열로 변환
-                                                val situationLabel = selectedSituation.mapNotNull { id ->
-                                                    allOptions.find { it.id == id }?.label
-                                                }.joinToString("_").ifEmpty { "normal" }
+                                                val situationLabel =
+                                                    selectedSituation.mapNotNull { id ->
+                                                        allOptions.find { it.id == id }?.label
+                                                    }.joinToString("_").ifEmpty { "normal" }
 
                                                 // 2. 워치 깨우기 (전선 연결! + 상황 라벨 전달)
-                                                alarmViewModel.startSleepTracking(triggerTime, situationLabel)
+                                                alarmViewModel.startSleepTracking(
+                                                    triggerTime,
+                                                    situationLabel
+                                                )
                                                 // 3. 눈으로 확인하기 위한 토스트 메시지 (추가)
-                                                android.widget.Toast.makeText(context, "워치 연결 시도 중...", android.widget.Toast.LENGTH_SHORT).show()
+                                                android.widget.Toast.makeText(
+                                                    context,
+                                                    "워치 연결 시도 중...",
+                                                    android.widget.Toast.LENGTH_SHORT
+                                                ).show()
 
                                                 // 여기서 알람 정보를 디스크에 저장
                                                 alarmPrefs.saveAlarm(alarmViewModel.alarm)
@@ -745,7 +748,7 @@ fun HomeScreen(
                                             },
                                             modifier = Modifier
                                                 .weight(1f)
-                                                .height(48.dp)
+                                                .height(56.dp)
                                                 .border(
                                                     width = 1.dp,
                                                     color = Color(0xFF2A2D32),
@@ -753,21 +756,28 @@ fun HomeScreen(
                                                 ),
                                             shape = RoundedCornerShape(100.dp),
                                             colors = ButtonDefaults.buttonColors(
-                                                containerColor = MaterialTheme.colorScheme.onPrimary.copy(
-                                                    alpha = 0.05f
-                                                ),
-                                                contentColor = MaterialTheme.colorScheme.onPrimary.copy(
-                                                    alpha = 0.5f
-                                                )
-                                            )
+                                                containerColor = Color.White,
+                                                contentColor = Color(0xFF111111),
+                                                disabledContainerColor = Color.White.copy(alpha = 0.5f),
+                                                disabledContentColor = Color(0xFF111111)
+                                            ),
+                                            // 선택한 아이템이 있으면 비활성화.
+                                            enabled = selectedSituation.isEmpty()
                                         ) {
-                                            Text("건너뛰기")
+                                            Text(
+                                                text = "없어요",
+                                                style = MaterialTheme.typography.bodyLarge.copy(
+                                                    fontSize = 18.sp,
+                                                    color = Color.Black)
+                                            )
                                         }
+
+                                        /*** 상황선택 확인 ***/
                                         Button(
                                             onClick = {
                                                 showSituationModal = false
 
-                                                if(!isAllEssentialPermissionsGranted(context)){
+                                                if (!isAllEssentialPermissionsGranted(context)) {
 
                                                     android.widget.Toast.makeText(
                                                         context,
@@ -802,14 +812,22 @@ fun HomeScreen(
                                                 val triggerTime = scheduler.getTriggerTime()
 
                                                 // [추가] 선택된 상황을 라벨 문자열로 변환
-                                                val situationLabel = selectedSituation.mapNotNull { id ->
-                                                    allOptions.find { it.id == id }?.label
-                                                }.joinToString("_").ifEmpty { "normal" }
+                                                val situationLabel =
+                                                    selectedSituation.mapNotNull { id ->
+                                                        allOptions.find { it.id == id }?.label
+                                                    }.joinToString("_").ifEmpty { "normal" }
 
                                                 // 2. 워치 깨우기 (전선 연결! + 상황 라벨 전달)
-                                                alarmViewModel.startSleepTracking(triggerTime, situationLabel)
+                                                alarmViewModel.startSleepTracking(
+                                                    triggerTime,
+                                                    situationLabel
+                                                )
                                                 // 3. 눈으로 확인하기 위한 토스트 메시지 (추가)
-                                                android.widget.Toast.makeText(context, "워치 연결 시도 중...", android.widget.Toast.LENGTH_SHORT).show()
+                                                android.widget.Toast.makeText(
+                                                    context,
+                                                    "워치 연결 시도 중...",
+                                                    android.widget.Toast.LENGTH_SHORT
+                                                ).show()
 
                                                 // 여기서 알람 정보를 디스크에 저장
                                                 alarmPrefs.saveAlarm(alarmViewModel.alarm)
@@ -818,18 +836,28 @@ fun HomeScreen(
                                             },
                                             modifier = Modifier
                                                 .weight(1f)
-                                                .height(48.dp),
+                                                .height(56.dp),
                                             shape = RoundedCornerShape(100.dp),
                                             colors = ButtonDefaults.buttonColors(
-                                                containerColor = MaterialTheme.colorScheme.primary,
-                                                contentColor = MaterialTheme.colorScheme.onPrimary
-                                            ),
+                                                containerColor = Color(0xFFAFF4F9),
+                                                contentColor = Color(0xFF111111),
+                                                disabledContainerColor = Color(0x80AFF4F9),
+                                                disabledContentColor = Color(0xFF111111)
+                                            )
+                                            ,
                                             // 선택한 아이템이 없다면 비활성화.
                                             enabled = selectedSituation.isNotEmpty()
                                         ) {
-                                            Text("완료")
+                                            Text(
+                                                text = "완료",
+                                                style = MaterialTheme.typography.bodyLarge.copy(
+                                                    fontSize = 18.sp,
+                                                    color = Color.Black)
+                                            )
                                         }
+
                                     }
+                                    Spacer(Modifier.height(30.dp))
                                 }
 
                                 // 직접 추가시 모달
@@ -840,76 +868,92 @@ fun HomeScreen(
                                             .imePadding()              // ✅ 키보드 올라오면 자동으로 위로 밀림
                                             .navigationBarsPadding()   // ✅ 하단 제스처바/네비바 고려
                                     ) {
-                                        Spacer(Modifier.height(10.dp))
+                                        Spacer(Modifier.height(52.dp))
 
                                         OutlinedTextField(
                                             value = customText,
                                             onValueChange = { customText = it },
                                             modifier = Modifier
-                                                .fillMaxWidth(),
-                                            placeholder = { Text("어떤 상황인지 작성해주세요.", color = Color.White.copy(alpha = 0.35f)) },
+                                                .fillMaxWidth()
+                                                .height(180.dp)
+                                                .clip(RoundedCornerShape(20.dp)),
+                                            textStyle = MaterialTheme.typography.bodyMedium.copy(
+                                                color = Color.Black,
+                                                fontSize = 14.sp
+                                            ),
+                                            placeholder = {
+                                                Text(
+                                                    "어떤 상황인지 작성해주세요.",
+                                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                                        color = Color.Black.copy(alpha = 0.5f),
+                                                        fontSize = 14.sp
+                                                    )
+                                                )
+                                            },
                                             singleLine = false,
                                             minLines = 4,
-                                            maxLines = 6
+                                            maxLines = 6,
+                                            colors = TextFieldDefaults.colors(
+                                                focusedContainerColor = Color.White,
+                                                unfocusedContainerColor = Color.White,
+                                                cursorColor = Color.Transparent,
+                                                focusedTextColor = Color.Black,
+                                                unfocusedTextColor = Color.Black
+                                            )
                                         )
 
-                                        Spacer(Modifier.height(14.dp))
+                                        Spacer(Modifier.height(52.dp))
 
                                         Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.End
-                                        ) {
-                                            Checkbox(
-                                                checked = customChecked,
-                                                onCheckedChange = { customChecked = it },
-                                                colors = CheckboxDefaults.colors(
-                                                    checkedColor = Color.White,
-                                                    uncheckedColor = Color.White.copy(alpha = 0.6f),
-                                                    checkmarkColor = Color(0xFF050C16)
+                                            modifier = Modifier
+                                                .fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(20.dp)
+                                        ){
+                                            Button(
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .height(56.dp),
+                                                onClick = {
+                                                    isCustomMode = false
+                                                },
+                                                colors = ButtonDefaults.buttonColors(
+                                                    containerColor = Color.White,
+                                                    contentColor = Color.Black
                                                 )
-                                            )
-                                            Text("추가", color = Color.White.copy(alpha = 0.85f))
-                                        }
-
-                                        Spacer(Modifier.height(12.dp))
-
-                                        Button(
-                                            onClick = {
-                                                // ✅ "추가"가 체크되어 있고, 텍스트가 비어있지 않으면 그리드 아이템으로 추가
-                                                val trimmed = customText.trim()
-                                                if (customChecked && trimmed.isNotEmpty()) {
-                                                    val saved = customSituationPrefs.add(trimmed) // ✅ prefs에 저장 + 새 item 반환
-
-                                                    customOptions = customOptions + SituationOption(
-                                                        id = saved.id,
-                                                        label = saved.label,
-                                                        iconRes = null
+                                            ){
+                                                Text(
+                                                    text = "취소",
+                                                    style = MaterialTheme.typography.bodyLarge.copy(
+                                                        fontSize = 18.sp,
+                                                        color = Color.Black
                                                     )
-                                                    selectedSituation = selectedSituation + saved.id
+                                                )
+                                            }
+                                            Button(
+                                                onClick = {
+                                                    // ✅ "추가"가 체크되어 있고, 텍스트가 비어있지 않으면 그리드 아이템으로 추가
+                                                    val trimmed = customText.trim()
 
-                                                }
+                                                    // 필수권한 확인
+                                                    if (!isAllEssentialPermissionsGranted(context)) {
 
-                                                if(!isAllEssentialPermissionsGranted(context)){
+                                                        android.widget.Toast.makeText(
+                                                            context,
+                                                            "권한 설정이 필요합니다. 잠시 후 설정 화면으로 이동합니다.",
+                                                            android.widget.Toast.LENGTH_SHORT
+                                                        ).show()
 
-                                                    android.widget.Toast.makeText(
-                                                        context,
-                                                        "권한 설정이 필요합니다. 잠시 후 설정 화면으로 이동합니다.",
-                                                        android.widget.Toast.LENGTH_SHORT
-                                                    ).show()
+                                                        // 코루틴을 사용하여 지연 실행
+                                                        scope.launch {
+                                                            delay(1500L) // 1.5초 지연 (사용자가 토스트를 읽을 시간)
+                                                            openAppSettings(context)
+                                                        }
 
-                                                    // 코루틴을 사용하여 지연 실행
-                                                    scope.launch {
-                                                        delay(1500L) // 1.5초 지연 (사용자가 토스트를 읽을 시간)
-                                                        openAppSettings(context)
+                                                        // 권한이 없으므로 알람 등록을 진행하지 않고 종료
+                                                        return@Button
                                                     }
 
-                                                    // 권한이 없으므로 알람 등록을 진행하지 않고 종료
-                                                    return@Button
-                                                }
 
-
-                                                if(!customChecked){
                                                     // 알람정보 뷰모델로 저장하고 스케쥴러에 등록하고 다음 화면으로
 
                                                     alarmViewModel.saveAlarm(
@@ -927,48 +971,65 @@ fun HomeScreen(
                                                     val triggerTime = scheduler.getTriggerTime()
 
                                                     // [추가] 선택된 상황을 라벨 문자열로 변환
-                                                    val situationLabel = selectedSituation.mapNotNull { id ->
-                                                        allOptions.find { it.id == id }?.label
-                                                    }.joinToString("_").ifEmpty { "normal" }
+                                                    val situationLabel =
+                                                        selectedSituation.mapNotNull { id ->
+                                                            allOptions.find { it.id == id }?.label
+                                                        }.joinToString("_").ifEmpty { "normal" }
 
                                                     // 2. 워치 깨우기 (전선 연결! + 상황 라벨 전달)
-                                                    alarmViewModel.startSleepTracking(triggerTime, situationLabel)
+                                                    alarmViewModel.startSleepTracking(
+                                                        triggerTime,
+                                                        situationLabel
+                                                    )
                                                     // 3. 눈으로 확인하기 위한 토스트 메시지 (추가)
-                                                    android.widget.Toast.makeText(context, "워치 연결 시도 중...", android.widget.Toast.LENGTH_SHORT).show()
+                                                    android.widget.Toast.makeText(
+                                                        context,
+                                                        "워치 연결 시도 중...",
+                                                        android.widget.Toast.LENGTH_SHORT
+                                                    ).show()
 
                                                     // 여기서 알람 정보를 디스크에 저장
                                                     alarmPrefs.saveAlarm(alarmViewModel.alarm)
 
                                                     onClickConfirm()
-                                                }
-                                                // 모드 종료
-                                                isCustomMode = false
-                                                customChecked = false
 
+                                                    // 모드 종료
+                                                    isCustomMode = false
+                                                },
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .height(56.dp),
+                                                shape = RoundedCornerShape(100.dp),
+                                                colors = ButtonDefaults.buttonColors(
+                                                    containerColor = Color(0xFFAFF4F9),
+                                                    disabledContainerColor = Color(0xFFAFF4F9).copy(alpha = 0.5f),
+                                                    contentColor = Color.Black,
+                                                    disabledContentColor = Color.Black
+                                                ),
+                                                enabled = customText.isNotEmpty()
+                                            ) {
+                                                Text(
+                                                    text ="완료",
+                                                    style = MaterialTheme.typography.bodyLarge.copy(
+                                                        fontSize = 18.sp,
+                                                        color = Color.Black)
+                                                )
+                                            }
 
-                                            },
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .height(48.dp),
-                                            shape = RoundedCornerShape(100.dp),
-                                            colors = ButtonDefaults.buttonColors(
-                                                containerColor = MaterialTheme.colorScheme.primary,
-                                                contentColor = MaterialTheme.colorScheme.onPrimary
-                                            )
-                                        ) {
-                                            Text("완료")
                                         }
+                                        Spacer(Modifier.height(30.dp))
+
                                     }
                                 }
+
                             }
 
                         }
                     }
-                //여기 glass 바텀 쓋
-                }
 
             }
         }
+        // TODO: dp로 바꿔라
         Spacer(Modifier.weight(32f))
     }
 }
