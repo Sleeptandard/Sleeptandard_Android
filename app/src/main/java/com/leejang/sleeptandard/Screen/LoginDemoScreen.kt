@@ -41,7 +41,6 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.leejang.sleeptandard.backend.SupabaseClientProvider
 import io.github.jan.supabase.auth.auth
-import io.github.jan.supabase.auth.exception.AuthRestException
 import io.github.jan.supabase.auth.providers.builtin.Email
 import io.github.jan.supabase.postgrest.postgrest
 import kotlinx.coroutines.launch
@@ -56,11 +55,18 @@ sealed class AuthStep {
     data class SignupNickname(val email: String, val pw: String) : AuthStep() // 3단계: 닉네임
 }
 
-// profiles 테이블에 INSERT 할 때 사용하는 데이터 클래스
+// profiles 테이블에 INSERT/SELECT 할 때 사용하는 데이터 클래스
 @Serializable
 data class ProfileInsert(
     val id: String,
-    val nickname: String
+    val nickname: String,
+    val email: String
+)
+
+// 이메일 존재 여부 조회용
+@Serializable
+data class ProfileEmail(
+    val email: String
 )
 
 // Supabase Auth 실제 연동 ViewModel
@@ -70,35 +76,20 @@ class AuthViewModel : ViewModel() {
 
     private val supabase = SupabaseClientProvider.client
 
-    // 1단계: 이메일로 신규/기존 유저 구분
-    // 빈 비밀번호로 signIn 시도 → WrongPassword 예외 → 기존 유저 (로그인 화면으로)
-    //                           → UserNotFound 예외 → 신규 유저 (회원가입 화면으로)
+    // 1단계: profiles 테이블에서 이메일 조회 → 신규/기존 유저 자동 분기
     fun checkEmail(email: String) {
         viewModelScope.launch {
             try {
-                supabase.auth.signInWith(Email) {
-                    this.email = email
-                    this.password = ""
-                }
-                // 이 줄까지 오는 경우는 없지만, 안전망으로 로그인 화면으로
-                currentStep = AuthStep.LoginPassword(email)
-            } catch (e: AuthRestException) {
-                val msg = e.message ?: ""
-                currentStep = when {
-                    // 비밀번호가 틀렸다는 뜻 → 이미 가입된 이메일
-                    msg.contains("Invalid login credentials", ignoreCase = true) ||
-                    msg.contains("invalid_credentials", ignoreCase = true) ->
-                        AuthStep.LoginPassword(email)
-                    // 유저를 찾을 수 없다 → 신규 가입
-                    msg.contains("user not found", ignoreCase = true) ||
-                    msg.contains("Email not confirmed", ignoreCase = true) ->
-                        AuthStep.SignupPassword(email)
-                    else ->
-                        // 그 외(네트워크 오류 등)는 일단 로그인 화면으로 fallback
-                        AuthStep.LoginPassword(email)
+                val result = supabase.postgrest["profiles"]
+                    .select { filter { eq("email", email) } }
+                    .decodeList<ProfileEmail>()
+                currentStep = if (result.isNotEmpty()) {
+                    AuthStep.LoginPassword(email)   // 기존 유저 → 로그인
+                } else {
+                    AuthStep.SignupPassword(email)  // 신규 유저 → 회원가입
                 }
             } catch (e: Exception) {
-                // 네트워크 등 기타 오류 → 로그인 화면으로 fallback
+                // 네트워크 오류 등 → 로그인 화면으로 fallback
                 currentStep = AuthStep.LoginPassword(email)
             }
         }
@@ -150,9 +141,9 @@ class AuthViewModel : ViewModel() {
                 }
                 // 2) 방금 발급된 UID 가져오기
                 val uid = supabase.auth.currentUserOrNull()?.id ?: ""
-                // 3) profiles 테이블에 닉네임 저장
+                // 3) profiles 테이블에 닉네임 + 이메일 저장
                 supabase.postgrest["profiles"].insert(
-                    ProfileInsert(id = uid, nickname = nickname)
+                    ProfileInsert(id = uid, nickname = nickname, email = email)
                 )
                 onComplete(nickname)
             } catch (e: Exception) {
