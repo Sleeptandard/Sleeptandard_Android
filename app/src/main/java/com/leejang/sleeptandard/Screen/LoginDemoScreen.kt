@@ -138,7 +138,8 @@ fun LoginDemoScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 20.dp),
+            .padding(horizontal = 20.dp)
+            .background(brush = linearGradation),
         horizontalAlignment = Alignment.CenterHorizontally
     ){
         Spacer(Modifier.height(50.dp))
@@ -151,7 +152,8 @@ fun LoginDemoScreen(
         ){
             Row(
                 modifier = Modifier
-                    .fillMaxSize()
+                    .fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
             ){
                 Text(
                     text = "메일입력",
@@ -172,7 +174,8 @@ fun LoginDemoScreen(
 
             Box(
                 modifier = Modifier
-                    .fillMaxWidth(),
+                    .fillMaxWidth()
+                    .height(43.dp),
                 contentAlignment = Alignment.Center
             ){
                 Box(

@@ -214,6 +214,10 @@ fun AppNav(
                 onFinish = {
                     alarmPrefs.setFirstRunCompleted()
                     rememberNavController.popBackStack()
+                    when{
+                        alarmPrefs.isFirstRun() -> Screen.Tutorial.route
+                        else -> Screen.Home.route
+                    }
                     rememberNavController.navigate(Screen.Home.route)
                 }
             )
