@@ -1,5 +1,6 @@
 package com.leejang.sleeptandard.Screen
 
+import android.util.Log
 import android.widget.Toast
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
@@ -43,6 +44,7 @@ import com.leejang.sleeptandard.backend.SupabaseClientProvider
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.providers.builtin.Email
 import io.github.jan.supabase.postgrest.postgrest
+import io.github.jan.supabase.postgrest.query.Columns
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 
@@ -71,9 +73,12 @@ class AuthViewModel : ViewModel() {
     fun checkEmail(email: String) {
         viewModelScope.launch {
             try {
+                // email 컬럼만 요청해서 역직렬화 문제 방지
                 val result =
                         supabase.postgrest["profiles"]
-                                .select { filter { eq("email", email) } }
+                                .select(columns = Columns.list("email")) {
+                                    filter { eq("email", email) }
+                                }
                                 .decodeList<ProfileEmail>()
                 currentStep =
                         if (result.isNotEmpty()) {
@@ -82,6 +87,7 @@ class AuthViewModel : ViewModel() {
                             AuthStep.SignupPassword(email) // 신규 유저 → 회원가입
                         }
             } catch (e: Exception) {
+                Log.e("AuthVM", "checkEmail 실패: ${e.message}", e)
                 // 네트워크 오류 등 → 로그인 화면으로 fallback
                 currentStep = AuthStep.LoginPassword(email)
             }
