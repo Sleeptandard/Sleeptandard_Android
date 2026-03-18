@@ -7,14 +7,18 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Button
@@ -27,6 +31,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
@@ -114,12 +121,190 @@ fun LoginDemoScreen(
 
     val context = LocalContext.current
 
+    val BarGradient = Brush.horizontalGradient(
+        colors = listOf(
+            Color(0xFF437AC7),
+            Color(0xFFAFF4F9)
+        )
+    )
+
+    val linearGradation = Brush.verticalGradient(
+        colorStops = arrayOf(
+            0f to Color(0xFF050C16),
+            1f to Color(0xFF1C447C)
+        )
+    )
+
     Column(
         modifier = Modifier
-            .fillMaxSize(),
+            .fillMaxSize()
+            .padding(horizontal = 20.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ){
-        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.height(50.dp))
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(100.dp),
+            verticalArrangement = Arrangement.SpaceBetween
+        ){
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+            ){
+                Text(
+                    text = "메일입력",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Color.White
+                )
+                Text(
+                    text = "회원가입",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Color.White
+                )
+                Text(
+                    text = "로그인",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Color.White
+                )
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ){
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(8.dp)
+                        .clip(RoundedCornerShape(100.dp))
+                        .background(brush = BarGradient)
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ){
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(0.5f)
+                            .size(105.dp, 43.dp),
+                        contentAlignment = Alignment.Center
+                    ){
+                        Box(
+                            modifier = Modifier
+                                .matchParentSize()
+                                .blur(30.dp) // 유리 뒤를 흐리게
+                                .background(
+                                    brush = Brush.verticalGradient(
+                                        colors = listOf(
+                                            Color.White.copy(alpha = 0.15f), // 위쪽 하이라이트
+                                            Color.White.copy(alpha = 0.05f)  // 아래쪽 그림자
+                                        )
+                                    )
+                                )
+                                .border(
+                                    width = 1.dp,
+                                    brush = Brush.verticalGradient(
+                                        colors = listOf(
+                                            Color.White.copy(alpha = 0.4f), // 테두리 위쪽 (빛남)
+                                            Color.Transparent,             // 테두리 중간 (투명)
+                                            Color.White.copy(alpha = 0.1f)  // 테두리 아래쪽 (은은함)
+                                        )
+                                    ),
+                                    shape = RoundedCornerShape(24.dp)
+                                )
+                        ){}
+
+                        Text(
+                            text = "메일입력",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color(0xFFAFF4F9)
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(0.5f)
+                            .size(105.dp, 43.dp),
+                        contentAlignment = Alignment.Center
+                    ){
+                        Box(
+                            modifier = Modifier
+                                .matchParentSize()
+                                .blur(30.dp) // 유리 뒤를 흐리게
+                                .background(
+                                    brush = Brush.verticalGradient(
+                                        colors = listOf(
+                                            Color.White.copy(alpha = 0.15f), // 위쪽 하이라이트
+                                            Color.White.copy(alpha = 0.05f)  // 아래쪽 그림자
+                                        )
+                                    )
+                                )
+                                .border(
+                                    width = 1.dp,
+                                    brush = Brush.verticalGradient(
+                                        colors = listOf(
+                                            Color.White.copy(alpha = 0.4f), // 테두리 위쪽 (빛남)
+                                            Color.Transparent,             // 테두리 중간 (투명)
+                                            Color.White.copy(alpha = 0.1f)  // 테두리 아래쪽 (은은함)
+                                        )
+                                    ),
+                                    shape = RoundedCornerShape(24.dp)
+                                )
+                        ){}
+
+                        Text(
+                            text = "회원가입",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color(0xFFAFF4F9)
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(0.5f)
+                            .size(105.dp, 43.dp),
+                        contentAlignment = Alignment.Center
+                    ){
+                        Box(
+                            modifier = Modifier
+                                .matchParentSize()
+                                .blur(30.dp) // 유리 뒤를 흐리게
+                                .background(
+                                    brush = Brush.verticalGradient(
+                                        colors = listOf(
+                                            Color.White.copy(alpha = 0.15f), // 위쪽 하이라이트
+                                            Color.White.copy(alpha = 0.05f)  // 아래쪽 그림자
+                                        )
+                                    )
+                                )
+                                .border(
+                                    width = 1.dp,
+                                    brush = Brush.verticalGradient(
+                                        colors = listOf(
+                                            Color.White.copy(alpha = 0.4f), // 테두리 위쪽 (빛남)
+                                            Color.Transparent,             // 테두리 중간 (투명)
+                                            Color.White.copy(alpha = 0.1f)  // 테두리 아래쪽 (은은함)
+                                        )
+                                    ),
+                                    shape = RoundedCornerShape(24.dp)
+                                )
+                        ){}
+
+                        Text(
+                            text = "로그인",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color(0xFFAFF4F9)
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(94.dp))
+
+
 
         // 현재 스텝에 따른 UI 출력 with animation
         AnimatedContent(
