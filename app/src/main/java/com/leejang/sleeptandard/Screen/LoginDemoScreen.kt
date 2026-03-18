@@ -2,6 +2,8 @@ package com.leejang.sleeptandard.Screen
 
 import android.widget.Toast
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -11,14 +13,18 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Button
@@ -37,6 +43,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
@@ -50,15 +57,16 @@ import kotlinx.coroutines.launch
 
 
 // 유저의 로그인/회원가입 진행 단계 정의 및 email + 비번 저장 클래스
-// TODO: 여기서 정보 뺴가야될듯?
 sealed class AuthStep {
     object EmailInput : AuthStep()                          // 1단계: 이메일 입력
     data class LoginPassword(val email: String) : AuthStep() // 2단계(경로A): 로그인 비밀번호
     data class SignupPassword(val email: String) : AuthStep() // 2단계(경로B): 회원가입 비밀번호
     data class SignupNickname(val email: String, val pw: String) : AuthStep() // 3단계: 닉네임
+    data class Completed(val nickname: String) : AuthStep()
 }
 
 /**** 1.이메일 체크, 2. 이메일 비번 (로그인)검증, 3.회원가입 처리 더미 로직 ****/
+// TODO: 여기서 정보 뺴가야될듯?
 // 로그인/회원가입 진행을 맡는 역할
 class AuthViewModel : ViewModel() {
     var currentStep by mutableStateOf<AuthStep>(AuthStep.EmailInput)
@@ -104,6 +112,7 @@ class AuthViewModel : ViewModel() {
         val newUser = User(email, pw, nickname)
         AuthRepository.addUser(newUser)
         onComplete(nickname)
+        currentStep = AuthStep.Completed(nickname)
     }
 
     fun goToNicknameStep(email: String, pw: String) {
@@ -116,7 +125,7 @@ class AuthViewModel : ViewModel() {
 @Composable
 fun LoginDemoScreen(
     authViewModel: AuthViewModel = viewModel(),
-    onComplete: (String) -> Unit
+    onConfirm: (String) -> Unit
 ){
 
     val context = LocalContext.current
@@ -135,19 +144,22 @@ fun LoginDemoScreen(
         )
     )
 
+
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .background(brush = linearGradation)
             .padding(horizontal = 20.dp)
-            .background(brush = linearGradation),
+,
         horizontalAlignment = Alignment.CenterHorizontally
     ){
         Spacer(Modifier.height(50.dp))
 
+        /*
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(100.dp),
+                .height(50.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ){
             Row(
@@ -192,7 +204,6 @@ fun LoginDemoScreen(
                 ){
                     Box(
                         modifier = Modifier
-                            .fillMaxWidth(0.5f)
                             .size(105.dp, 43.dp),
                         contentAlignment = Alignment.Center
                     ){
@@ -229,7 +240,6 @@ fun LoginDemoScreen(
                     }
                     Box(
                         modifier = Modifier
-                            .fillMaxWidth(0.5f)
                             .size(105.dp, 43.dp),
                         contentAlignment = Alignment.Center
                     ){
@@ -266,7 +276,6 @@ fun LoginDemoScreen(
                     }
                     Box(
                         modifier = Modifier
-                            .fillMaxWidth(0.5f)
                             .size(105.dp, 43.dp),
                         contentAlignment = Alignment.Center
                     ){
@@ -305,7 +314,16 @@ fun LoginDemoScreen(
             }
         }
 
-        Spacer(Modifier.height(94.dp))
+         */
+
+        // ✅ 상단에 단계 인디케이터 배치
+        AuthStepIndicator(
+            currentStep = authViewModel.currentStep,
+            modifier = Modifier.padding(vertical = 24.dp)
+        )
+
+
+        Spacer(Modifier.height(6.dp))
 
 
 
@@ -332,7 +350,7 @@ fun LoginDemoScreen(
                         authViewModel.performLogin(
                             email = step.email,
                             pw = pw,
-                            onSuccess = { nickname -> onComplete("$nickname 님, 환영합니다!") },
+                            onSuccess = { nickname -> onConfirm("$nickname 님, 환영합니다!") },
                             onError = { Toast.makeText(context, "비밀번호가 틀렸습니다.", Toast.LENGTH_SHORT).show() }
                         )
                     }
@@ -350,8 +368,14 @@ fun LoginDemoScreen(
                     // AuthViewModel의 회원가입 더미 로직
                     onComplete = { nickname ->
                         authViewModel.completeSignup(step.email, step.pw, nickname) {
-                            onComplete("$nickname 님, 가입을 축하합니다!")
                         }
+                    }
+                )
+
+                is AuthStep.Completed -> CompletedStep(
+                    nickname = step.nickname,
+                    onConfirm = {nickname ->
+                        onConfirm("$nickname 님, 가입을 축하합니다!")
                     }
                 )
             }
@@ -541,6 +565,116 @@ fun NicknameStep(email: String, pw: String, onComplete: (String) -> Unit) {
     }
 }
 
+@Composable
+fun CompletedStep(
+    nickname: String,
+    onConfirm: (String) -> Unit
+){
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+    )
+    {
+        Text(
+            text = "환영합니다, " + nickname + "님!",
+            style = MaterialTheme.typography.titleLarge.copy(
+                fontSize = 28.sp,
+                color = Color.White
+            )
+        )
+        Spacer(Modifier.height(50.dp))
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(60.dp)
+                .clip(RoundedCornerShape(100.dp))
+                .background(Color.White)
+                .clickable{
+                    onConfirm(nickname)
+                },
+            contentAlignment = Alignment.Center
+        ){
+            Text(
+                text = "확인",
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontSize = 18.sp,
+                    color = Color.Black
+                )
+            )
+        }
+    }
+
+
+
+}
+
+@Composable
+fun AuthStepIndicator(
+    currentStep: AuthStep,
+    modifier: Modifier = Modifier
+) {
+    // 1. 표시할 텍스트 리스트 (로그인/회원가입 공통 단계로 구성)
+    val stepLabels = listOf("메일 입력", "회원가입", "로그인")
+
+    // 2. ✅ 핵심 수정: 현재 상태(AuthStep)를 인덱스 번호로 매핑합니다.
+    // SignupPassword와 LoginPassword를 모두 '비밀번호 입력' 단계(인덱스 1)로 묶어줍니다.
+    val currentIndex = when (currentStep) {
+        is AuthStep.EmailInput -> 0
+        is AuthStep.SignupPassword -> 1
+        is AuthStep.SignupNickname -> 1
+        is AuthStep.LoginPassword -> 2
+        is AuthStep.Completed -> 3
+    }
+
+    val numberOfSteps = stepLabels.size
+    val containerColor = Color(0xFF1B2432)
+    val highlightColor = Color(0xFFAAEDF2)
+
+    BoxWithConstraints(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(56.dp)
+            .background(containerColor, RoundedCornerShape(100.dp))
+            .padding(4.dp)
+    ) {
+        val stepWidth = (maxWidth - 8.dp) / numberOfSteps
+        val targetOffset = stepWidth * currentIndex
+
+        // 위치 이동 애니메이션
+        val animatedOffset by animateDpAsState(
+            targetValue = targetOffset,
+            animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
+            label = "step_highlight_move"
+        )
+
+        // 하이라이트 박스
+        Box(
+            modifier = Modifier
+                .width(stepWidth)
+                .fillMaxHeight()
+                .offset(x = animatedOffset)
+                .background(highlightColor, RoundedCornerShape(100.dp))
+        )
+
+        // 텍스트 레이어
+        Row(modifier = Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
+            stepLabels.forEachIndexed { index, label ->
+                val isSelected = index == currentIndex
+                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    Text(
+                        text = label,
+                        style = TextStyle(
+                            fontSize = 13.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                            color = if (isSelected) Color(0xFF111111) else Color.White.copy(alpha = 0.6f)
+                        )
+                    )
+                }
+            }
+        }
+    }
+}
 
 /******* 백엔드가 처다볼 필요도 없는 테스트용 더미 서버, 리포지토리 ******/
 

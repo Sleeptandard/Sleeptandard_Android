@@ -126,7 +126,7 @@ fun AppNav(
         /** 로그인 데모 **/
         composable(Screen.LoginDemo.route){
             LoginDemoScreen(
-                onComplete = { greeting ->
+                onConfirm = { greeting ->
                     rememberNavController.navigate(Screen.Home.route)
                     Toast.makeText(context, greeting, Toast.LENGTH_SHORT).show()
                 }
