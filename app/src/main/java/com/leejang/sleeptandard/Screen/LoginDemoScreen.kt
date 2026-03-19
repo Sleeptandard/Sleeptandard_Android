@@ -403,7 +403,7 @@ fun GlassyTextField(
                     .fillMaxWidth()
                     .height(60.dp)
                     // ✅ 기존에 정의한 innerShadow 적용
-                    .background(Color.White.copy(0.05f), RoundedCornerShape(30.dp))
+                    .background(Color.White), RoundedCornerShape(30.dp))
                     .padding(horizontal = 24.dp),
                 contentAlignment = Alignment.CenterStart
             ) {
@@ -420,13 +420,30 @@ fun EmailInputStep(onConfirm: (String) -> Unit) {
 
     Column(modifier = Modifier
         .fillMaxSize()
-        .padding(horizontal = 24.dp)) {
+    ){
         Text(
-            text = "이메일을 입력해주세요 🌇", //
-            style = MaterialTheme.typography.titleLarge,
-            color = Color.White
+            modifier = Modifier.padding(start = 10.dp),
+            text = "이메일을 입력해주세요", //
+            style = MaterialTheme.typography.titleLarge.copy(
+                color = Color.White,
+                fontSize = 22.sp
+            )
+
         )
-        Spacer(Modifier.height(40.dp))
+
+        Spacer(Modifier.height(10.dp))
+
+        Text(
+            modifier = Modifier.padding(start = 10.dp),
+            text = "이메일에 따라 가입 또는 로그인으로 진행됩니다.",
+            style = MaterialTheme.typography.titleMedium.copy(
+                color = Color.White.copy(alpha = 0.7f),
+                fontSize = 14.sp
+            )
+
+        )
+
+        Spacer(Modifier.height(60.dp))
 
         GlassyTextField(
             value = email,
@@ -631,49 +648,54 @@ fun AuthStepIndicator(
     val containerColor = Color(0xFF1B2432)
     val highlightColor = Color(0xFFAAEDF2)
 
-    BoxWithConstraints(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(56.dp)
-            .background(containerColor, RoundedCornerShape(100.dp))
-            .padding(4.dp)
-    ) {
-        val stepWidth = (maxWidth - 8.dp) / numberOfSteps
-        val targetOffset = stepWidth * currentIndex
+    if(currentIndex < 3){
+        BoxWithConstraints(
+            modifier = modifier
+                .fillMaxWidth()
+                .height(56.dp)
+                .background(containerColor, RoundedCornerShape(100.dp))
+                .padding(4.dp)
+        ) {
 
-        // 위치 이동 애니메이션
-        val animatedOffset by animateDpAsState(
-            targetValue = targetOffset,
-            animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
-            label = "step_highlight_move"
-        )
+            val stepWidth = (maxWidth - 8.dp) / numberOfSteps
+            val targetOffset = stepWidth * currentIndex
 
-        // 하이라이트 박스
-        Box(
-            modifier = Modifier
-                .width(stepWidth)
-                .fillMaxHeight()
-                .offset(x = animatedOffset)
-                .background(highlightColor, RoundedCornerShape(100.dp))
-        )
+            // 위치 이동 애니메이션
+            val animatedOffset by animateDpAsState(
+                targetValue = targetOffset,
+                animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
+                label = "step_highlight_move"
+            )
 
-        // 텍스트 레이어
-        Row(modifier = Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
-            stepLabels.forEachIndexed { index, label ->
-                val isSelected = index == currentIndex
-                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                    Text(
-                        text = label,
-                        style = TextStyle(
-                            fontSize = 13.sp,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                            color = if (isSelected) Color(0xFF111111) else Color.White.copy(alpha = 0.6f)
+            // 하이라이트 박스
+            Box(
+                modifier = Modifier
+                    .width(stepWidth)
+                    .fillMaxHeight()
+                    .offset(x = animatedOffset)
+                    .background(highlightColor, RoundedCornerShape(100.dp))
+            )
+
+            // 텍스트 레이어
+            Row(modifier = Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
+                stepLabels.forEachIndexed { index, label ->
+                    val isSelected = index == currentIndex
+                    Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                        Text(
+                            text = label,
+                            style = TextStyle(
+                                fontSize = 13.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                color = if (isSelected) Color(0xFF111111) else Color.White.copy(alpha = 0.6f)
+                            )
                         )
-                    )
+                    }
                 }
             }
         }
     }
+
+
 }
 
 /******* 백엔드가 처다볼 필요도 없는 테스트용 더미 서버, 리포지토리 ******/
