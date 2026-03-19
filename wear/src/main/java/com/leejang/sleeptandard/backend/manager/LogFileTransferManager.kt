@@ -13,6 +13,11 @@ import java.io.File
  * - ChannelClient 사용 (큰 파일 전송 가능)
  * - 가장 최근 sensor_log, inference_log만 전송
  * - 전송 완료 후 파일 삭제
+ * 
+ * ⚠️ [주의] ⚠️
+ * 이 클래스의 메서드(sendLatestLogsToPhone 등)를 직접 호출하지 마세요.
+ * 파일 전송 중 화면이 꺼지면(Doze 모드 진입 시) 전송이 중단될 수 있습니다.
+ * 반드시 백그라운드 실행을 보장하는 `LogTransferService`를 통해서만 호출해야 합니다.
  */
 class LogFileTransferManager(private val context: Context) {
 
