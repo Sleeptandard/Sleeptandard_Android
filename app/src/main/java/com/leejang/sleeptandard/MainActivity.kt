@@ -15,6 +15,8 @@ import com.leejang.sleeptandard.Permission.checkFullScreenIntentPermission
 import com.leejang.sleeptandard.Permission.checkNotificationPermission
 import com.leejang.sleeptandard.Permission.checkSetExactAlarms
 import com.leejang.sleeptandard.Prefs.AlarmPreferences
+import com.leejang.sleeptandard.backend.SupabaseClientProvider
+import io.github.jan.supabase.auth.auth
 // 마이크 테스트
 class MainActivity : ComponentActivity() {
 
@@ -36,7 +38,7 @@ class MainActivity : ComponentActivity() {
         // 스플래시 화면에서 빠져나오는 전환 애니메이션
         splash.setOnExitAnimationListener { splashScreenView ->
 
-            // 예쁜 “창 전환” 느낌: 살짝 축소 + 페이드아웃
+            // 예쁜 "창 전환" 느낌: 살짝 축소 + 페이드아웃
             splashScreenView.view.animate()
                 .alpha(0f)
                 .scaleX(0.98f)
@@ -68,13 +70,15 @@ class MainActivity : ComponentActivity() {
     ): String {
         val startDestinationFromIntent = intent.getStringExtra("startDestination")
 
+        // Supabase 세션이 남아있으면 로그인 건너뛰기
+        val isLoggedIn = SupabaseClientProvider.client.auth.currentSessionOrNull() != null
+
         return when {
             alarmPrefs.isFirstRun() -> Screen.Tutorial.route           // 1순위: 앱을 처음 실행한 경우
             alarmPrefs.isAlarmSet() -> Screen.SettedAlarm.route       // 2순위: 알람이 설정되어 있는 경우
             startDestinationFromIntent != null -> startDestinationFromIntent // 3순위: 알람을 끄고 온 경우 (피드백 화면)
-            /** 로그인 데모 **/
-            else -> Screen.LoginDemo.route
-            // else -> Screen.Home.route                                 // 4순위: 일반적인 경우
+            isLoggedIn -> Screen.Home.route                           // 4순위: 이미 로그인되어 있는 경우
+            else -> Screen.LoginDemo.route                           // 5순위: 로그인 안 된 경우
         }
     }
 

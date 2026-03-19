@@ -202,8 +202,12 @@ fun LoginDemoScreen(authViewModel: AuthViewModel = viewModel(), onComplete: (Str
                                 email = step.email,
                                 pw = step.pw,
                                 onComplete = { nickname ->
-                                    authViewModel.completeSignup(step.email, step.pw, nickname) {
-                                        onComplete("$nickname 님, 가입을 축하합니다!")
+                                    authViewModel.completeSignup(step.email, step.pw, nickname) { resultMsg ->
+                                        if (resultMsg.startsWith("오류")) {
+                                            onComplete(resultMsg) // 실패 시 실제 에러 메시지 팝업
+                                        } else {
+                                            onComplete("$nickname 님, 가입을 축하합니다!")
+                                        }
                                     }
                                 }
                         )
