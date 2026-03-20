@@ -1,6 +1,7 @@
 package com.leejang.sleeptandard.Screen
 
 import android.widget.Toast
+import android.util.Log
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateDpAsState
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -40,6 +42,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Brush.Companion.linearGradient
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
@@ -155,176 +158,13 @@ fun LoginDemoScreen(
     ){
         Spacer(Modifier.height(50.dp))
 
-        /*
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(50.dp),
-            verticalArrangement = Arrangement.SpaceBetween
-        ){
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ){
-                Text(
-                    text = "메일입력",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = Color.White
-                )
-                Text(
-                    text = "회원가입",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = Color.White
-                )
-                Text(
-                    text = "로그인",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = Color.White
-                )
-            }
-
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(43.dp),
-                contentAlignment = Alignment.Center
-            ){
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(8.dp)
-                        .clip(RoundedCornerShape(100.dp))
-                        .background(brush = BarGradient)
-                )
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ){
-                    Box(
-                        modifier = Modifier
-                            .size(105.dp, 43.dp),
-                        contentAlignment = Alignment.Center
-                    ){
-                        Box(
-                            modifier = Modifier
-                                .matchParentSize()
-                                .blur(30.dp) // 유리 뒤를 흐리게
-                                .background(
-                                    brush = Brush.verticalGradient(
-                                        colors = listOf(
-                                            Color.White.copy(alpha = 0.15f), // 위쪽 하이라이트
-                                            Color.White.copy(alpha = 0.05f)  // 아래쪽 그림자
-                                        )
-                                    )
-                                )
-                                .border(
-                                    width = 1.dp,
-                                    brush = Brush.verticalGradient(
-                                        colors = listOf(
-                                            Color.White.copy(alpha = 0.4f), // 테두리 위쪽 (빛남)
-                                            Color.Transparent,             // 테두리 중간 (투명)
-                                            Color.White.copy(alpha = 0.1f)  // 테두리 아래쪽 (은은함)
-                                        )
-                                    ),
-                                    shape = RoundedCornerShape(24.dp)
-                                )
-                        ){}
-
-                        Text(
-                            text = "메일입력",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = Color(0xFFAFF4F9)
-                        )
-                    }
-                    Box(
-                        modifier = Modifier
-                            .size(105.dp, 43.dp),
-                        contentAlignment = Alignment.Center
-                    ){
-                        Box(
-                            modifier = Modifier
-                                .matchParentSize()
-                                .blur(30.dp) // 유리 뒤를 흐리게
-                                .background(
-                                    brush = Brush.verticalGradient(
-                                        colors = listOf(
-                                            Color.White.copy(alpha = 0.15f), // 위쪽 하이라이트
-                                            Color.White.copy(alpha = 0.05f)  // 아래쪽 그림자
-                                        )
-                                    )
-                                )
-                                .border(
-                                    width = 1.dp,
-                                    brush = Brush.verticalGradient(
-                                        colors = listOf(
-                                            Color.White.copy(alpha = 0.4f), // 테두리 위쪽 (빛남)
-                                            Color.Transparent,             // 테두리 중간 (투명)
-                                            Color.White.copy(alpha = 0.1f)  // 테두리 아래쪽 (은은함)
-                                        )
-                                    ),
-                                    shape = RoundedCornerShape(24.dp)
-                                )
-                        ){}
-
-                        Text(
-                            text = "회원가입",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = Color(0xFFAFF4F9)
-                        )
-                    }
-                    Box(
-                        modifier = Modifier
-                            .size(105.dp, 43.dp),
-                        contentAlignment = Alignment.Center
-                    ){
-                        Box(
-                            modifier = Modifier
-                                .matchParentSize()
-                                .blur(30.dp) // 유리 뒤를 흐리게
-                                .background(
-                                    brush = Brush.verticalGradient(
-                                        colors = listOf(
-                                            Color.White.copy(alpha = 0.15f), // 위쪽 하이라이트
-                                            Color.White.copy(alpha = 0.05f)  // 아래쪽 그림자
-                                        )
-                                    )
-                                )
-                                .border(
-                                    width = 1.dp,
-                                    brush = Brush.verticalGradient(
-                                        colors = listOf(
-                                            Color.White.copy(alpha = 0.4f), // 테두리 위쪽 (빛남)
-                                            Color.Transparent,             // 테두리 중간 (투명)
-                                            Color.White.copy(alpha = 0.1f)  // 테두리 아래쪽 (은은함)
-                                        )
-                                    ),
-                                    shape = RoundedCornerShape(24.dp)
-                                )
-                        ){}
-
-                        Text(
-                            text = "로그인",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = Color(0xFFAFF4F9)
-                        )
-                    }
-                }
-            }
-        }
-
-         */
-
         // ✅ 상단에 단계 인디케이터 배치
         AuthStepIndicator(
             currentStep = authViewModel.currentStep,
             modifier = Modifier.padding(vertical = 24.dp)
         )
 
-
         Spacer(Modifier.height(6.dp))
-
 
 
         // 현재 스텝에 따른 UI 출력 with animation
@@ -395,7 +235,7 @@ fun GlassyTextField(
     BasicTextField(
         value = value,
         onValueChange = onValueChange,
-        textStyle = TextStyle(color = Color.White, fontSize = 16.sp),
+        textStyle = TextStyle(color = Color.Black, fontSize = 16.sp),
         visualTransformation = visualTransformation,
         decorationBox = { innerTextField ->
             Box(
@@ -403,11 +243,17 @@ fun GlassyTextField(
                     .fillMaxWidth()
                     .height(60.dp)
                     // ✅ 기존에 정의한 innerShadow 적용
-                    .background(Color.White), RoundedCornerShape(30.dp))
+                    .background(Color.White, RoundedCornerShape(30.dp))
                     .padding(horizontal = 24.dp),
                 contentAlignment = Alignment.CenterStart
-            ) {
-                if (value.isEmpty()) Text(placeholder, color = Color.White.copy(0.3f))
+            ){
+                if (value.isEmpty()) Text(
+                    text = placeholder,
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        color = Color(0xFF050C16).copy(0.3f),
+                        fontSize = 16.sp
+                    )
+                )
                 innerTextField()
             }
         }
@@ -417,6 +263,13 @@ fun GlassyTextField(
 @Composable
 fun EmailInputStep(onConfirm: (String) -> Unit) {
     var email by remember { mutableStateOf("") }
+
+    val buttonGradient = linearGradient(
+        listOf(Color(0xFF437AC7),
+            Color(0xFFAFF4F9))
+    )
+
+    var buttonEnabled by remember { mutableStateOf( email.contains("@")) }
 
     Column(modifier = Modifier
         .fillMaxSize()
@@ -453,12 +306,68 @@ fun EmailInputStep(onConfirm: (String) -> Unit) {
 
         Spacer(Modifier.height(100.dp)) // 버튼을 하단으로 밀어냄
 
+
+        Button(
+            modifier = Modifier
+                .clip(RoundedCornerShape(100.dp)),
+            enabled = email.contains("@"), // 간단한 유효성 검사
+            onClick = {
+                onConfirm(email)
+            },
+            contentPadding = PaddingValues(0.dp)
+        ){
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(100.dp))
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ){
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(60.dp)
+                        .background(brush = buttonGradient)
+                        .blur(30.dp)
+                        .border(
+                            width = 2.dp,
+                            brush = Brush.verticalGradient(
+                                colors = listOf(
+                                    Color.White.copy(alpha = 0.4f), // 테두리 위쪽 (빛남)
+                                    Color.Transparent,             // 테두리 중간 (투명)
+                                    Color.White.copy(alpha = 0.1f)  // 테두리 아래쪽 (은은함)
+                                )
+                            ),
+                            shape = RoundedCornerShape(24.dp)
+                        ),
+                    contentAlignment = Alignment.Center
+                ){
+
+                }
+
+                Text(
+                    text = "제출",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 18.sp,
+
+                        color =
+                            if(email.contains("@")) {
+                                Color.White
+                            }
+                        else
+                            Color.Black.copy(alpha = 0.5f)
+                    )
+                )
+            }
+        }
+/*
         Button(
             enabled = email.contains("@"), // 간단한 유효성 검사
             onClick = { onConfirm(email) }
         ){
             Text("확인")
         }
+
+ */
         Spacer(Modifier.height(20.dp))
     }
 }
