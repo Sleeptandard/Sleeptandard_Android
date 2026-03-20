@@ -269,15 +269,13 @@ fun EmailInputStep(onConfirm: (String) -> Unit) {
             Color(0xFFAFF4F9))
     )
 
-    var buttonEnabled by remember { mutableStateOf( email.contains("@")) }
-
     Column(modifier = Modifier
         .fillMaxSize()
     ){
         Text(
             modifier = Modifier.padding(start = 10.dp),
             text = "이메일을 입력해주세요", //
-            style = MaterialTheme.typography.titleLarge.copy(
+            style = MaterialTheme.typography.bodyLarge.copy(
                 color = Color.White,
                 fontSize = 22.sp
             )
@@ -289,7 +287,7 @@ fun EmailInputStep(onConfirm: (String) -> Unit) {
         Text(
             modifier = Modifier.padding(start = 10.dp),
             text = "이메일에 따라 가입 또는 로그인으로 진행됩니다.",
-            style = MaterialTheme.typography.titleMedium.copy(
+            style = MaterialTheme.typography.bodyMedium.copy(
                 color = Color.White.copy(alpha = 0.7f),
                 fontSize = 14.sp
             )
@@ -359,15 +357,7 @@ fun EmailInputStep(onConfirm: (String) -> Unit) {
                 )
             }
         }
-/*
-        Button(
-            enabled = email.contains("@"), // 간단한 유효성 검사
-            onClick = { onConfirm(email) }
-        ){
-            Text("확인")
-        }
 
- */
         Spacer(Modifier.height(20.dp))
     }
 }
@@ -376,13 +366,20 @@ fun EmailInputStep(onConfirm: (String) -> Unit) {
 fun LoginPasswordStep(email: String, onLogin: (String) -> Unit) {
     var password by remember { mutableStateOf("") }
 
+    val buttonGradient = linearGradient(
+        listOf(Color(0xFF437AC7),
+            Color(0xFFAFF4F9))
+    )
+
     Column(modifier = Modifier
         .fillMaxSize()
         .padding(horizontal = 24.dp)) {
         Text(
-            text = "비밀번호를 입력해주세요 🔒", //
-            style = MaterialTheme.typography.titleLarge,
-            color = Color.White
+            text = "비밀번호를 입력해주세요 ", //
+            style = MaterialTheme.typography.bodyLarge.copy(
+                color = Color.White,
+                fontSize = 22.sp
+            )
         )
         Spacer(Modifier.height(40.dp))
 
@@ -393,27 +390,81 @@ fun LoginPasswordStep(email: String, onLogin: (String) -> Unit) {
             visualTransformation = PasswordVisualTransformation()
         )
 
-        // 비밀번호 찾기
-        Text(
-            text = "비밀번호 찾기",
+        Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 16.dp)
-                .clickable { /* 찾기 로직 */ },
-            textAlign = TextAlign.Center,
-            color = Color.White.copy(alpha = 0.6f),
-            textDecoration = TextDecoration.Underline,
-            fontSize = 14.sp
-        )
+                .fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ){
+            // 비밀번호 찾기
+            Text(
+                text = "비밀번호 찾기",
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 16.dp)
+                    .clickable { /* 찾기 로직 */ },
+                textAlign = TextAlign.Center,
+                color = Color.White.copy(alpha = 0.6f),
+                textDecoration = TextDecoration.Underline,
+                fontSize = 14.sp
+            )
+        }
+
 
         Spacer(Modifier.weight(1f))
 
         Button(
-
-            onClick = { onLogin(password) }
+            modifier = Modifier
+                .clip(RoundedCornerShape(100.dp)),
+            enabled = (password.length >= 8), // 간단한 유효성 검사
+            onClick = {
+                onLogin(password)
+            },
+            contentPadding = PaddingValues(0.dp)
         ){
-            Text("확인")
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(100.dp))
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ){
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(60.dp)
+                        .background(brush = buttonGradient)
+                        .blur(30.dp)
+                        .border(
+                            width = 2.dp,
+                            brush = Brush.verticalGradient(
+                                colors = listOf(
+                                    Color.White.copy(alpha = 0.4f), // 테두리 위쪽 (빛남)
+                                    Color.Transparent,             // 테두리 중간 (투명)
+                                    Color.White.copy(alpha = 0.1f)  // 테두리 아래쪽 (은은함)
+                                )
+                            ),
+                            shape = RoundedCornerShape(24.dp)
+                        ),
+                    contentAlignment = Alignment.Center
+                ){
+
+                }
+
+                Text(
+                    text = "확인",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 18.sp,
+
+                        color =
+                            if((password.length >= 8)) {
+                                Color.White
+                            }
+                            else
+                                Color.Black.copy(alpha = 0.5f)
+                    )
+                )
+            }
         }
+
         Spacer(Modifier.height(20.dp))
     }
 }
@@ -423,13 +474,20 @@ fun SignupPasswordStep(email: String, onNext: (String) -> Unit) {
     var password by remember { mutableStateOf("") }
     var passwordConfirm by remember { mutableStateOf("") }
 
+    val buttonGradient = linearGradient(
+        listOf(Color(0xFF437AC7),
+            Color(0xFFAFF4F9))
+    )
+
     Column(modifier = Modifier
         .fillMaxSize()
         .padding(horizontal = 24.dp)) {
         Text(
-            text = "비밀번호를 설정해주세요 🔐", //
-            style = MaterialTheme.typography.titleLarge,
-            color = Color.White
+            text = "비밀번호를 설정해주세요", //
+            style = MaterialTheme.typography.bodyLarge.copy(
+                color = Color.White,
+                fontSize = 22.sp
+            )
         )
         Spacer(Modifier.height(40.dp))
 
@@ -439,7 +497,9 @@ fun SignupPasswordStep(email: String, onNext: (String) -> Unit) {
             placeholder = "8자리 이상 입력해주세요", //
             visualTransformation = PasswordVisualTransformation()
         )
+
         Spacer(Modifier.height(16.dp))
+
         GlassyTextField(
             value = passwordConfirm,
             onValueChange = { passwordConfirm = it },
@@ -450,11 +510,58 @@ fun SignupPasswordStep(email: String, onNext: (String) -> Unit) {
         Spacer(Modifier.weight(1f))
 
         Button(
-            enabled = password.length >= 8 && password == passwordConfirm,
-            onClick = { onNext(password) }
+            modifier = Modifier
+                .clip(RoundedCornerShape(100.dp)),
+            enabled = password.length >= 8 && password == passwordConfirm, // 간단한 유효성 검사
+            onClick = {
+                onNext(password)
+            },
+            contentPadding = PaddingValues(0.dp)
         ){
-            Text("확인")
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(100.dp))
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ){
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(60.dp)
+                        .background(brush = buttonGradient)
+                        .blur(30.dp)
+                        .border(
+                            width = 2.dp,
+                            brush = Brush.verticalGradient(
+                                colors = listOf(
+                                    Color.White.copy(alpha = 0.4f), // 테두리 위쪽 (빛남)
+                                    Color.Transparent,             // 테두리 중간 (투명)
+                                    Color.White.copy(alpha = 0.1f)  // 테두리 아래쪽 (은은함)
+                                )
+                            ),
+                            shape = RoundedCornerShape(24.dp)
+                        ),
+                    contentAlignment = Alignment.Center
+                ){
+
+                }
+
+                Text(
+                    text = "확인",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 18.sp,
+
+                        color =
+                            if(password.length >= 8 && password == passwordConfirm) {
+                                Color.White
+                            }
+                            else
+                                Color.Black.copy(alpha = 0.5f)
+                    )
+                )
+            }
         }
+
         Spacer(Modifier.height(20.dp))
     }
 }
@@ -463,30 +570,85 @@ fun SignupPasswordStep(email: String, onNext: (String) -> Unit) {
 fun NicknameStep(email: String, pw: String, onComplete: (String) -> Unit) {
     var nickname by remember { mutableStateOf("") }
 
+    val buttonGradient = linearGradient(
+        listOf(Color(0xFF437AC7),
+            Color(0xFFAFF4F9))
+    )
+
     Column(modifier = Modifier
         .fillMaxSize()
         .padding(horizontal = 24.dp)) {
         Text(
             text = "닉네임을 설정해주세요 🌙", //
-            style = MaterialTheme.typography.titleLarge,
-            color = Color.White
+            style = MaterialTheme.typography.bodyLarge.copy(
+                color = Color.White,
+                fontSize = 22.sp
+            )
         )
+
         Spacer(Modifier.height(40.dp))
 
         GlassyTextField(
             value = nickname,
             onValueChange = { nickname = it },
-            placeholder = "닉네임" //
+            placeholder = "ex) 노곤노곤한 카피바라" //
         )
 
         Spacer(Modifier.weight(1f))
 
         Button(
-            enabled = nickname.isNotBlank(),
-            onClick = { onComplete(nickname) }
+            modifier = Modifier
+                .clip(RoundedCornerShape(100.dp)),
+            enabled =  nickname.isNotBlank(), // 간단한 유효성 검사
+            onClick = {
+                onComplete(nickname)
+            },
+            contentPadding = PaddingValues(0.dp)
         ){
-            Text("확인")
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(100.dp))
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ){
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(60.dp)
+                        .background(brush = buttonGradient)
+                        .blur(30.dp)
+                        .border(
+                            width = 2.dp,
+                            brush = Brush.verticalGradient(
+                                colors = listOf(
+                                    Color.White.copy(alpha = 0.4f), // 테두리 위쪽 (빛남)
+                                    Color.Transparent,             // 테두리 중간 (투명)
+                                    Color.White.copy(alpha = 0.1f)  // 테두리 아래쪽 (은은함)
+                                )
+                            ),
+                            shape = RoundedCornerShape(24.dp)
+                        ),
+                    contentAlignment = Alignment.Center
+                ){
+
+                }
+
+                Text(
+                    text = "확인",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 18.sp,
+
+                        color =
+                            if( nickname.isNotBlank()) {
+                                Color.White
+                            }
+                            else
+                                Color.Black.copy(alpha = 0.5f)
+                    )
+                )
+            }
         }
+
         Spacer(Modifier.height(20.dp))
     }
 }
