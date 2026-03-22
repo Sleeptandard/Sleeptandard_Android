@@ -2,8 +2,6 @@ package com.leejang.sleeptandard.Screen
 
 import android.widget.Toast
 import android.util.Log
-import android.widget.RadioButton
-import android.widget.RadioGroup
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateDpAsState
@@ -36,18 +34,18 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Button
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -71,11 +69,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.leejang.sleeptandard.Component.BirthDatePicker
 import com.leejang.sleeptandard.ui.theme.AppIcons
 import kotlinx.coroutines.launch
+import java.util.Locale
 
 
 // 유저의 로그인/회원가입 진행 단계 정의 및 email + 비번 저장 클래스
@@ -95,6 +96,15 @@ sealed class AuthStep {
 class AuthViewModel : ViewModel() {
     var currentStep by mutableStateOf<AuthStep>(AuthStep.EmailInput)
         private set
+
+    // ✅ 1. 모달 표시 상태 (true일 때만 화면에 Dialog가 뜸)
+    var showDatePickerModal by mutableStateOf(false)
+        private set
+    // ✅ 2. 휠 피커(다이얼)에서 현재 돌아가고 있는 임시 값들
+    var pickerYear by mutableIntStateOf(2000)
+    var pickerMonth by mutableIntStateOf(1)
+    var pickerDay by mutableIntStateOf(1)
+
 
     // 상태 변수들을 ViewModel로 이동
     var email by mutableStateOf("")
@@ -162,6 +172,36 @@ class AuthViewModel : ViewModel() {
     }
 
     fun backToEmail() { currentStep = AuthStep.EmailInput }
+
+    // ✅ 3. 모달을 여는 함수 (TextField 클릭 시 호출)
+    fun openDatePicker() {
+        // 이미 입력된 날짜가 있다면 해당 날짜로 휠 위치를 초기화합니다.
+        if (birthdate.isNotEmpty()) {
+            val parts = birthdate.split(".")
+            if (parts.size == 3) {
+                pickerYear = parts[0].toIntOrNull() ?: 2000
+                pickerMonth = parts[1].toIntOrNull() ?: 1
+                pickerDay = parts[2].toIntOrNull() ?: 1
+            }
+        }
+        showDatePickerModal = true // 모달 표시 활성화
+    }
+    // ✅ 4. 모달을 닫는 함수 (취소 버튼 또는 배경 클릭 시 호출)
+    fun closeDatePicker() {
+        showDatePickerModal = false // 모달 표시 비활성화
+    }
+    // ✅ 5. 휠을 돌릴 때마다 실시간으로 임시 값을 업데이트하는 함수
+    fun updatePickerValues(year: Int, month: Int, day: Int) {
+        pickerYear = year
+        pickerMonth = month
+        pickerDay = day
+    }
+    // ✅ 6. '확인' 버튼 클릭 시 호출: 임시 값을 최종 결과에 반영하고 닫기
+    fun confirmDatePickerSelection() {
+        // "YYYY.MM.DD" 형식으로 포맷팅하여 저장합니다.
+        birthdate = String.format(Locale.KOREA, "%d.%02d.%02d", pickerYear, pickerMonth, pickerDay)
+        closeDatePicker() // 저장 후 모달 닫기
+    }
 }
 
 @Composable
@@ -759,6 +799,15 @@ fun GenderBirthStep(viewModel: AuthViewModel) {
 
         Spacer(Modifier.height(12.dp))
 
+        // ✅ 1. 모달 표시 상태가 true일 때만 다이얼로그를 띄웁니다.
+        if (viewModel.showDatePickerModal) {
+            Dialog(
+                onDismissRequest = { viewModel.closeDatePicker() } // 다이얼로그 바깥 터치 시 닫기
+            ) {
+                BirthDatePicker(viewModel = viewModel)
+            }
+        }
+
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -767,6 +816,7 @@ fun GenderBirthStep(viewModel: AuthViewModel) {
                 .background(Color.White)
                 .clickable{
                     // TODO: 생년월일 선택 모달창 띄우기
+                    viewModel.openDatePicker() // ✅ 클릭 시 모달 오픈 신호 전달
                 },
             verticalArrangement = Arrangement.Center,
         ){
@@ -789,22 +839,6 @@ fun GenderBirthStep(viewModel: AuthViewModel) {
                 )
             }
         }
-
-        /*
-        // 유리 효과 TextField 활용
-        GlassyTextField(
-            value = viewModel.birthdate,
-            onValueChange = { input ->
-                // 유효성 검사: 숫자와 마침표(.)만 허용, 최대 10자리까지만 입력 가능
-                val filtered = input.filter { it.isDigit() || it == '.' }
-                if (filtered.length <= 10) {
-                    viewModel.updateBirthdate(filtered)
-                }
-            },
-            placeholder = "YYYY / MM / DD",
-        )
-
-         */
 
         Spacer(Modifier.height(40.dp))
 
@@ -1146,6 +1180,102 @@ fun GenderRadioButton(
         )
         if (dotRadius.value > 0.dp) {
             drawCircle(Color.Black, dotRadius.value.toPx(), style = Fill)
+        }
+    }
+}
+
+@Composable
+fun BirthDatePicker(
+    viewModel: AuthViewModel
+) {
+
+    Column(
+        modifier = Modifier
+            .size(281.dp, 334.dp)
+            .clip(RoundedCornerShape(28.dp))
+            .background(color = Color.White),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ){
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "생년월일",
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontSize = 16.sp,
+                    color = Color.Black
+                )
+            )
+        }
+
+
+        HorizontalDivider(
+            modifier = Modifier.fillMaxWidth(),
+            thickness = 1.dp,
+            color = Color(0xFF050C16).copy(alpha = 0.5f)
+        )
+
+        BirthDatePicker(
+            modifier = Modifier
+                .weight(1f),
+            onDateChange = {y, m, d ->
+                // ✅ 휠을 돌릴 때마다 VM의 임시 값 업데이트
+                viewModel.updatePickerValues(y, m, d)
+            },
+            defaultYear = viewModel.pickerYear,
+            defaultMonth = viewModel.pickerMonth,
+            defaultDay = viewModel.pickerDay,
+        )
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp)
+        ){
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .background(
+                        color = Color(0xFFE0E0E0)
+                    )
+                    .clickable{
+                        viewModel.closeDatePicker()
+                    },
+                contentAlignment = Alignment.Center
+            ){
+                Text(
+                    text = "취소",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 16.sp,
+                        color = Color.Black
+                    )
+                )
+            }
+
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .background(
+                        color = Color(0xFFAFF4F9)
+                    )
+                    .clickable{
+                        viewModel.confirmDatePickerSelection() // ✅ 최종 값 확정 및 모달 닫기
+                    },
+                contentAlignment = Alignment.Center
+            ){
+                Text(
+                    text = "확인",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 16.sp,
+                        color = Color.Black
+                    )
+                )
+            }
         }
     }
 }
