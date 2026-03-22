@@ -2,6 +2,7 @@ package com.leejang.sleeptandard.Component
 
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.FlingBehavior
 import androidx.compose.foundation.gestures.ScrollScope
 import androidx.compose.foundation.gestures.stopScroll
@@ -362,6 +363,74 @@ fun BirthDatePicker(
         onDateChange(selectedYear, selectedMonth, selectedDay)
     }
 
+    // ✅ 핵심 변경: Box를 사용하여 레이어를 쌓습니다.
+    Box(
+        modifier = modifier.fillMaxWidth(),
+        contentAlignment = Alignment.Center // 중앙 배경과 피커를 정중앙에 배치
+    ) {
+        // 🎨 1. 배경 레이어: 현재 지정된 날짜의 바탕 회색 칠하기
+        // 이미지와 유사한 연한 회색 배경
+        Box(
+            modifier = Modifier
+                .fillMaxWidth() // 가로로 꽉 차게
+                .height(itemHeight) // 실제 피커 아이템 높이와 동일하게 설정
+                .background(Color(0xFFE0E0E0)) // 요청하신 이미지의 연회색 바탕
+        )
+
+        // 🎡 2. 피커 레이어: 실제 움직이는 휠 피커들 (배경 위에 얹어짐)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Spacer(Modifier.weight(1f))
+
+            // 년도 선택
+            WheelPicker(
+                modifier = Modifier.width(95.dp),
+                items = yearItems,
+                state = yearState,
+                selectedIndex = yearIndex,
+                onSelectedIndexChange = { yearIndex = it },
+                itemHeight = itemHeight,
+                scrollEnable = scrollEnable,
+                // ✅ 이미지 가이드에 맞춘 텍스트 스타일 수정 (선명하게 블랙)
+                textStyle = MaterialTheme.typography.bodyLarge.copy(fontSize = 20.sp, color = Color.Black, letterSpacing = (-0.5).sp ),
+                fadedTextStyle = MaterialTheme.typography.bodyLarge.copy(fontSize = 16.sp, color = Color(0xFF050C16).copy(alpha = 0.7f)),
+                visibleCount = 5
+            )
+
+            // 월 선택
+            WheelPicker(
+                modifier = Modifier.width(60.dp),
+                items = monthItems,
+                state = monthState,
+                selectedIndex = monthIndex,
+                onSelectedIndexChange = { monthIndex = it },
+                itemHeight = itemHeight,
+                scrollEnable = scrollEnable,
+                textStyle = MaterialTheme.typography.bodyLarge.copy(fontSize = 20.sp, color = Color.Black),
+                fadedTextStyle = MaterialTheme.typography.bodyLarge.copy(fontSize = 16.sp, color = Color(0xFF050C16).copy(alpha = 0.7f)),
+                visibleCount = 5
+            )
+
+            // 일 선택
+            WheelPicker(
+                modifier = Modifier.width(65.dp),
+                items = dayItems,
+                state = dayState,
+                selectedIndex = dayIndex,
+                onSelectedIndexChange = { dayIndex = it },
+                itemHeight = itemHeight,
+                scrollEnable = scrollEnable,
+                textStyle = MaterialTheme.typography.bodyLarge.copy(fontSize = 20.sp, color = Color.Black),
+                fadedTextStyle = MaterialTheme.typography.bodyLarge.copy(fontSize = 16.sp, color = Color(0xFF050C16).copy(alpha = 0.7f)),
+                visibleCount = 5
+            )
+
+            Spacer(Modifier.weight(1f))
+        }
+    }
+    /*
     Row(
         modifier = modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically
@@ -409,6 +478,8 @@ fun BirthDatePicker(
 
         Spacer(Modifier.weight(1f))
     }
+
+     */
 }
 
 private class VelocityScalingFlingBehavior(

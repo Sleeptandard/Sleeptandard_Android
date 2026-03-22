@@ -51,6 +51,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
@@ -319,6 +320,7 @@ fun GlassyTextField(
     )
 }
 
+// 이메일 입력 화면
 @Composable
 fun EmailInputStep(viewModel: AuthViewModel) {
 
@@ -360,7 +362,7 @@ fun EmailInputStep(viewModel: AuthViewModel) {
             placeholder = "이메일" //
         )
 
-        Spacer(Modifier.height(100.dp)) // 버튼을 하단으로 밀어냄
+        Spacer(Modifier.height(60.dp)) // 버튼을 하단으로 밀어냄
 
 
         Button(
@@ -420,6 +422,7 @@ fun EmailInputStep(viewModel: AuthViewModel) {
     }
 }
 
+// 로그인 비밀번호 입력 화면
 @Composable
 fun LoginPasswordStep(
     viewModel: AuthViewModel,
@@ -571,7 +574,10 @@ fun SignupPasswordStep(viewModel: AuthViewModel) {
             visualTransformation = PasswordVisualTransformation()
         )
 
-        Spacer(Modifier.weight(1f))
+        // TODO: 비밀번호 유효성 체크 메시지
+        //
+
+        Spacer(Modifier.height(52.dp)) // 12.dp
 
         Button(
             modifier = Modifier
@@ -656,7 +662,7 @@ fun NicknameStep(
             placeholder = "ex) 노곤노곤한 카피바라" //
         )
 
-        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.height(60.dp))
 
         Button(
             modifier = Modifier
@@ -815,7 +821,6 @@ fun GenderBirthStep(viewModel: AuthViewModel) {
                 .clip(RoundedCornerShape(100.dp))
                 .background(Color.White)
                 .clickable{
-                    // TODO: 생년월일 선택 모달창 띄우기
                     viewModel.openDatePicker() // ✅ 클릭 시 모달 오픈 신호 전달
                 },
             verticalArrangement = Arrangement.Center,
@@ -1057,6 +1062,54 @@ fun CompletedStep(
 }
 
 @Composable
+fun IndicatorGlassBox(
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit
+) {
+    val backgroundColor = Color(0xFFF1F4F9).copy(alpha = 0.3f)
+    val borderColor = Color.White.copy(alpha = 0.2f)
+
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(50.dp)), // 카드 모양
+        contentAlignment = Alignment.Center
+    ) {
+        // [Layer 1] 배경 블러 & 그라데이션
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .blur(100.dp) // 유리 뒤를 흐리게
+                .background( color = backgroundColor
+                    /*
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            Color.White.copy(alpha = 0.15f), // 위쪽 하이라이트
+                            Color.White.copy(alpha = 0.05f)  // 아래쪽 그림자
+                        )
+                    )
+                     */
+                )
+                .border(
+                    width = 3.dp,
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            Color.White.copy(alpha = 0.4f), // 테두리 위쪽 (빛남)
+                            Color.Transparent,             // 테두리 중간 (투명)
+                            Color.White.copy(alpha = 0.1f)  // 테두리 아래쪽 (은은함)
+                        )
+                    ),
+                    shape = RoundedCornerShape(50.dp)
+                )
+        )
+
+        // [Layer 2] 실제 내용물 (선명함 유지)
+        Box(modifier = Modifier) {
+            content()
+        }
+    }
+}
+
+@Composable
 fun AuthStepIndicator(
     currentStep: AuthStep,
     modifier: Modifier = Modifier
@@ -1067,25 +1120,28 @@ fun AuthStepIndicator(
     // 2. ✅ 핵심 수정: 현재 상태(AuthStep)를 인덱스 번호로 매핑합니다.
     // SignupPassword와 LoginPassword를 모두 '비밀번호 입력' 단계(인덱스 1)로 묶어줍니다.
     val currentIndex = when (currentStep) {
-        is AuthStep.EmailInput -> 0
-        is AuthStep.SignupPassword -> 1
+        is AuthStep.EmailInput -> 0         // 메일입력
+        is AuthStep.SignupPassword -> 1     // 회원가입
         is AuthStep.SignupNickname -> 1
         is AuthStep.SignupGenderBirth -> 1
-        is AuthStep.LoginPassword -> 2
-        is AuthStep.Completed -> 3
+        is AuthStep.LoginPassword -> 2      // 로그인
+        is AuthStep.Completed -> 3          // 없음
     }
 
     val numberOfSteps = stepLabels.size
     val containerColor = Color(0xFF1B2432)
     val highlightColor = Color(0xFFAAEDF2)
 
+    val barGradient = linearGradient(
+        listOf(Color(0xFF437AC7),
+            Color(0xFFAFF4F9))
+    )
+
     if(currentIndex < 3){
         BoxWithConstraints(
             modifier = modifier
                 .fillMaxWidth()
                 .height(56.dp)
-                .background(containerColor, RoundedCornerShape(100.dp))
-                .padding(4.dp)
         ) {
 
             val stepWidth = (maxWidth - 8.dp) / numberOfSteps
@@ -1098,6 +1154,36 @@ fun AuthStepIndicator(
                 label = "step_highlight_move"
             )
 
+            Column(
+                modifier = Modifier
+                    .fillMaxSize(),
+                verticalArrangement = Arrangement.Center
+            ){
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(8.dp)
+                        .clip(RoundedCornerShape(100.dp))
+                        .background(brush = barGradient)
+                )
+            }
+
+            IndicatorGlassBox(
+                modifier = Modifier
+                    .width(105.dp)
+                    .fillMaxHeight()
+                    .offset(x = animatedOffset),
+            ) {
+                Text(
+                    text = stepLabels[currentIndex],
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        color = Color(0xFFAFF4F9),
+                        fontSize = 16.sp
+                    )
+                )
+            }
+
+            /*
             // 하이라이트 박스
             Box(
                 modifier = Modifier
@@ -1123,6 +1209,8 @@ fun AuthStepIndicator(
                     }
                 }
             }
+
+             */
         }
     }
 
