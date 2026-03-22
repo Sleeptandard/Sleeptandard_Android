@@ -68,4 +68,8 @@ object AppIcons {
     @DrawableRes val TutorialPowerSaving1 = R.drawable.image_tutorial_power_saving1
     @DrawableRes val TutorialPowerSaving2 = R.drawable.image_tutorial_power_saving2
 
+    // 로그인/회원가입 화면
+    @DrawableRes val RegisterClock = R.drawable.image_register_clock
+    @DrawableRes val RegisterLogo = R.drawable.image_register_logo
+
 }
