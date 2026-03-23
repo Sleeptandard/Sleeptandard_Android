@@ -63,6 +63,7 @@ object AppIcons {
 
     // 튜토리얼
     @DrawableRes val TutorialGraph = R.drawable.image_tutorial_graph
+    @DrawableRes val TutorialGraph2 = R.drawable.image_tutorial_graph2
     @DrawableRes val Tutorial30Min = R.drawable.image_tutorial_30min
     @DrawableRes val TutorialFeedback = R.drawable.image_tutorial_feedback
     @DrawableRes val TutorialPowerSaving1 = R.drawable.image_tutorial_power_saving1
