@@ -215,6 +215,7 @@ fun AppNav(
                     alarmPrefs.setFirstRunCompleted()
                     rememberNavController.popBackStack()
                     when{
+                        // TODO: 로그인 정보가 없는경우 -> Screen.LoginDemo.route
                         alarmPrefs.isFirstRun() -> Screen.Tutorial.route
                         else -> Screen.Home.route
                     }

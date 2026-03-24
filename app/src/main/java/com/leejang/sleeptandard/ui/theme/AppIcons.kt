@@ -72,5 +72,10 @@ object AppIcons {
     // 로그인/회원가입 화면
     @DrawableRes val RegisterClock = R.drawable.image_register_clock
     @DrawableRes val RegisterLogo = R.drawable.image_register_logo
+    @DrawableRes val RegisterWarning = R.drawable.ic_login_warning
+    @DrawableRes val RegisterInvisible = R.drawable.ic_register_invisible
+    @DrawableRes val RegisterVisible = R.drawable.ic_register_visible
+    @DrawableRes val RegisterCancel = R.drawable.ic_register_cancel
+    @DrawableRes val RegisterOK = R.drawable.ic_nickname_ok
 
 }

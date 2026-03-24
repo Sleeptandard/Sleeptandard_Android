@@ -36,6 +36,7 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -64,6 +65,8 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
@@ -115,13 +118,60 @@ class AuthViewModel : ViewModel() {
     var gender by mutableStateOf("")    // 추가: "남자" or "여자"
     var birthdate by mutableStateOf("") // 추가: "YYYY.MM.DD"
 
+    /** 유효성 검사 **/
+    // 1. 이메일 유효성 검사용 정규표현식
+    private val emailPattern = Regex(
+        "^(([\\w-]+\\.)+[\\w-]+|([a-zA-Z]{1}|[\\w-]{2,}))@"
+                + "((([0-1]?[0-2]?[0-9]{1,2}\\.){3}[0-1]?[0-2]?[0-9]{1,2})|"
+                + "([a-zA-Z]+[\\w-]+\\.)+[a-zA-Z]{2,4})$"
+    )
+
+    // 2. 실시간 유효성 상태 (computed property)
+    val isEmailValid: Boolean
+        get() = email.matches(emailPattern)
+
+    // 조건 1: 8자리 이상인지 검사
+    val isPasswordLengthValid: Boolean
+        get() = password.length >= 8
+
+    // 조건 2: 허용된 문자(영문, 숫자, 특수문자)만 포함되었는지 검사
+    // ^[A-Za-z\d@$!%*?&]*$ -> 빈 문자열이거나 허용된 문자로만 구성됨을 의미
+    private val allowedCharsPattern = Regex("^[A-Za-z\\d@$!%*?&]*$")
+
+    val isPasswordCharsValid: Boolean
+        get() = password.matches(allowedCharsPattern)
+
+    // ✅ 전체 유효성: 두 조건이 모두 참이어야 함
+    val isPasswordValid: Boolean
+        get() = isPasswordLengthValid && isPasswordCharsValid
+
+    // 1. 닉네임 규칙: 1~15자, 특수문자 제외 (유니코드 문자+숫자 허용)
+    private val nicknamePattern = Regex("^[\\p{L}\\p{N}]{1,15}$")
+
+    // 2. 실시간 닉네임 유효성 상태
+    val isNicknameValid: Boolean
+        get() = nickname.matches(nicknamePattern)
+
+
+
     // 입력값 업데이트 함수들
-    fun updateEmail(input: String) { email = input }
-    fun updatePassword(input: String) { password = input }
-    fun updatePasswordConfirm(input: String) { passwordConfirm = input }
+    // ✅ 이메일 업데이트: 모든 공백 문자 제거
+    fun updateEmail(input: String) {
+        email = input.filter { !it.isWhitespace() }
+    }
+    // ✅ 비밀번호 업데이트: 모든 공백 문자 제거
+    fun updatePassword(input: String) {
+        password = input.filter { !it.isWhitespace() }
+    }
+    // ✅ 비밀번호 확인 업데이트: 모든 공백 문자 제거
+    fun updatePasswordConfirm(input: String) {
+        passwordConfirm = input.filter { !it.isWhitespace() }
+    }
     fun updateNickname(input: String) { nickname = input }
     fun updateGender(input: String) { gender = input }
     fun updateBirthdate(input: String) { birthdate = input }
+
+
 
     // 이메일 확인 API 호출 로직
     // 1단계: 이메일 확인 로직
@@ -155,7 +205,7 @@ class AuthViewModel : ViewModel() {
     fun setSignupPassword() {
         currentStep = AuthStep.SignupNickname(email, password)
     }
-
+    // 2단계: 나이, 성별 설정
     fun setSignupGenderBirth() {
         currentStep = AuthStep.SignupGenderBirth(email, password, nickname)
     }
@@ -290,34 +340,112 @@ fun GlassyTextField(
     value: String,
     onValueChange: (String) -> Unit,
     placeholder: String,
-    visualTransformation: VisualTransformation = VisualTransformation.None
+    visualTransformation: VisualTransformation = VisualTransformation.None,
+    isEmailInput: Boolean = false,
+    isPasswordInput: Boolean = false,
+    isNicknameInput: Boolean = false,
+    isNicknameValid: Boolean = true
 ) {
+    // 1. 비밀번호 가리기/보이기 상태 관리
+    var passwordVisible by remember { mutableStateOf(false) }
+
+    // 2. 현재 필드 타입에 따른 최종 VisualTransformation 결정
+    val actualTransformation = if (isPasswordInput) {
+        if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation()
+    } else {
+        visualTransformation
+    }
+
     BasicTextField(
         value = value,
         onValueChange = onValueChange,
         textStyle = TextStyle(color = Color.Black, fontSize = 16.sp),
-        visualTransformation = visualTransformation,
+        visualTransformation = actualTransformation,
+        singleLine = true, // ✅ 한 줄 입력만 허용 (엔터 키로 줄바꿈 방지)
+        keyboardOptions = KeyboardOptions(
+            imeAction = ImeAction.Next, // 엔터 키를 '다음' 버튼으로 변경
+            keyboardType = if (isEmailInput) KeyboardType.Email else KeyboardType.Unspecified// 이메일 전용 키보드 레이아웃 제공
+        ),
         decorationBox = { innerTextField ->
-            Box(
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(60.dp)
-                    // ✅ 기존에 정의한 innerShadow 적용
                     .background(Color.White, RoundedCornerShape(30.dp))
-                    .padding(horizontal = 24.dp),
-                contentAlignment = Alignment.CenterStart
-            ){
-                if (value.isEmpty()) Text(
-                    text = placeholder,
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        color = Color(0xFF050C16).copy(0.3f),
-                        fontSize = 16.sp
-                    )
-                )
-                innerTextField()
+                ,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // 텍스트 영역
+                Box(modifier = Modifier
+                    .weight(1f)
+                    .height(60.dp)
+                    .padding(start = 24.dp),
+                    contentAlignment = Alignment.CenterStart) {
+                    if (value.isEmpty()) {
+                        Text(
+                            text = placeholder,
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                color = Color(0xFF050C16).copy(0.3f),
+                                fontSize = 16.sp
+                            )
+                        )
+                    }
+                    innerTextField()
+                }
+
+                if(isPasswordInput){
+                    // ✅ 아이콘 영역 (오른쪽 배치)
+                    Row(
+                        modifier = Modifier
+                            .padding(horizontal = 20.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+
+                        // 기능 1: 비밀번호 가리기/보이기 (비밀번호 필드일 때만 표시)
+                        if (value.isNotEmpty()) {
+                            Icon(
+                                painter = if (passwordVisible) painterResource(AppIcons.RegisterInvisible) else painterResource(AppIcons.RegisterVisible),
+                                contentDescription = "toggle password visibility",
+                                tint = Color.Black,
+                                modifier = Modifier
+                                    .size(24.dp)
+                                    .clickable { passwordVisible = !passwordVisible }
+                            )
+                        }
+
+                        // 기능 2: 전체 지우기 (X 버튼, 값이 있을 때만 표시)
+                        if (value.isNotEmpty()) {
+                            Image(
+                                painter = painterResource(AppIcons.RegisterCancel), // 원형 X 아이콘
+                                contentDescription = "clear text",
+                                modifier = Modifier
+                                    .size(24.dp)
+                                    .clickable { onValueChange("") } // ✅ 클릭 시 빈 문자열로 초기화
+                            )
+                        }
+                    }
+                }
+                else if(isNicknameInput && value.isNotBlank()) {
+                    Row(
+                        modifier = Modifier
+                            .padding(horizontal = 20.dp),
+                    ) {
+                        // 기능 1: 비밀번호 가리기/보이기 (비밀번호 필드일 때만 표시)
+                        Image(
+                            painter = if (isNicknameValid) painterResource(AppIcons.RegisterOK) else painterResource(
+                                AppIcons.RegisterWarning
+                            ),
+                            contentDescription = "toggle password visibility",
+                            modifier = Modifier
+                                .size(24.dp)
+                        )
+                    }
+                }
             }
         }
     )
+
 }
 
 // 이메일 입력 화면
@@ -359,7 +487,8 @@ fun EmailInputStep(viewModel: AuthViewModel) {
         GlassyTextField(
             value = viewModel.email,
             onValueChange = { viewModel.updateEmail(it) },
-            placeholder = "이메일" //
+            placeholder = "이메일",
+            isEmailInput = true
         )
 
         Spacer(Modifier.height(60.dp)) // 버튼을 하단으로 밀어냄
@@ -368,7 +497,7 @@ fun EmailInputStep(viewModel: AuthViewModel) {
         Button(
             modifier = Modifier
                 .clip(RoundedCornerShape(100.dp)),
-            enabled = viewModel.email.contains("@"), // 간단한 유효성 검사
+            enabled = viewModel.isEmailValid,
             onClick = {
                 viewModel.checkEmail()
             },
@@ -408,7 +537,7 @@ fun EmailInputStep(viewModel: AuthViewModel) {
                         fontSize = 18.sp,
 
                         color =
-                            if(viewModel.email.contains("@")) {
+                            if(viewModel.isEmailValid) {
                                 Color.White
                             }
                         else
@@ -434,6 +563,7 @@ fun LoginPasswordStep(
             Color(0xFFAFF4F9))
     )
 
+
     Column(modifier = Modifier
         .fillMaxSize()
         ) {
@@ -452,7 +582,8 @@ fun LoginPasswordStep(
             value = viewModel.password,
             onValueChange = { viewModel.updatePassword(it) },
             placeholder = "8자리 이상 입력해주세요",
-            visualTransformation = PasswordVisualTransformation()
+            // visualTransformation = PasswordVisualTransformation(),
+            isPasswordInput = true
         )
 
         Column(
@@ -480,7 +611,7 @@ fun LoginPasswordStep(
         Button(
             modifier = Modifier
                 .clip(RoundedCornerShape(100.dp)),
-            enabled = (viewModel.password.length >= 8),
+            enabled = (viewModel.isPasswordValid),
             onClick = {
                 // ✅ 이메일과 비번이 이미 VM에 있으므로 파라미터 없이 로그인을 시도합니다.
                 viewModel.performLogin(
@@ -524,7 +655,7 @@ fun LoginPasswordStep(
                         fontSize = 18.sp,
 
                         color =
-                            if(viewModel.password.length >= 8) {
+                            if(viewModel.isPasswordValid) {
                                 Color.White
                             }
                             else
@@ -546,6 +677,12 @@ fun SignupPasswordStep(viewModel: AuthViewModel) {
             Color(0xFFAFF4F9))
     )
 
+    val pwInvalidMessage = if(!viewModel.isPasswordCharsValid) "영어, 숫자, 특수기호(@,\$,!,%,*,?,&)만 가능합니다"
+        else if(!viewModel.isPasswordLengthValid) "8자리 이상 입력해주세요"
+    else "비밀번호를 다시 확인해주세요"
+
+
+
     Column(modifier = Modifier
         .fillMaxSize()
         ) {
@@ -562,7 +699,8 @@ fun SignupPasswordStep(viewModel: AuthViewModel) {
             value = viewModel.password,
             onValueChange = { viewModel.updatePassword(it) },
             placeholder = "8자리 이상 입력해주세요", //
-            visualTransformation = PasswordVisualTransformation()
+            visualTransformation = PasswordVisualTransformation(),
+            isPasswordInput = true
         )
 
         Spacer(Modifier.height(16.dp))
@@ -571,13 +709,38 @@ fun SignupPasswordStep(viewModel: AuthViewModel) {
             value = viewModel.passwordConfirm,
             onValueChange = { viewModel.updatePasswordConfirm(it) },
             placeholder = "비밀번호 확인", //
-            visualTransformation = PasswordVisualTransformation()
+            //visualTransformation = PasswordVisualTransformation(),
+            isPasswordInput = true
         )
 
-        // TODO: 비밀번호 유효성 체크 메시지
-        //
+        if((viewModel.password.isNotEmpty() && !viewModel.isPasswordValid) || ((viewModel.password != viewModel.passwordConfirm) && viewModel.passwordConfirm.isNotEmpty())) {
 
-        Spacer(Modifier.height(52.dp)) // 12.dp
+            Spacer(Modifier.height(12.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Image(
+                    painter = painterResource(AppIcons.RegisterWarning),
+                    contentDescription = "비밀번호 경고"
+                )
+                Text(
+                    modifier = Modifier.padding(start = 6.dp),
+                    text = pwInvalidMessage,
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 14.sp,
+                        color = Color(0xFFEF4444)
+                    ),
+                    textAlign = TextAlign.Center,
+                    lineHeight = 16.sp
+                )
+            }
+            Spacer(Modifier.height(12.dp))
+        }else {
+            Spacer(Modifier.height(52.dp)) // 12.dp
+        }
 
         Button(
             modifier = Modifier
@@ -620,7 +783,7 @@ fun SignupPasswordStep(viewModel: AuthViewModel) {
                         fontSize = 18.sp,
 
                         color =
-                            if((viewModel.password.length >= 8) && (viewModel.password == viewModel.passwordConfirm)) {
+                            if((viewModel.isPasswordValid) && (viewModel.password == viewModel.passwordConfirm)) {
                                 Color.White
                             }
                             else
@@ -659,7 +822,9 @@ fun NicknameStep(
         GlassyTextField(
             value = viewModel.nickname,
             onValueChange = { viewModel.updateNickname(it) },
-            placeholder = "ex) 노곤노곤한 카피바라" //
+            placeholder = "ex) 노곤노곤한 카피바라", //
+            isNicknameInput = true,
+            isNicknameValid = viewModel.isNicknameValid,
         )
 
         Spacer(Modifier.height(60.dp))
@@ -667,7 +832,7 @@ fun NicknameStep(
         Button(
             modifier = Modifier
                 .clip(RoundedCornerShape(100.dp)),
-            enabled =  viewModel.nickname.isNotBlank(), // 간단한 유효성 검사
+            enabled =  viewModel.nickname.isNotBlank() && viewModel.isNicknameValid , // 간단한 유효성 검사
             onClick = {
                 viewModel.setSignupGenderBirth()
             },
@@ -707,7 +872,7 @@ fun NicknameStep(
                         fontSize = 18.sp,
 
                         color =
-                            if( viewModel.nickname.isNotBlank()) {
+                            if( viewModel.nickname.isNotBlank() && viewModel.isNicknameValid) {
                                 Color.White
                             }
                             else
