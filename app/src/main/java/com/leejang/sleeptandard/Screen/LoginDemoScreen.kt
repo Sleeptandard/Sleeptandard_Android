@@ -87,6 +87,7 @@ import java.util.Locale
 sealed class AuthStep {
     object EmailInput : AuthStep()                          // 1단계: 이메일 입력
     data class LoginPassword(val email: String) : AuthStep() // 2단계(경로A): 로그인 비밀번호
+    data class PasswordChange(val email: String) : AuthStep()// 비밀번호 재설정
     data class SignupPassword(val email: String) : AuthStep() // 2단계(경로B): 회원가입 비밀번호
     data class SignupNickname(val email: String, val pw: String) : AuthStep() // 3단계: 닉네임
 
@@ -145,14 +146,15 @@ class AuthViewModel : ViewModel() {
     val isPasswordValid: Boolean
         get() = isPasswordLengthValid && isPasswordCharsValid
 
-    // 1. 닉네임 규칙: 1~15자, 특수문자 제외 (유니코드 문자+숫자 허용)
+    // 1. 특수문자 제외 (유니코드 문자+숫자 허용)
     private val nicknamePattern = Regex("^[\\p{L}\\p{N}]{1,15}$")
 
     // 2. 실시간 닉네임 유효성 상태
     val isNicknameValid: Boolean
         get() = nickname.matches(nicknamePattern)
 
-
+    val isNicknameLengthValid: Boolean
+        get() = (0 < nickname.length) && (nickname.length <= 15)
 
     // 입력값 업데이트 함수들
     // ✅ 이메일 업데이트: 모든 공백 문자 제거
@@ -189,6 +191,10 @@ class AuthViewModel : ViewModel() {
         cureentStep = if (exist) AuthStep.LoginPassword(email)
             else AuthStep.SignupPassword(email)
          */
+    }
+
+    fun passwordChange(){
+        currentStep = AuthStep.PasswordChange(email)
     }
 
     // 2단계(경로A): 로그인 실행
@@ -311,7 +317,15 @@ fun LoginDemoScreen(
                     },
                     onLoginError = {
                         Toast.makeText(context, "비밀번호가 틀렸습니다.", Toast.LENGTH_SHORT).show()
+                    },
+                    onPwChange = {
+
                     }
+                )
+
+                is AuthStep.PasswordChange -> PasswordChangeStep(
+                    viewModel = authViewModel,
+                    onConfirm = {}
                 )
 
                 is AuthStep.SignupPassword -> SignupPasswordStep(viewModel = authViewModel)
@@ -556,7 +570,8 @@ fun EmailInputStep(viewModel: AuthViewModel) {
 fun LoginPasswordStep(
     viewModel: AuthViewModel,
     onLoginSuccess: (String) -> Unit,
-    onLoginError: () -> Unit
+    onLoginError: () -> Unit,
+    onPwChange: () -> Unit,
 ) {
     val buttonGradient = linearGradient(
         listOf(Color(0xFF437AC7),
@@ -597,7 +612,10 @@ fun LoginPasswordStep(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 16.dp)
-                    .clickable { /* 찾기 로직 */ },
+                    .clickable {
+                        viewModel.PasswordChange()
+                        //TODO: 인증 메일 보내는 로직
+                    },
                 textAlign = TextAlign.Center,
                 color = Color.White,
                 textDecoration = TextDecoration.Underline,
@@ -806,6 +824,10 @@ fun NicknameStep(
             Color(0xFFAFF4F9))
     )
 
+    val nicknameInvalidMessage = if(viewModel.nickname.length > 15)
+        "15자 이하로 작성해주세요"
+    else "특수문자는 들어갈 수 없어요"
+
     Column(modifier = Modifier
         .fillMaxSize()
         ) {
@@ -827,7 +849,36 @@ fun NicknameStep(
             isNicknameValid = viewModel.isNicknameValid,
         )
 
-        Spacer(Modifier.height(60.dp))
+        if(!viewModel.isNicknameValid && viewModel.nickname.isNotBlank()){
+
+            Spacer(Modifier.height(12.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Image(
+                    painter = painterResource(AppIcons.RegisterWarning),
+                    contentDescription = "닉네임 경고"
+                )
+                Text(
+                    modifier = Modifier.padding(start = 6.dp),
+                    text = nicknameInvalidMessage,
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 14.sp,
+                        color = Color(0xFFEF4444)
+                    ),
+                    textAlign = TextAlign.Center,
+                    lineHeight = 16.sp
+                )
+            }
+            Spacer(Modifier.height(12.dp))
+
+        } else{
+            Spacer(Modifier.height(60.dp))
+        }
+
 
         Button(
             modifier = Modifier

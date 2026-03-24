@@ -77,5 +77,6 @@ object AppIcons {
     @DrawableRes val RegisterVisible = R.drawable.ic_register_visible
     @DrawableRes val RegisterCancel = R.drawable.ic_register_cancel
     @DrawableRes val RegisterOK = R.drawable.ic_nickname_ok
+    @DrawableRes val RegisterMail = R.drawable.ic_login_mail
 
 }
