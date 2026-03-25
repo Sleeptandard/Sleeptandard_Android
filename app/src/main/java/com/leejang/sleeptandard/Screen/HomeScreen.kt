@@ -483,10 +483,15 @@ fun HomeScreen(
 
                     ModalBottomSheet(
                         onDismissRequest = {
-                            // ✅ 핵심: 모달이 어떤 방식으로든 닫힐 때 모든 입력 상태를 초기화합니다.
-                            showSituationModal = false
-                            isCustomMode = false  // 다음번 열 때 리스트가 보이도록 리셋
-                            customText = ""       // 입력하던 텍스트도 비워줌
+                            try{
+                                // ✅ 핵심: 모달이 어떤 방식으로든 닫힐 때 모든 입력 상태를 초기화합니다.
+                                showSoundSheet = false
+                                isCustomMode = false  // 다음번 열 때 리스트가 보이도록 리셋
+                                customText = ""       // 입력하던 텍스트도 비워줌
+                                Log.d("dismiss_modal","dismiss successed")
+                            }catch(e: Exception){
+                                Log.e("dismiss_modal","failed: ${e}")
+                            }
                         },
                         sheetState = soundSheetState,
                         containerColor = DarkBackground,
