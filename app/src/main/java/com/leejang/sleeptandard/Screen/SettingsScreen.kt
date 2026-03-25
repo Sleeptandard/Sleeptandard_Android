@@ -1,6 +1,8 @@
 package com.leejang.sleeptandard.Screen
 
 import android.graphics.BlurMaskFilter
+import android.util.Log
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -47,19 +49,25 @@ import androidx.compose.ui.unit.sp
 import com.leejang.sleeptandard.ui.theme.AppIcons
 import java.util.Dictionary
 
+data class SettingElements(
+    val id: Int,
+    val name: String,
+    val iconID: Int,
+    val onClick: () -> Unit
+)
+
 @Composable
 fun SettingsScreen(
     onClickQnA: ()-> Unit,
     onClickPermission: ()-> Unit,
     onClickTutorial: ()-> Unit,
-    onClickSendingData: ()-> Unit
+    onClickSendingData: ()-> Unit,
+    onClickAccount: () -> Unit = {}
 ){
-
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(17.dp)
 
     ){
 
@@ -73,8 +81,45 @@ fun SettingsScreen(
                 .padding(start = 12.dp)
         )
 
-        Spacer(Modifier.height(34.dp))
+        Spacer(Modifier.height(32.dp))
 
+        SettingSection(
+            title = "계정",
+            elementList = listOf(
+                SettingElements(1, "계정관리", AppIcons.SettingsAccountManagement, {})
+            )
+        )
+
+        Spacer(Modifier.height(30.dp))
+
+        SettingSection(
+            title = "앱 설정",
+            elementList = listOf(
+                SettingElements(id = 1, name = "시스템 접근권한", iconID = AppIcons.SettingsSysAccessibility, onClick = onClickPermission),
+            )
+        )
+
+        Spacer(Modifier.height(30.dp))
+
+        SettingSection(
+            title = "도움",
+            elementList = listOf(
+                SettingElements(1, "튜토리얼", AppIcons.SettingsTutorial, onClickTutorial),
+                SettingElements(2, "고객지원", AppIcons.SettingsCustomerService, onClickQnA)
+            )
+        )
+
+        Spacer(Modifier.height(30.dp))
+
+        SettingSection(
+            title = "데이터",
+            elementList = listOf(
+                SettingElements(id = 1, name = "수면데이터 보내기", iconID = AppIcons.SettingsDataSending, onClick = onClickSendingData)
+            )
+        )
+
+
+        /*
         Surface(
             modifier = Modifier
                 .fillMaxWidth( )
@@ -320,19 +365,22 @@ fun SettingsScreen(
 
         }
 
+         */
+
     }
 }
+
+
 
 @Composable
 fun SettingSection(
     title: String,
-    elementMap: Map<String, Int>
+    elementList: List<SettingElements>
 ){
-
     // UI 요소 변수
 
     // 섹션 높이
-    val sectionHeight = elementMap.size * 60
+    val sectionHeight = elementList.size * 60
 
     // 흰색 그림자
     val highlightColor1 = Color(0xFFB9C8DF).copy(alpha = 0.15f)
@@ -344,8 +392,6 @@ fun SettingSection(
     val blurRadius2 = 15.dp
     val offsetX2 = (8).dp
     val offsetY2 = (8).dp
-
-    var index by remember{ mutableIntStateOf(0) }
 
     Column(
         modifier = Modifier
@@ -426,36 +472,46 @@ fun SettingSection(
         ){
             Column(
                 modifier = Modifier
-                    .fillMaxWidth(),
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(28.dp)),
                 verticalArrangement = Arrangement.Center
             ) {
-                elementMap.forEach { m ->
+                elementList.forEach { l ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(16.dp)
+                            .clickable{
+                                l.onClick()
+                            },
                     ) {
-                        Icon(
-                            modifier = Modifier.size(25.dp),
-                            painter = painterResource(m.value),
-                            contentDescription = "icon",
-                        )
-
-                        Text(
-                            modifier = Modifier.padding(start = 16.dp),
-                            text = m.key,
-                            style = MaterialTheme.typography.bodyMedium.copy(
-                                fontSize = 16.sp,
-                                color = Color.White
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ){
+                            Image(
+                                modifier = Modifier.size(25.dp),
+                                painter = painterResource(l.iconID),
+                                contentDescription = "icon",
                             )
-                        )
+
+                            Text(
+                                modifier = Modifier.padding(start = 16.dp),
+                                text = l.name,
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    fontSize = 16.sp,
+                                    color = Color.White
+                                )
+                            )
+                        }
+
                     }
-                    if (elementMap.size > index){
+                    if (elementList.size > l.id){
                         HorizontalDivider(
-                            modifier = Modifier.height(0.dp),
+                            modifier = Modifier.height(0.dp).padding(horizontal = 16.dp),
                             color = Color(0xFF2A3240))
                     }
-                    index++
                 }
 
             }
