@@ -22,6 +22,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -341,6 +345,7 @@ fun SettingSection(
     val offsetX2 = (8).dp
     val offsetY2 = (8).dp
 
+    var index by remember{ mutableIntStateOf(0) }
 
     Column(
         modifier = Modifier
@@ -418,38 +423,41 @@ fun SettingSection(
                         offset = DpOffset(x = 5.dp, 6.dp)
                     )
                 )
-                .clickable {
-
-                }
         ){
             Column(
                 modifier = Modifier
                     .fillMaxWidth(),
                 verticalArrangement = Arrangement.Center
-            ){elementMap.forEach{ m ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp)
-                ){
-                    Icon(
-                        modifier = Modifier.size(25.dp),
-                        painter = painterResource(m.value),
-                        contentDescription = "icon",
-                    )
-
-                    Text(
-                        modifier = Modifier.padding(start = 16.dp),
-                        text = m.key,
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            fontSize = 16.sp,
-                            color = Color.White
+            ) {
+                elementMap.forEach { m ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp)
+                    ) {
+                        Icon(
+                            modifier = Modifier.size(25.dp),
+                            painter = painterResource(m.value),
+                            contentDescription = "icon",
                         )
-                    )
-                }
-                if(elementMap.size > 1)
 
-            }
+                        Text(
+                            modifier = Modifier.padding(start = 16.dp),
+                            text = m.key,
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontSize = 16.sp,
+                                color = Color.White
+                            )
+                        )
+                    }
+                    if (elementMap.size > index){
+                        HorizontalDivider(
+                            modifier = Modifier.height(0.dp),
+                            color = Color(0xFF2A3240))
+                    }
+                    index++
+                }
+
             }
 
         }
