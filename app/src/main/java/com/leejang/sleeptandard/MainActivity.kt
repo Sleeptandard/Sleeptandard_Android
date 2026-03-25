@@ -72,9 +72,11 @@ class MainActivity : ComponentActivity() {
             alarmPrefs.isFirstRun() -> Screen.Tutorial.route           // 1순위: 앱을 처음 실행한 경우
             alarmPrefs.isAlarmSet() -> Screen.SettedAlarm.route       // 2순위: 알람이 설정되어 있는 경우
             startDestinationFromIntent != null -> startDestinationFromIntent // 3순위: 알람을 끄고 온 경우 (피드백 화면)
+            /** experiment **/
+            // else -> Screen.Experiment.route
             /** 로그인 데모 **/
-            else -> Screen.LoginDemo.route
-            // else -> Screen.Home.route                                 // 4순위: 일반적인 경우
+            // else -> Screen.LoginDemo.route
+            else -> Screen.Home.route                                 // 4순위: 일반적인 경우
         }
     }
 
