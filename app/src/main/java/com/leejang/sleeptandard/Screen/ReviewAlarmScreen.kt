@@ -222,11 +222,14 @@ fun SemiCircularSlider(
                     .fillMaxSize()
                     .pointerInput(Unit) {
                         detectDragGestures { change, _ ->
-                            // ✅ 3. x축 변화값만 사용하여 비율 계산
-                            val touchX = change.position.x
-                            val normalized =
-                                ((touchX - sideMarginPx) / usableWidth).coerceIn(0f, 1f)
-                            onValueChange(normalized)
+                            // ✅ 3. 반원의 위쪽 영역(y <= 중심선)에서만 값 변경
+                            val touchY = change.position.y
+                            if (touchY <= width / 2f) {
+                                val touchX = change.position.x
+                                val normalized =
+                                    ((touchX - sideMarginPx) / usableWidth).coerceIn(0f, 1f)
+                                onValueChange(normalized)
+                            }
                         }
                     }
             ) {
