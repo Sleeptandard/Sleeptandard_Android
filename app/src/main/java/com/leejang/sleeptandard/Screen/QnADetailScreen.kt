@@ -52,9 +52,11 @@ fun QnADetailScreen(
                 .fillMaxWidth()
                 .height(60.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(17.dp)
         ){
-            IconButton(onClick = onBack) {
+            IconButton(
+                modifier = Modifier.size(32.dp),
+                onClick = onBack
+            ) {
                 Icon(
                     modifier = Modifier.size(32.dp),
                     painter = painterResource(AppIcons.QnAArrowBack),
@@ -62,6 +64,7 @@ fun QnADetailScreen(
                 )
             }
 
+            Spacer(Modifier.width(10.dp))
             // 제목 (질문 타이틀)
             Text(
                 text = item.title,
