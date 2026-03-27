@@ -260,8 +260,10 @@ fun AppNav(
             val showBottom = when (currentRoute) {
                 Screen.Home.route,
                 Screen.Journal.route,
-                Screen.Settings.route,
                 Screen.SettedAlarm.route,
+                Screen.Settings.route,
+                Screen.QnA.route,
+                Screen.QnADetail.route,
                 Screen.SendingData.route -> true
                 else -> false
             }
@@ -274,6 +276,8 @@ fun AppNav(
                         Screen.SettedAlarm.route -> 0
                         Screen.Journal.route -> 1
                         Screen.Settings.route -> 2
+                        Screen.QnA.route -> 2
+                        Screen.QnADetail.route -> 2
                         Screen.SendingData.route -> 2
 
                         else -> 2
