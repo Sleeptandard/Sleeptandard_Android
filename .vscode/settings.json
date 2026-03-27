@@ -1,5 +1,0 @@
-{
-    "java.server.launchMode": "Off",
-    "java.import.gradle.enabled": false,
-    "java.configuration.updateBuildConfiguration": "interactive"
-}
