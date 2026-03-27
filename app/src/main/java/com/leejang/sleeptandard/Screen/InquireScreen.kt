@@ -67,185 +67,175 @@ fun InquireScreen(
         selectedImageUris = selectedImageUris + uris
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {},
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            painter = painterResource(AppIcons.QnAArrowBack),
-                            contentDescription = "뒤로가기",
-                            tint = Color.White
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 26.dp)
+    ) {
+        IconButton(onClick = onBack) {
+            Icon(
+                painter = painterResource(AppIcons.QnAArrowBack),
+                contentDescription = "뒤로가기",
+                tint = Color.White
             )
         }
-    ) { inner ->
-        Column(
+
+        Spacer(Modifier.weight(16f))
+
+        // ---- 제목 ----
+        Text(
+            text = "제목",
+            modifier = Modifier.padding(8.dp),
+            color = Color(0xCCF1F1F1),
+            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 16.sp)
+        )
+        Spacer(Modifier.weight(10f))
+
+        OutlinedTextField(
+            value = title,
+            onValueChange = { if (it.length <= 30) title = it }, // ✅ 30자 제한
             modifier = Modifier
-                .fillMaxSize()
-                .padding(inner)
-                .padding(horizontal = 26.dp)
+                .fillMaxWidth()
+                .height(46.dp),
+            placeholder = {
+                Text(
+                    "30자 이내로 입력해주세요.",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 14.sp
+                    ),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            },
+            singleLine = true,
+            textStyle = MaterialTheme.typography.bodyMedium.copy(
+                fontSize = 14.sp,
+                lineHeight = 18.sp,
+                color = Color.White
+            ),
+            shape = RoundedCornerShape(14.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedContainerColor = fieldBg,
+                unfocusedContainerColor = fieldBg,
+                focusedBorderColor = Color.Transparent,
+                unfocusedBorderColor = Color.Transparent,
+                cursorColor = Color.White,
+                focusedTextColor = Color.White,
+                unfocusedTextColor = Color.White
+            )
+        )
+
+        Spacer(Modifier.weight(22f))
+
+        // ---- 내용 ----
+        Text(
+            "내용",
+            color = Color(0xCCF1F1F1),
+            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 16.sp)
+        )
+        Spacer(Modifier.weight(10f))
+
+        OutlinedTextField(
+            value = body,
+            onValueChange = { body = it },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(220.dp),
+            placeholder = {
+                Text(
+                    "질문할 내용을 작성해주세요.",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 14.sp
+                    )
+                )
+            },
+            singleLine = false,
+            textStyle = MaterialTheme.typography.bodyMedium.copy(
+                fontSize = 14.sp,
+                lineHeight = 20.sp,
+                color = Color.White
+            ),
+            shape = RoundedCornerShape(14.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedContainerColor = fieldBg,
+                unfocusedContainerColor = fieldBg,
+                focusedBorderColor = Color.Transparent,
+                unfocusedBorderColor = Color.Transparent,
+                cursorColor = Color.White,
+                focusedTextColor = Color.White,
+                unfocusedTextColor = Color.White
+            )
+        )
+
+        Spacer(Modifier.weight(22f))
+
+        // ---- 사진 첨부 ----
+        Text(
+            "사진 첨부",
+            color = Color(0xCCF1F1F1),
+            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 16.sp)
+        )
+        Spacer(Modifier.weight(10f))
+
+        // 3. 사진 미리보기 및 추가 영역 (가로 스크롤 가능)
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Spacer(Modifier.weight(16f))
-
-            // ---- 제목 ----
-            Text(
-                text = "제목",
-                modifier = Modifier.padding(8.dp),
-                color = Color(0xCCF1F1F1),
-                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 16.sp)
-            )
-            Spacer(Modifier.weight(10f))
-
-            OutlinedTextField(
-                value = title,
-                onValueChange = { if (it.length <= 30) title = it }, // ✅ 30자 제한
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(46.dp),
-                placeholder = {
-                    Text(
-                        "30자 이내로 입력해주세요.",
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            fontSize = 14.sp
-                        ),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+            // 선택된 이미지들 표시
+            items(selectedImageUris) { uri ->
+                Box(
+                    modifier = Modifier
+                        .size(100.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                ) {
+                    AsyncImage(
+                        model = uri,
+                        contentDescription = "선택된 이미지",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
                     )
-                },
-                singleLine = true,
-                textStyle = MaterialTheme.typography.bodyMedium.copy(
-                    fontSize = 14.sp,
-                    lineHeight = 18.sp,
-                    color = Color.White
-                ),
-                shape = RoundedCornerShape(14.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = fieldBg,
-                    unfocusedContainerColor = fieldBg,
-                    focusedBorderColor = Color.Transparent,
-                    unfocusedBorderColor = Color.Transparent,
-                    cursorColor = Color.White,
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White
-                )
-            )
-
-            Spacer(Modifier.weight(22f))
-
-            // ---- 내용 ----
-            Text(
-                "내용",
-                color = Color(0xCCF1F1F1),
-                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 16.sp)
-            )
-            Spacer(Modifier.weight(10f))
-
-            OutlinedTextField(
-                value = body,
-                onValueChange = { body = it },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(220.dp),
-                placeholder = {
-                    Text(
-                        "질문할 내용을 작성해주세요.",
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            fontSize = 14.sp
-                        )
-                    )
-                },
-                singleLine = false,
-                textStyle = MaterialTheme.typography.bodyMedium.copy(
-                    fontSize = 14.sp,
-                    lineHeight = 20.sp,
-                    color = Color.White
-                ),
-                shape = RoundedCornerShape(14.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = fieldBg,
-                    unfocusedContainerColor = fieldBg,
-                    focusedBorderColor = Color.Transparent,
-                    unfocusedBorderColor = Color.Transparent,
-                    cursorColor = Color.White,
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White
-                )
-            )
-
-            Spacer(Modifier.weight(22f))
-
-            // ---- 사진 첨부 ----
-            Text(
-                "사진 첨부",
-                color = Color(0xCCF1F1F1),
-                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 16.sp)
-            )
-            Spacer(Modifier.weight(10f))
-
-            // 3. 사진 미리보기 및 추가 영역 (가로 스크롤 가능)
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                // 선택된 이미지들 표시
-                items(selectedImageUris) { uri ->
-                    Box(
-                        modifier = Modifier
-                            .size(100.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                    ) {
-                        AsyncImage(
-                            model = uri,
-                            contentDescription = "선택된 이미지",
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop
-                        )
-                        // (옵션) 여기에 삭제 버튼 'X'를 추가하면 더 좋습니다.
-                    }
-                }
-
-                // 4. 사진 추가 버튼 (항상 마지막에 위치)
-                item {
-                    Box(
-                        modifier = Modifier
-                            .size(100.dp)
-                            .background(fieldBg, RoundedCornerShape(12.dp))
-                            .clickable {
-                                // 이미지 타입을 처리할 수 있는 앱 선택창을 띄웁니다.
-                                photoPickerLauncher.launch("image/*")
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            "+",
-                            color = Color.White,
-                            style = MaterialTheme.typography.headlineMedium
-                        )
-                    }
+                    // (옵션) 여기에 삭제 버튼 'X'를 추가하면 더 좋습니다.
                 }
             }
 
-            Spacer(Modifier.weight(60f))
-
-            // ---- 제출 버튼
-            Button(
-                onClick = {
-                    // 5. 제출 시 리스트 전체를 전달
-                    onSubmit(title, body, selectedImageUris)
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp)
-                    .padding(bottom = 16.dp),
-                shape = RoundedCornerShape(100.dp),
-                enabled = title.isNotBlank() && body.isNotBlank()
-            ) {
-                Text("제출", style = MaterialTheme.typography.bodyMedium.copy(fontSize = 18.sp))
+            // 4. 사진 추가 버튼 (항상 마지막에 위치)
+            item {
+                Box(
+                    modifier = Modifier
+                        .size(100.dp)
+                        .background(fieldBg, RoundedCornerShape(12.dp))
+                        .clickable {
+                            // 이미지 타입을 처리할 수 있는 앱 선택창을 띄웁니다.
+                            photoPickerLauncher.launch("image/*")
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        "+",
+                        color = Color.White,
+                        style = MaterialTheme.typography.headlineMedium
+                    )
+                }
             }
+        }
+
+        Spacer(Modifier.weight(60f))
+
+        // ---- 제출 버튼
+        Button(
+            onClick = {
+                // 5. 제출 시 리스트 전체를 전달
+                onSubmit(title, body, selectedImageUris)
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp)
+                .padding(bottom = 16.dp),
+            shape = RoundedCornerShape(100.dp),
+            enabled = title.isNotBlank() && body.isNotBlank()
+        ) {
+            Text("제출", style = MaterialTheme.typography.bodyMedium.copy(fontSize = 18.sp))
         }
     }
 }
+
