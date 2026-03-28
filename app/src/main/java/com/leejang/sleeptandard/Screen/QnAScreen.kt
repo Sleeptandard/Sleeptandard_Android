@@ -1,6 +1,7 @@
 package com.leejang.sleeptandard.Screen
 
 import android.graphics.BlurMaskFilter
+import android.net.Uri
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -64,7 +65,8 @@ import com.leejang.sleeptandard.ui.theme.AppIcons
 fun QnAScreen(
     onBack: () -> Unit = {},
     onClickAsk: () -> Unit = {},
-    onClickItem: (String) -> Unit = {}
+    onClickItem: (String) -> Unit = {},
+    onSubmit: (title: String, body: String, imageUris: List<Uri>) -> Unit
 ) {
     // 사용자가 입력하는 값
     var query by remember { mutableStateOf("") }
@@ -80,6 +82,8 @@ fun QnAScreen(
         if (q.isEmpty()) allItems
         else allItems.filter { it.title.contains(q, ignoreCase = true) }
     }
+
+    var showInquireModal by remember{ mutableStateOf(false)}
 
     // 흰색 그림자
     val highlightColor1 = Color(0xFFB9C8DF).copy(alpha = 0.07f)
@@ -255,7 +259,10 @@ fun QnAScreen(
                 .fillMaxWidth()
         ) {
             Button(
-                onClick = onClickAsk,
+                onClick = {
+                    showInquireModal = true
+                    //onClickAsk
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(60.dp),
@@ -275,6 +282,13 @@ fun QnAScreen(
             }
         }
         Spacer(Modifier.height(47.dp))
+
+        if(showInquireModal){
+            InquireModalBottomSheet(
+                onDismiss = { showInquireModal = false },
+                onSubmit = onSubmit
+            )
+        }
     }
 }
 
