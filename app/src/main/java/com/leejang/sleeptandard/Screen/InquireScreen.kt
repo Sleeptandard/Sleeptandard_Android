@@ -461,7 +461,7 @@ fun InquireModalBottomSheet(
                 Button(
                     onClick = {
                         // 5. 제출 시 리스트 전체를 전달
-                        // onSubmit(title, body, selectedImageUris)
+                        onSubmit(title, body, selectedImageUris)
                     },
                     modifier = Modifier
                         .fillMaxWidth()
