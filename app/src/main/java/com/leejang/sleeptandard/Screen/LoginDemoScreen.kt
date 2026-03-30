@@ -52,7 +52,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
@@ -64,7 +63,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -87,7 +85,8 @@ import java.util.Locale
 sealed class AuthStep {
     object EmailInput : AuthStep()                          // 1단계: 이메일 입력
     data class LoginPassword(val email: String) : AuthStep() // 2단계(경로A): 로그인 비밀번호
-    data class PasswordChange(val email: String) : AuthStep()// 비밀번호 재설정
+    data class FindPassword(val email: String) : AuthStep() // 비밀번호 찾기
+    data class PasswordReset(val email: String) : AuthStep()    // 비밀번호 재설정
     data class SignupPassword(val email: String) : AuthStep() // 2단계(경로B): 회원가입 비밀번호
     data class SignupNickname(val email: String, val pw: String) : AuthStep() // 3단계: 닉네임
 
@@ -193,8 +192,12 @@ class AuthViewModel : ViewModel() {
          */
     }
 
-    fun passwordChange(){
-        currentStep = AuthStep.PasswordChange(email)
+    fun findingPassword(){
+        currentStep = AuthStep.FindPassword(email)
+    }
+
+    fun resetPassword(){
+        currentStep = AuthStep.PasswordReset(email)
     }
 
     // 2단계(경로A): 로그인 실행
@@ -319,13 +322,27 @@ fun LoginDemoScreen(
                         Toast.makeText(context, "비밀번호가 틀렸습니다.", Toast.LENGTH_SHORT).show()
                     },
                     onPwChange = {
-
+                        // TODO: 비밀번호 재설정 메일 송신 로직 넣어야함
+                        authViewModel.findingPassword()
                     }
                 )
 
-                is AuthStep.PasswordChange -> PasswordChangeStep(
+                is AuthStep.FindPassword -> PasswordChangeStep(
                     viewModel = authViewModel,
-                    onConfirm = {}
+                    onConfirm = {
+                        authViewModel.resetPassword()
+                    },
+                    onResend = {
+                        // TODO: 비밀번호 재설정 메일 송신 로직 넣어야함
+                    }
+                )
+
+                is AuthStep.PasswordReset -> PasswordResetStep(
+                    viewModel = authViewModel,
+                    onReset = {
+                        // TODO: 비밀번호 재설정 로직 백엔드 연결 필요
+                        authViewModel.backToEmail()
+                    }
                 )
 
                 is AuthStep.SignupPassword -> SignupPasswordStep(viewModel = authViewModel)
@@ -613,8 +630,7 @@ fun LoginPasswordStep(
                     .fillMaxWidth()
                     .padding(top = 16.dp)
                     .clickable {
-                        viewModel.PasswordChange()
-                        //TODO: 인증 메일 보내는 로직
+                        onPwChange()
                     },
                 textAlign = TextAlign.Center,
                 color = Color.White,
@@ -684,6 +700,245 @@ fun LoginPasswordStep(
         }
 
         Spacer(Modifier.height(20.dp))
+    }
+}
+
+@Composable
+fun PasswordChangeStep(
+    viewModel: AuthViewModel,
+    onConfirm: () -> Unit,
+    onResend: () -> Unit,
+) {
+
+    val buttonGradient = linearGradient(
+        listOf(Color(0xFF437AC7),
+            Color(0xFFAFF4F9))
+    )
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+
+        Spacer(Modifier.height(42.dp))
+
+        Icon(
+            modifier = Modifier.size(120.dp),
+            painter = painterResource(AppIcons.RegisterMail),
+            contentDescription = "메일 발송 아이콘"
+        )
+
+        Spacer(Modifier.height(36.dp))
+
+        Text(
+            text = viewModel.email,
+            style = MaterialTheme.typography.bodyMedium.copy(
+                fontSize = 18.sp,
+                color = Color.White.copy(alpha = 0.8f)
+            )
+        )
+
+        Spacer(Modifier.height(4.dp))
+
+        Text(
+            text = "비밀번호 재설정 메일이 발송됐어요",
+            style = MaterialTheme.typography.bodyMedium.copy(
+                fontSize = 22.sp,
+                color = Color.White
+            )
+        )
+
+        Spacer(Modifier.height(40.dp))
+
+        Button(
+            modifier = Modifier
+                .clip(RoundedCornerShape(100.dp)),
+            onClick = {
+                onConfirm()
+            },
+            contentPadding = PaddingValues(0.dp)
+        ){
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(100.dp))
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ){
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(60.dp)
+                        .background(brush = buttonGradient)
+                        .blur(30.dp)
+                        .border(
+                            width = 2.dp,
+                            brush = Brush.verticalGradient(
+                                colors = listOf(
+                                    Color.White.copy(alpha = 0.4f), // 테두리 위쪽 (빛남)
+                                    Color.Transparent,             // 테두리 중간 (투명)
+                                    Color.White.copy(alpha = 0.1f)  // 테두리 아래쪽 (은은함)
+                                )
+                            ),
+                            shape = RoundedCornerShape(24.dp)
+                        ),
+                    contentAlignment = Alignment.Center
+                ){
+
+                }
+
+                Text(
+                    text = "확인",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 18.sp,
+                        color = Color.White
+                    )
+                )
+            }
+        }
+
+        Spacer(Modifier.height(10.dp))
+
+        Text(
+            modifier = Modifier.clickable {
+                onResend()
+            },
+            text = "재발송",
+            style = MaterialTheme.typography.bodyMedium.copy(
+                color = Color.White,
+                fontSize = 14.sp
+            ),
+            textDecoration = TextDecoration.Underline
+        )
+
+    }
+}
+
+@Composable
+fun PasswordResetStep(
+    viewModel: AuthViewModel,
+    onReset: () -> Unit
+) {
+    val buttonGradient = linearGradient(
+        listOf(Color(0xFF437AC7),
+            Color(0xFFAFF4F9))
+    )
+
+    val pwInvalidMessage = if(!viewModel.isPasswordCharsValid) "영어, 숫자, 특수기호(@,\$,!,%,*,?,&)만 가능합니다"
+    else if(!viewModel.isPasswordLengthValid) "8자리 이상 입력해주세요"
+    else "비밀번호를 다시 확인해주세요"
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+    ){
+        Text(
+            modifier = Modifier.padding(10.dp),
+            text = "비밀번호 재설정",
+            style = MaterialTheme.typography.bodyMedium.copy(
+                fontSize = 22.sp,
+                color = Color.White
+            )
+        )
+
+        GlassyTextField(
+            value = viewModel.password,
+            onValueChange = { viewModel.updatePassword(it) },
+            placeholder = "8자리 이상 입력해주세요", //
+            visualTransformation = PasswordVisualTransformation(),
+            isPasswordInput = true
+        )
+
+        Spacer(Modifier.height(16.dp))
+
+        GlassyTextField(
+            value = viewModel.passwordConfirm,
+            onValueChange = { viewModel.updatePasswordConfirm(it) },
+            placeholder = "비밀번호 확인", //
+            //visualTransformation = PasswordVisualTransformation(),
+            isPasswordInput = true
+        )
+
+        if((viewModel.password.isNotEmpty() && !viewModel.isPasswordValid) || ((viewModel.password != viewModel.passwordConfirm) && viewModel.passwordConfirm.isNotEmpty())) {
+
+            Spacer(Modifier.height(12.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Image(
+                    painter = painterResource(AppIcons.RegisterWarning),
+                    contentDescription = "비밀번호 경고"
+                )
+                Text(
+                    modifier = Modifier.padding(start = 6.dp),
+                    text = pwInvalidMessage,
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 14.sp,
+                        color = Color(0xFFEF4444)
+                    ),
+                    textAlign = TextAlign.Center,
+                    lineHeight = 16.sp
+                )
+            }
+            Spacer(Modifier.height(12.dp))
+        }else {
+            Spacer(Modifier.height(52.dp)) // 12.dp
+        }
+
+        Button(
+            modifier = Modifier
+                .clip(RoundedCornerShape(100.dp)),
+            enabled = (viewModel.password.length >= 8) && (viewModel.password == viewModel.passwordConfirm),
+            onClick = onReset,
+            contentPadding = PaddingValues(0.dp)
+        ){
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(100.dp))
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ){
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(60.dp)
+                        .background(brush = buttonGradient)
+                        .blur(30.dp)
+                        .border(
+                            width = 2.dp,
+                            brush = Brush.verticalGradient(
+                                colors = listOf(
+                                    Color.White.copy(alpha = 0.4f), // 테두리 위쪽 (빛남)
+                                    Color.Transparent,             // 테두리 중간 (투명)
+                                    Color.White.copy(alpha = 0.1f)  // 테두리 아래쪽 (은은함)
+                                )
+                            ),
+                            shape = RoundedCornerShape(24.dp)
+                        ),
+                    contentAlignment = Alignment.Center
+                ){
+
+                }
+
+                Text(
+                    text = "변경하기",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 18.sp,
+
+                        color =
+                            if((viewModel.isPasswordValid) && (viewModel.password == viewModel.passwordConfirm)) {
+                                Color.White
+                            }
+                            else
+                                Color.Black.copy(alpha = 0.5f)
+                    )
+                )
+            }
+        }
+
     }
 }
 
@@ -1341,7 +1596,9 @@ fun AuthStepIndicator(
         is AuthStep.SignupNickname -> 1
         is AuthStep.SignupGenderBirth -> 1
         is AuthStep.LoginPassword -> 2      // 로그인
-        is AuthStep.Completed -> 3          // 없음
+        is AuthStep.FindPassword -> 2
+        is AuthStep.PasswordReset -> 3      // 없음
+        is AuthStep.Completed -> 3
     }
 
     val numberOfSteps = stepLabels.size
