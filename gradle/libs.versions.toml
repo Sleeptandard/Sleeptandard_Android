@@ -19,8 +19,8 @@ wearToolingPreview = "1.0.0"
 animation = "1.10.4"
 foundationLayoutVersion = "1.10.5"
 cameraCamera2Pipe = "1.7.0-alpha01"
-project-versionCode = "9"
-project-versionName = "1.2.0"
+project-versionCode = "14"
+project-versionName = "1.2.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
