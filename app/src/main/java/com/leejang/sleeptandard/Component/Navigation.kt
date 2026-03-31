@@ -126,7 +126,7 @@ fun AppNav(
         /** 로그인 데모 **/
         composable(Screen.LoginDemo.route){
             LoginDemoScreen(
-                onComplete = { greeting ->
+                onConfirm = { greeting ->
                     rememberNavController.navigate(Screen.Home.route)
                     Toast.makeText(context, greeting, Toast.LENGTH_SHORT).show()
                 }
@@ -199,6 +199,38 @@ fun AppNav(
                 onClickAsk = { rememberNavController.navigate(Screen.Inquire.route) },
                 onClickItem = { id ->
                     rememberNavController.navigate(Screen.QnADetail.createRoute(id))
+                },
+                onSubmit = { title, body, uris ->
+                    val emailIntent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+                        // 1. 수신자 설정
+                        putExtra(Intent.EXTRA_EMAIL, arrayOf("studyjun0224@gmail.com"))
+
+                        // 2. 제목 설정
+                        putExtra(Intent.EXTRA_SUBJECT, "[문의사항] $title")
+
+                        // 3. 본문 설정
+                        putExtra(Intent.EXTRA_TEXT, body)
+
+                        // 4. 첨부 파일(이미지) 추가
+                        // Intent는 ArrayList 형태의 Uri를 받습니다.
+                        putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(uris))
+
+                        // 5. 타입 설정 (이미지 및 메시지 형식)
+                        type = "message/rfc822" // 또는 "image/*"
+
+                        // 첨부 파일에 대한 읽기 권한 부여
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+
+                    try {
+                        // 이메일 앱 선택창 띄우기
+                        context.startActivity(Intent.createChooser(emailIntent, "이메일 앱을 선택하세요"))
+
+                        // 제출 후 화면 뒤로 가기 (선택 사항)
+                        rememberNavController.popBackStack()
+                    } catch (e: Exception) {
+                        Toast.makeText(context, "이메일 앱을 찾을 수 없습니다.", Toast.LENGTH_SHORT).show()
+                    }
                 }
             )
         }
@@ -214,6 +246,11 @@ fun AppNav(
                 onFinish = {
                     alarmPrefs.setFirstRunCompleted()
                     rememberNavController.popBackStack()
+                    when{
+                        // TODO: 로그인 정보가 없는경우 -> Screen.LoginDemo.route
+                        alarmPrefs.isFirstRun() -> Screen.Tutorial.route
+                        else -> Screen.Home.route
+                    }
                     rememberNavController.navigate(Screen.Home.route)
                 }
             )
@@ -260,8 +297,10 @@ fun AppNav(
             val showBottom = when (currentRoute) {
                 Screen.Home.route,
                 Screen.Journal.route,
-                Screen.Settings.route,
                 Screen.SettedAlarm.route,
+                Screen.Settings.route,
+                Screen.QnA.route,
+                Screen.QnADetail.route,
                 Screen.SendingData.route -> true
                 else -> false
             }
@@ -274,6 +313,8 @@ fun AppNav(
                         Screen.SettedAlarm.route -> 0
                         Screen.Journal.route -> 1
                         Screen.Settings.route -> 2
+                        Screen.QnA.route -> 2
+                        Screen.QnADetail.route -> 2
                         Screen.SendingData.route -> 2
 
                         else -> 2
