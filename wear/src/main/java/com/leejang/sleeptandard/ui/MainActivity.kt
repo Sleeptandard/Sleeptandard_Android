@@ -104,7 +104,7 @@ fun WearHomeScreen() {
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            painter = painterResource(id = R.drawable.ic_launcher_foreground),
+                            painter = painterResource(id = R.drawable.ic_watch_upload),
                             contentDescription = "로그 재전송 (수동)",
                             tint = Color.White,
                             modifier = Modifier.size(16.dp)

@@ -15,6 +15,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,6 +25,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
@@ -36,6 +39,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -58,6 +64,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.res.vectorResource
+import androidx.compose.ui.text.style.BaselineShift
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.sp
 
@@ -83,12 +90,50 @@ fun SettedAlarmScreen(
         horizontalAlignment = Alignment.CenterHorizontally
     ){
         Spacer(Modifier.weight(124f))
-        Text(
-            text = getWakeUpTimeRange(alarm.hour, alarm.minute, alarm.isAm, alarm.earlyWakeUpMinutes),
-            style = MaterialTheme.typography.bodyMedium.copy(
-                fontSize = 16.sp
+
+        Column(
+            modifier = Modifier
+        ) {
+            Text(
+                text = earlyWakeUpText(alarm.hour, alarm.minute, alarm.isAm, alarm.earlyWakeUpMinutes),
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontSize = 16.sp,
+                    color = Color(0xCCF1F4F9)
+                )
             )
-        )
+
+            Spacer(Modifier.height(8.dp))
+
+            Row(
+                modifier = Modifier,
+                verticalAlignment = Alignment.Bottom,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ){
+                Text(
+                    text = "~",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 48.sp,
+                        color = Color(0xCCF1F4F9),
+                    )
+                )
+                Text(
+                    text = String.format(Locale.getDefault(),"%d : %02d",alarm.hour,alarm.minute),
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 48.sp,
+                        color = Color(0xCCF1F4F9),
+                    )
+                )
+                Text(
+                    text = "사이 알람",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 16.sp,
+                        color = Color(0xCCF1F4F9),
+                        baselineShift = BaselineShift(0.5f)
+                    )
+                )
+            }
+        }
+
         Spacer(Modifier.weight(28f))
 
         Box(
@@ -202,11 +247,44 @@ fun SettedAlarmScreen(
         ActivityAnimation(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(104.dp)
+                .height(120.dp)
         )
         
         Spacer(Modifier.weight(92f))
 
+        Box(
+            modifier = Modifier
+                .size(320.dp, 60.dp)
+                .clip(RoundedCornerShape(100.dp))
+                .background(color = Color.White)
+                .clickable{
+                    // 1) 알람 스케줄 취소
+                    scheduler.cancel(alarmViewModel.alarm)
+
+                    // 2) 워치에 수면 추적 중지 명령 전송
+                    alarmViewModel.stopSleepTracking()
+
+                    // 3) SharedPreferences 플래그/값 삭제
+                    val alarmPrefs = AlarmPreferences(context)
+                    alarmPrefs.clearAlarm()
+
+                    // 4) 네비게이션 처리
+                    onTurnAlarmOff()
+                },
+            contentAlignment = Alignment.Center
+        ){
+            Text(
+                text = "알람 중지",
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontSize = 18.sp,
+                    color = Color.Black
+                )
+            )
+        }
+
+        Spacer(Modifier.height(80.dp))
+
+        /*
         Button(
             modifier = Modifier
                 .size(320.dp, 56.dp),
@@ -227,6 +305,8 @@ fun SettedAlarmScreen(
         ){
             Text("알람 중지")
         }
+
+         */
     }
 }
 
@@ -295,13 +375,30 @@ private fun ActivityAnimation(
                     }
                 }
         ) {
-            Canvas(modifier = Modifier.fillMaxSize()) {
+            Canvas(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(vertical = 12.dp) // ✅ 상하단에 블러가 퍼질 12dp의 여유 공간 확보
+                    .blur(radius = 5.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)
+            ){
                 with(graphPainter) {
                     draw(
                         size = size,
                         colorFilter = ColorFilter.tint(graphTintColor)
                     )
                 }
+            }
+            Canvas(modifier = Modifier
+                .fillMaxSize()
+                .padding(vertical = 12.dp) // ✅ 상하단에 블러가 퍼질 12dp의 여유 공간 확보
+            ) {
+                with(graphPainter) {
+                    draw(
+                        size = size,
+                        colorFilter = ColorFilter.tint(graphTintColor)
+                    )
+                }
+
             }
         }
     }
@@ -390,7 +487,19 @@ fun getWakeUpTimeRange(hour:Int, minute: Int, isAm: Boolean, earlyWakeUpMinutes:
         ampm, earlyTotalMinute/60, earlyTotalMinute%60, hour, minute)
 }
 
-/* fuck you 0303
+fun earlyWakeUpText(hour:Int, minute: Int, isAm: Boolean, earlyWakeUpMinutes: Int): String{
+    var earlyTotalMinute: Int = (hour * 60 + minute) - earlyWakeUpMinutes
+    val ampm = if(isAm) "오전" else "오후"
+    if(earlyTotalMinute < 0) earlyTotalMinute += 12 * 60
+
+    return String.format(
+        Locale.getDefault(),
+        "%s  %d:%02d",
+        ampm, earlyTotalMinute/60, earlyTotalMinute%60
+    )
+}
+
+/* fuck you 0303 
 
 val context = LocalContext.current   // ✨ 추가
 
