@@ -288,10 +288,10 @@ fun InquireModalBottomSheet(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 1 .dp) // 시트 양옆에 살짝 여백을 주면 더 입체적입니다
+                .padding(horizontal = 0.5f .dp) // 시트 양옆에 살짝 여백을 주면 더 입체적입니다
                 // 배경: 반투명한 어두운 블루 톤
                 .background(
-                    color = Color(0x991A1C29),
+                    color = Color(0xFF565F8E).copy(alpha = 0.3f),
                     shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp)
                 )
                 // 테두리: 얇은 흰색 투명 선으로 '유리 가장자리' 효과

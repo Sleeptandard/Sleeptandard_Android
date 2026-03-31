@@ -40,6 +40,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.innerShadow
 import androidx.compose.ui.geometry.CornerRadius
@@ -84,6 +85,7 @@ fun QnAScreen(
     }
 
     var showInquireModal by remember{ mutableStateOf(false)}
+    val modalBlur = if(showInquireModal) 20.dp else 0.dp
 
     // 흰색 그림자
     val highlightColor1 = Color(0xFFB9C8DF).copy(alpha = 0.07f)
@@ -99,196 +101,203 @@ fun QnAScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(20.dp)
+            .blur(modalBlur)
     ) {
-        Spacer(Modifier.height(30.dp))
-
-        IconButton(
-            modifier = Modifier.size(32.dp),
-            onClick = onBack
-        ) {
-            Icon(
-                modifier = Modifier
-                    .size(32.dp),
-                painter = painterResource(AppIcons.QnAArrowBack),
-                contentDescription = "뒤로가기",
-            )
-
-        }
-
-        Spacer(Modifier.height(35.dp))
-
-        // 검색창
-        OutlinedTextField(
-            value = query,
-            onValueChange = { query = it },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(60.dp)
-                .drawBehind {
-                    // 흰색 그림자
-                    drawIntoCanvas { canvas ->
-                        val paint = Paint().asFrameworkPaint().apply {
-                            color = highlightColor1.toArgb()
-                            maskFilter =
-                                BlurMaskFilter(blurRadius1.toPx(), BlurMaskFilter.Blur.NORMAL)
-                        }
-
-                        canvas.nativeCanvas.drawRoundRect(
-                            offsetX1.toPx(), offsetY1.toPx(),
-                            size.width + offsetX1.toPx(), size.height + offsetY1.toPx(),
-                            28.dp.toPx(), 28.dp.toPx(),
-                            paint
-                        )
-                    }
-                    // 검은색 그림자
-                    drawIntoCanvas { canvas ->
-                        val paint = Paint().asFrameworkPaint().apply {
-                            color = highlightColor2.toArgb()
-                            maskFilter =
-                                BlurMaskFilter(blurRadius2.toPx(), BlurMaskFilter.Blur.NORMAL)
-                        }
-
-                        canvas.nativeCanvas.drawRoundRect(
-                            offsetX2.toPx(), offsetY2.toPx(),
-                            size.width + offsetX2.toPx(), size.height + offsetY2.toPx(),
-                            // 여기
-                            28.dp.toPx(), 28.dp.toPx(),
-                            paint
-                        )
-                    }
-
-                    val gradient = Brush.linearGradient(
-                        colors = listOf(
-                            Color(0xFF07101E),
-                            Color(0xFF101A2A)
-                        ),
-                        // 시작점을 박스의 정중앙(Center)으로 설정
-                        start = Offset(size.width / 2, size.height / 2),
-                        // 끝점을 박스의 우측 상단으로부터 2/3 지점 설정
-                        end = Offset(size.width, size.height * 2 / 3)
-                    )
-                    drawRoundRect(
-                        brush = gradient,
-                        cornerRadius = CornerRadius(30.dp.toPx(), 30.dp.toPx()) // 30dp만큼 둥글게
-                    )
-                }
-                // Inner shadow
-                .innerShadow(
-                    shape = RoundedCornerShape(28.dp),
-                    shadow = Shadow(
-                        radius = 25.dp,
-                        spread = (-12).dp,
-                        color = Color(0xFF030E1E).copy(0.8f),
-                        offset = DpOffset(x = 5.dp, 6.dp)
-                    )
-                ),
-            placeholder = {
-                Text(
-                    "키워드를 검색해보세요.",
-                    style = MaterialTheme.typography.bodyLarge.copy(
-                        fontSize = 14.sp,
-                        color = Color.White.copy(alpha = 0.8f),
-                    ),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            },
-
-            textStyle = MaterialTheme.typography.bodyMedium.copy(
-                fontSize = 14.sp,        // ✅ 입력 텍스트 크기
-                lineHeight = 18.sp       // ✅ 중요: height보다 작게
-            ),
-
-            leadingIcon = {
-                Icon(
-                    painter = painterResource(AppIcons.QnASearch),
-                    contentDescription = "검색",
-                    tint = Color.White
-                )
-            },
-
-            singleLine = true,
-
-            shape = RoundedCornerShape(10.dp),
-
-            colors = OutlinedTextFieldDefaults.colors(
-                //focusedContainerColor = Color(0x26F1F1F1),
-                //unfocusedContainerColor = Color(0x26F1F1F1),
-                focusedBorderColor = Color.Transparent,
-                unfocusedBorderColor = Color.Transparent,
-                cursorColor = Color.White,
-                focusedTextColor = Color.White,
-                unfocusedTextColor = Color.White
-            )
-        )
-
         Column(
             modifier = Modifier
-                .weight(1f)
-                .padding(horizontal = 10.dp)
-        ) {
-            Spacer(Modifier.height(39.dp))
+                .fillMaxSize()
+                .padding(20.dp)
+        ){
+            Spacer(Modifier.height(30.dp))
 
-            Text(
-                "자주 묻는 질문",
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    fontSize = 16.sp,
+            IconButton(
+                modifier = Modifier.size(32.dp),
+                onClick = onBack
+            ) {
+                Icon(
+                    modifier = Modifier
+                        .size(32.dp),
+                    painter = painterResource(AppIcons.QnAArrowBack),
+                    contentDescription = "뒤로가기",
+                )
+
+            }
+
+            Spacer(Modifier.height(35.dp))
+
+            // 검색창
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(60.dp)
+                    .drawBehind {
+                        // 흰색 그림자
+                        drawIntoCanvas { canvas ->
+                            val paint = Paint().asFrameworkPaint().apply {
+                                color = highlightColor1.toArgb()
+                                maskFilter =
+                                    BlurMaskFilter(blurRadius1.toPx(), BlurMaskFilter.Blur.NORMAL)
+                            }
+
+                            canvas.nativeCanvas.drawRoundRect(
+                                offsetX1.toPx(), offsetY1.toPx(),
+                                size.width + offsetX1.toPx(), size.height + offsetY1.toPx(),
+                                28.dp.toPx(), 28.dp.toPx(),
+                                paint
+                            )
+                        }
+                        // 검은색 그림자
+                        drawIntoCanvas { canvas ->
+                            val paint = Paint().asFrameworkPaint().apply {
+                                color = highlightColor2.toArgb()
+                                maskFilter =
+                                    BlurMaskFilter(blurRadius2.toPx(), BlurMaskFilter.Blur.NORMAL)
+                            }
+
+                            canvas.nativeCanvas.drawRoundRect(
+                                offsetX2.toPx(), offsetY2.toPx(),
+                                size.width + offsetX2.toPx(), size.height + offsetY2.toPx(),
+                                // 여기
+                                28.dp.toPx(), 28.dp.toPx(),
+                                paint
+                            )
+                        }
+
+                        val gradient = Brush.linearGradient(
+                            colors = listOf(
+                                Color(0xFF07101E),
+                                Color(0xFF101A2A)
+                            ),
+                            // 시작점을 박스의 정중앙(Center)으로 설정
+                            start = Offset(size.width / 2, size.height / 2),
+                            // 끝점을 박스의 우측 상단으로부터 2/3 지점 설정
+                            end = Offset(size.width, size.height * 2 / 3)
+                        )
+                        drawRoundRect(
+                            brush = gradient,
+                            cornerRadius = CornerRadius(30.dp.toPx(), 30.dp.toPx()) // 30dp만큼 둥글게
+                        )
+                    }
+                    // Inner shadow
+                    .innerShadow(
+                        shape = RoundedCornerShape(28.dp),
+                        shadow = Shadow(
+                            radius = 25.dp,
+                            spread = (-12).dp,
+                            color = Color(0xFF030E1E).copy(0.8f),
+                            offset = DpOffset(x = 5.dp, 6.dp)
+                        )
+                    ),
+                placeholder = {
+                    Text(
+                        "키워드를 검색해보세요.",
+                        style = MaterialTheme.typography.bodyLarge.copy(
+                            fontSize = 14.sp,
+                            color = Color.White.copy(alpha = 0.8f),
+                        ),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                },
+
+                textStyle = MaterialTheme.typography.bodyMedium.copy(
+                    fontSize = 14.sp,        // ✅ 입력 텍스트 크기
+                    lineHeight = 18.sp       // ✅ 중요: height보다 작게
+                ),
+
+                leadingIcon = {
+                    Icon(
+                        painter = painterResource(AppIcons.QnASearch),
+                        contentDescription = "검색",
+                        tint = Color.White
+                    )
+                },
+
+                singleLine = true,
+
+                shape = RoundedCornerShape(10.dp),
+
+                colors = OutlinedTextFieldDefaults.colors(
+                    //focusedContainerColor = Color(0x26F1F1F1),
+                    //unfocusedContainerColor = Color(0x26F1F1F1),
+                    focusedBorderColor = Color.Transparent,
+                    unfocusedBorderColor = Color.Transparent,
+                    cursorColor = Color.White,
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White
                 )
             )
 
-            Spacer(Modifier.height(24.dp))
-
-            // 리스트
-            LazyColumn(
+            Column(
                 modifier = Modifier
-                    .fillMaxWidth(),
-                contentPadding = PaddingValues(vertical = 8.dp),
+                    .weight(1f)
+                    .padding(horizontal = 10.dp)
             ) {
-                items(filtered) { item ->
-                    QnAListItem(
-                        text = item.title,
-                        onClick = { onClickItem(item.id) } // ✅ id 넘김
+                Spacer(Modifier.height(39.dp))
+
+                Text(
+                    "자주 묻는 질문",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 16.sp,
+                    )
+                )
+
+                Spacer(Modifier.height(24.dp))
+
+                // 리스트
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth(),
+                    contentPadding = PaddingValues(vertical = 8.dp),
+                ) {
+                    items(filtered) { item ->
+                        QnAListItem(
+                            text = item.title,
+                            onClick = { onClickItem(item.id) } // ✅ id 넘김
+                        )
+                    }
+                }
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+            ) {
+                Button(
+                    onClick = {
+                        showInquireModal = true
+                        //onClickAsk
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(60.dp),
+                    shape = RoundedCornerShape(100.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFFF1F4F9),
+                        contentColor = Color.Black
+                    )
+                ) {
+                    Text(
+                        text = "문의하기",
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            color = Color.Black,
+                            fontSize = 18.sp
+                        )
                     )
                 }
             }
-        }
+            Spacer(Modifier.height(47.dp))
 
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-        ) {
-            Button(
-                onClick = {
-                    showInquireModal = true
-                    //onClickAsk
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(60.dp),
-                shape = RoundedCornerShape(100.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFFF1F4F9),
-                    contentColor = Color.Black
-                )
-            ) {
-                Text(
-                    text = "문의하기",
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        color = Color.Black,
-                        fontSize = 18.sp
-                    )
+            if(showInquireModal){
+                InquireModalBottomSheet(
+                    onDismiss = { showInquireModal = false },
+                    onSubmit = onSubmit
                 )
             }
         }
-        Spacer(Modifier.height(47.dp))
 
-        if(showInquireModal){
-            InquireModalBottomSheet(
-                onDismiss = { showInquireModal = false },
-                onSubmit = onSubmit
-            )
-        }
     }
 }
 
