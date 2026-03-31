@@ -126,7 +126,7 @@ fun AppNav(
         /** 로그인 데모 **/
         composable(Screen.LoginDemo.route){
             LoginDemoScreen(
-                onComplete = { greeting ->
+                onConfirm = { greeting ->
                     rememberNavController.navigate(Screen.Home.route)
                     Toast.makeText(context, greeting, Toast.LENGTH_SHORT).show()
                 }
@@ -214,6 +214,11 @@ fun AppNav(
                 onFinish = {
                     alarmPrefs.setFirstRunCompleted()
                     rememberNavController.popBackStack()
+                    when{
+                        // TODO: 로그인 정보가 없는경우 -> Screen.LoginDemo.route
+                        alarmPrefs.isFirstRun() -> Screen.Tutorial.route
+                        else -> Screen.Home.route
+                    }
                     rememberNavController.navigate(Screen.Home.route)
                 }
             )

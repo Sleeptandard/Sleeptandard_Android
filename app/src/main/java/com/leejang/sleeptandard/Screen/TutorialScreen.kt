@@ -2,16 +2,23 @@ package com.leejang.sleeptandard.Screen
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -20,10 +27,12 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -36,9 +45,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.dropShadow
+import androidx.compose.ui.draw.innerShadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.shadow.Shadow
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.painterResource
@@ -211,11 +227,75 @@ fun StartPage(){
 
             Spacer(Modifier.height(110.dp))
         }
+        BoxWithConstraints(modifier = Modifier.fillMaxWidth().height(24.dp)) {
+
+            val targetX = maxWidth * (51f / 72f) - 6.dp
+            val targetY = maxHeight * (1f / 2f) - 6.dp
+
+            // 1. 깜빡임(Pulse)을 위한 무한 애니메이션 설정
+            val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+            val alpha by infiniteTransition.animateFloat(
+                initialValue = 0.3f, // 가장 흐릴 때
+                targetValue = 0.9f,  // 가장 선명할 때
+                animationSpec = infiniteRepeatable(
+                    animation = tween(1500, easing = LinearEasing), // 1.5초 간격
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "alpha"
+            )
+            // 2. 드롭 쉐도우와 원을 겹치기 위한 Box
+            Box(
+                modifier = Modifier
+                    .offset(x = targetX, y = targetY),
+                contentAlignment = Alignment.Center) {
+
+                // ✅ 레이어 1: 깜빡이는 드롭 쉐도우 (광원 효과)
+                Box(
+                    modifier = Modifier
+                        .size(16.dp) // 원보다 약간 크게 설정하여 빛이 퍼지게 함
+                        .graphicsLayer {
+                            this.alpha = alpha // 애니메이션되는 투명도 적용
+                            compositingStrategy = CompositingStrategy.Offscreen // 블러 성능 최적화
+                        }
+                        .blur(radius = 25.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)
+                        .background(
+                            // "알람의 정석" 메인 테마인 민트/블루 그라데이션
+                            brush = Brush.radialGradient(listOf(Color(0xFF437AC7), Color(0xFFAAEDF2))),
+                            shape = CircleShape
+                        )
+                )
+
+                // ✅ 레이어 2: 실제 12.dp 크기의 흰색 원
+                Box(
+                    modifier = Modifier
+                        .size(12.dp)
+                        .background(Color.White, CircleShape)
+                )
+            }
+            /*
+            Box(
+                modifier = Modifier
+                    .offset(x = targetX, y = targetY) // 계산된 위치만큼 옆으로 밀기
+                    .size(12.dp)
+                    .background(Color(0xFFD9D9D9), CircleShape)
+                    .border(width = 1.dp, color = Color(0xFFAFF4F9), shape = CircleShape)
+                    .innerShadow(
+                        shape = CircleShape,
+                        shadow = Shadow(radius = 4.dp, color = Color(0xFFAFF4F9), spread = 3.dp)
+                    )
+                    .dropShadow(
+                        shape = CircleShape,
+                        shadow = Shadow(radius = 12.dp, color = Color(0xFFAFF4F9), spread = 1.dp)
+                    )
+            )
+
+             */
+        }
         Image(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(150.dp),
-            painter = painterResource(AppIcons.TutorialGraph),
+            painter = painterResource(AppIcons.TutorialGraph2),
             contentDescription = "그래프",
             contentScale = ContentScale.Fit
         )
