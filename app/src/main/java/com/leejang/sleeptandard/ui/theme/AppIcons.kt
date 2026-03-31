@@ -48,6 +48,12 @@ object AppIcons {
     @DrawableRes val SettingsQuestion = R.drawable.ic_settings_question
     @DrawableRes val SettingsActivity = R.drawable.ic_settings_activity
 
+    @DrawableRes val SettingsAccountManagement = R.drawable.ic_setting_account_management
+    @DrawableRes val SettingsCustomerService = R.drawable.ic_setting_customer_service
+    @DrawableRes val SettingsDataSending = R.drawable.ic_setting_data_sending
+    @DrawableRes val SettingsSysAccessibility = R.drawable.ic_setting_system_accessibilty
+    @DrawableRes val SettingsTutorial = R.drawable.ic_setting_tutorial
+
     // QnA
     @DrawableRes val QnAArrowBack = R.drawable.ic_qna_arrowback
     @DrawableRes val QnAQ = R.drawable.ic_qna_q
