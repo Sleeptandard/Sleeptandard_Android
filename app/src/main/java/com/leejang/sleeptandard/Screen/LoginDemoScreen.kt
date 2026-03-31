@@ -54,11 +54,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Brush.Companion.linearGradient
+import androidx.compose.ui.graphics.Canvas
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawscope.draw
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
@@ -1196,7 +1201,7 @@ fun NicknameStep(
 
 @Composable
 fun GenderBirthStep(viewModel: AuthViewModel) {
-    val buttonGradient = Brush.linearGradient(
+    val buttonGradient = linearGradient(
         listOf(Color(0xFF437AC7), Color(0xFFAFF4F9))
     )
 
@@ -1245,7 +1250,8 @@ fun GenderBirthStep(viewModel: AuthViewModel) {
                                 selected = (text == selectedOption),
                                 onClick = {
                                     onOptionSelected(text)
-                                    viewModel.updateGender(text) },
+                                    viewModel.updateGender(text)
+                                },
                                 role = Role.RadioButton
                             )
                             .padding(end = 12.dp),
@@ -1293,7 +1299,7 @@ fun GenderBirthStep(viewModel: AuthViewModel) {
                 .height(60.dp)
                 .clip(RoundedCornerShape(100.dp))
                 .background(Color.White)
-                .clickable{
+                .clickable {
                     viewModel.openDatePicker() // ✅ 클릭 시 모달 오픈 신호 전달
                 },
             verticalArrangement = Arrangement.Center,
@@ -1492,7 +1498,7 @@ fun CompletedStep(
             modifier = Modifier
                 .clip(RoundedCornerShape(100.dp))
                 .fillMaxWidth()
-                .clickable{
+                .clickable {
                     onConfirm("홈")
                 },
             contentAlignment = Alignment.Center
@@ -1552,7 +1558,8 @@ fun IndicatorGlassBox(
             modifier = Modifier
                 .matchParentSize()
                 .blur(100.dp) // 유리 뒤를 흐리게
-                .background( color = backgroundColor
+                .background(
+                    color = backgroundColor
                     /*
                     brush = Brush.verticalGradient(
                         colors = listOf(
@@ -1619,7 +1626,7 @@ fun AuthStepIndicator(
                 .height(56.dp)
         ) {
 
-            val stepWidth = (maxWidth - 8.dp) / numberOfSteps
+            val stepWidth = (maxWidth) / numberOfSteps
             val targetOffset = stepWidth * currentIndex
 
             // 위치 이동 애니메이션
@@ -1629,11 +1636,32 @@ fun AuthStepIndicator(
                 label = "step_highlight_move"
             )
 
-            Column(
+            Box(
                 modifier = Modifier
-                    .fillMaxSize(),
-                verticalArrangement = Arrangement.Center
+                    .fillMaxSize()
+                    .drawWithContent{
+                        val eraseEdge = animatedOffset / maxWidth
+                        val drawEdge = (animatedOffset + stepWidth) / maxWidth
+
+                        Log.d("eraseEdge", "erase: ${eraseEdge}, draw: ${drawEdge}")
+                        clipRect(
+                            left = eraseEdge,
+                            right = drawEdge
+                        ){
+                            this@drawWithContent.drawContent()
+                        }
+                    },
+                contentAlignment = Alignment.Center,
             ){
+                Canvas(
+                    modifier = Modifier.fillMaxWidth().height(8.dp).blur(15.dp)
+                ){
+                    drawRect(
+                        size = size,
+                        brush = barGradient
+                    )
+                }
+                /*
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1641,6 +1669,8 @@ fun AuthStepIndicator(
                         .clip(RoundedCornerShape(100.dp))
                         .background(brush = barGradient)
                 )
+
+                 */
             }
 
             IndicatorGlassBox(
@@ -1805,7 +1835,7 @@ fun BirthDatePicker(
                     .background(
                         color = Color(0xFFE0E0E0)
                     )
-                    .clickable{
+                    .clickable {
                         viewModel.closeDatePicker()
                     },
                 contentAlignment = Alignment.Center
@@ -1826,7 +1856,7 @@ fun BirthDatePicker(
                     .background(
                         color = Color(0xFFAFF4F9)
                     )
-                    .clickable{
+                    .clickable {
                         viewModel.confirmDatePickerSelection() // ✅ 최종 값 확정 및 모달 닫기
                     },
                 contentAlignment = Alignment.Center
