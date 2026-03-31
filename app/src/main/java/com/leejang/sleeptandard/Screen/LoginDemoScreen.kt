@@ -330,6 +330,8 @@ fun LoginDemoScreen(
                 is AuthStep.FindPassword -> PasswordChangeStep(
                     viewModel = authViewModel,
                     onConfirm = {
+                        /** 확인버튼 필요 없지 않음? **/
+                        // 일단 재설정 창 확인용으로만 존재
                         authViewModel.resetPassword()
                     },
                     onResend = {
