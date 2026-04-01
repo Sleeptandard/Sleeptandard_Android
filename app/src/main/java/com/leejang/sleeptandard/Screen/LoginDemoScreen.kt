@@ -84,7 +84,19 @@ import com.leejang.sleeptandard.Component.BirthDatePicker
 import com.leejang.sleeptandard.ui.theme.AppIcons
 import kotlinx.coroutines.launch
 import java.util.Locale
+import com.leejang.sleeptandard.backend.SupabaseClientProvider
+import io.github.jan.supabase.auth.auth
+import io.github.jan.supabase.auth.providers.builtin.Email
+import io.github.jan.supabase.postgrest.postgrest
+import io.github.jan.supabase.postgrest.query.Columns
+import kotlinx.serialization.Serializable
 
+
+// profiles 테이블에 INSERT/SELECT 할 때 사용하는 데이터 클래스
+@Serializable data class ProfileInsert(val id: String, val nickname: String, val email: String)
+
+// 이메일 존재 여부 조회용
+@Serializable data class ProfileEmail(val email: String)
 
 // 유저의 로그인/회원가입 진행 단계 정의 및 email + 비번 저장 클래스
 sealed class AuthStep {
@@ -105,6 +117,8 @@ sealed class AuthStep {
 class AuthViewModel : ViewModel() {
     var currentStep by mutableStateOf<AuthStep>(AuthStep.EmailInput)
         private set
+
+    private val supabase = SupabaseClientProvider.client
 
     // ✅ 1. 모달 표시 상태 (true일 때만 화면에 Dialog가 뜸)
     var showDatePickerModal by mutableStateOf(false)
@@ -181,20 +195,27 @@ class AuthViewModel : ViewModel() {
 
     // 이메일 확인 API 호출 로직
     // 1단계: 이메일 확인 로직
-    fun checkEmail(
-    ) {
+    fun checkEmail() {
         viewModelScope.launch {
-            // 더미 서버에서 확인
-            val exists = AuthRepository.isEmailExists(email)
-            currentStep = if (exists) AuthStep.LoginPassword(email)
-            else AuthStep.SignupPassword(email)
+            try {
+                // email 컬럼만 요청해서 역직렬화 문제 방지
+                val result =
+                        supabase.postgrest["profiles"]
+                                .select(columns = Columns.list("email")) {
+                                    filter { eq("email", email) }
+                                }
+                                .decodeList<ProfileEmail>()
+                currentStep =
+                        if (result.isNotEmpty()) {
+                            AuthStep.LoginPassword(email)
+                        } else {
+                            AuthStep.SignupPassword(email)
+                        }
+            } catch (e: Exception) {
+                Log.e("AuthVM", "checkEmail 실패: ${e.message}", e)
+                currentStep = AuthStep.LoginPassword(email)
+            }
         }
-
-        //TODO: 백엔드 통신받은 사인으로 분기
-        /*
-        cureentStep = if (exist) AuthStep.LoginPassword(email)
-            else AuthStep.SignupPassword(email)
-         */
     }
 
     fun findingPassword(){
@@ -207,11 +228,21 @@ class AuthViewModel : ViewModel() {
 
     // 2단계(경로A): 로그인 실행
     fun performLogin(onSuccess: (String) -> Unit, onError: () -> Unit) {
-        val user = AuthRepository.verifyLogin(email, password)
-        if (user != null) {
-            onSuccess(user.nickname)
-        } else {
-            onError()
+        viewModelScope.launch {
+            try {
+                supabase.auth.signInWith(Email) {
+                    this.email = this@AuthViewModel.email
+                    this.password = this@AuthViewModel.password
+                }
+                val uid = supabase.auth.currentUserOrNull()?.id ?: ""
+                val profile =
+                        supabase.postgrest["profiles"]
+                                .select { filter { eq("id", uid) } }
+                                .decodeSingle<ProfileInsert>()
+                onSuccess(profile.nickname)
+            } catch (e: Exception) {
+                onError()
+            }
         }
     }
 
@@ -226,10 +257,26 @@ class AuthViewModel : ViewModel() {
 
     // 3단계: 회원가입 완료 및 가입 처리
     fun completeSignup(onComplete: (String) -> Unit) {
-        val newUser = User(email, password, nickname, gender, birthdate)
-        AuthRepository.addUser(newUser)
-        onComplete(nickname)
-        currentStep = AuthStep.Completed(nickname)
+        viewModelScope.launch {
+            try {
+                // 1) Supabase Auth 가입
+                supabase.auth.signUpWith(Email) {
+                    this.email = this@AuthViewModel.email
+                    this.password = this@AuthViewModel.password
+                }
+                // 2) 발급된 UID 가져오기
+                val uid = supabase.auth.currentUserOrNull()?.id ?: ""
+                // 3) profiles 테이블에 닉네임 + 이메일 저장
+                supabase.postgrest["profiles"].insert(
+                        ProfileInsert(id = uid, nickname = nickname, email = email)
+                )
+                
+                onComplete(nickname)
+                currentStep = AuthStep.Completed(nickname)
+            } catch (e: Exception) {
+                Log.e("AuthVM", "completeSignup 실패: ${e.message}", e)
+            }
+        }
     }
 
     fun goToNicknameStep(email: String, pw: String) {
