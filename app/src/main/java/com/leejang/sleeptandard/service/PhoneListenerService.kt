@@ -14,6 +14,7 @@ import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import com.leejang.sleeptandard.ClassFile.AlarmReceiver
 import com.leejang.sleeptandard.Prefs.AlarmPreferences
+import com.leejang.sleeptandard.backend.CsvUploadManager
 import com.google.android.gms.wearable.ChannelClient
 import com.google.android.gms.wearable.MessageEvent
 import com.google.android.gms.wearable.Wearable
@@ -213,6 +214,9 @@ class PhoneListenerService : WearableListenerService() {
             
             // [디버깅] 파일 내용 검증
             validateReceivedFile(outputFile)
+
+            // [Supabase Storage] CSV 파일 서버에 업로드 (백그라운드 처리)
+            CsvUploadManager.uploadCsvFile(outputFile)
             
             // 알림 표시
             showFileReceivedNotification(fileName, totalBytes)
