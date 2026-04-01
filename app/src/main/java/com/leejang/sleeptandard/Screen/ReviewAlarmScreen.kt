@@ -173,7 +173,8 @@ fun ReviewAlarmScreen(
 fun SemiCircularSlider(
     value: Float, // 0.0f ~ 1.0f
     onValueChange: (Float) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    touchEnabled: Boolean = true
 ) {
     val strokeWidth = 24.dp
     val density = LocalDensity.current
@@ -222,13 +223,15 @@ fun SemiCircularSlider(
                     .fillMaxSize()
                     .pointerInput(Unit) {
                         detectDragGestures { change, _ ->
-                            // ✅ 3. 반원의 위쪽 영역(y <= 중심선)에서만 값 변경
-                            val touchY = change.position.y
-                            if (touchY <= width / 2f) {
-                                val touchX = change.position.x
-                                val normalized =
-                                    ((touchX - sideMarginPx) / usableWidth).coerceIn(0f, 1f)
-                                onValueChange(normalized)
+                            if(touchEnabled) {
+                                // ✅ 3. 반원의 위쪽 영역(y <= 중심선)에서만 값 변경
+                                val touchY = change.position.y
+                                if (touchY <= width / 2f) {
+                                    val touchX = change.position.x
+                                    val normalized =
+                                        ((touchX - sideMarginPx) / usableWidth).coerceIn(0f, 1f)
+                                    onValueChange(normalized)
+                                }
                             }
                         }
                     }

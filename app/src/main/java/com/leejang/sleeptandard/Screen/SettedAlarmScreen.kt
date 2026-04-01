@@ -311,7 +311,7 @@ fun SettedAlarmScreen(
 }
 
 @Composable
-private fun ActivityAnimation(
+fun ActivityAnimation(
     modifier: Modifier = Modifier
 ){
     val graphIcon: ImageVector = ImageVector.vectorResource(id = AppIcons.SettedActivityGraph)
