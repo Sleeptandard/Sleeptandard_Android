@@ -362,15 +362,7 @@ fun HomeScreen(
                     .fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                WakeUpWindow(
-                    modifier = Modifier
-                        .fillMaxWidth(),
-                    onValueChange = {earlyWakeUpMinutes = it},
-                    selectedHour = selectedHour,
-                    selectedMinute = selectedMinute,
-                    selectedIsAm = selectedIsAm,
-                    earlyWakeUpMinutes = earlyWakeUpMinutes
-                )
+
                 /*
                 // 기상 윈도우 슬라이더 부분
                 Row(

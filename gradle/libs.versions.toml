@@ -21,6 +21,7 @@ foundationLayoutVersion = "1.10.5"
 cameraCamera2Pipe = "1.7.0-alpha01"
 project-versionCode = "14"
 project-versionName = "1.2.1"
+animationCoreVersion = "1.10.6"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -48,6 +49,7 @@ androidx-wear-tooling-preview = { group = "androidx.wear", name = "wear-tooling-
 androidx-compose-animation = { group = "androidx.compose.animation", name = "animation", version.ref = "animation" }
 androidx-foundation-layout = { group = "androidx.compose.foundation", name = "foundation-layout", version.ref = "foundationLayoutVersion" }
 androidx-camera-camera2-pipe = { group = "androidx.camera", name = "camera-camera2-pipe", version.ref = "cameraCamera2Pipe" }
+androidx-animation-core = { group = "androidx.compose.animation", name = "animation-core", version.ref = "animationCoreVersion" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
