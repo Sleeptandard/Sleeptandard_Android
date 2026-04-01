@@ -73,6 +73,7 @@ dependencies {
     implementation(libs.androidx.compose.ui.text)
     implementation(libs.androidx.compose.animation.core)
     implementation(libs.androidx.compose.animation)
+    implementation(libs.androidx.foundation.layout)
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
@@ -106,6 +107,6 @@ dependencies {
     implementation("io.github.jan-tennert.supabase:postgrest-kt")
     implementation("io.ktor:ktor-client-okhttp:3.1.2")
 
-    // 워치앱 선언 (현재  비활성화 중)
-    // wearApp(project(":wear"))
+    // 워치앱 선언 (현재 활성화 중)
+    wearApp(project(":wear"))
 }

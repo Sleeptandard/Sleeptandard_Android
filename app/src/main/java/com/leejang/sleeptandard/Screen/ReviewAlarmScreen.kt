@@ -1,11 +1,16 @@
 package com.leejang.sleeptandard.Screen
 
+import android.graphics.BlurMaskFilter
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -25,15 +30,28 @@ import androidx.compose.material3.MaterialTheme
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Brush.Companion.horizontalGradient
+import androidx.compose.ui.graphics.Brush.Companion.linearGradient
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Paint
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onSizeChanged
@@ -44,8 +62,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.leejang.sleeptandard.ui.theme.AppIcons
 import kotlin.math.roundToInt
-
-enum class WakeCondition { BAD, SOSO, GOOD }
 
 @Composable
 fun ReviewAlarmScreen(
@@ -59,148 +75,272 @@ fun ReviewAlarmScreen(
         )
     )
 
-    var feedback1 by remember { mutableIntStateOf(-1) } // 무응답 상태
-    var feedback2 by remember { mutableIntStateOf(-1) }
-    var feedback3 by remember { mutableIntStateOf(-1) }
-    val answerList1 = listOf<String>("멍함", "보통", "선명함")
-    val answerList2 = listOf<String>("무거움", "보통", "가벼움")
-    val answerList3 = listOf<String>("많이졸림", "보통", "안졸림")
+    val buttonGradient = linearGradient(
+        listOf(Color(0xFF437AC7),
+            Color(0xFFAFF4F9))
+    )
 
+    var feedbackScore by remember { mutableFloatStateOf(0.5f) } // 0.0f ~ 1.0f
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(linearGradation),
-        horizontalAlignment = Alignment.CenterHorizontally
+            .background(linearGradation)
+            .padding(horizontal = 20.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
     ) {
-        Spacer(modifier = Modifier.weight(112f))
 
-        Column(
+
+        Spacer(Modifier.weight(100f))
+
+        Text(
+            text = "오늘 기상 점수는 몇 점인가요?",
+            style = MaterialTheme.typography.bodyMedium.copy(
+                fontSize = 25.sp,
+                color = Color.White
+            )
+        )
+
+        Spacer(Modifier.height(10.dp))
+
+        Text(
+            text = "얼마나 개운하게 일어났는지 알려주세요",
+            style = MaterialTheme.typography.bodyMedium.copy(
+                fontSize = 18.sp,
+                color = Color.White.copy(alpha = 0.7f)
+            )
+        )
+
+        Spacer(Modifier.weight(104f))
+
+        SemiCircularSlider(
+            value = feedbackScore,
+            onValueChange = { score -> feedbackScore = score }
+        )
+
+        Spacer(Modifier.weight(104f))
+
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .weight(140f)
-                .background(Color.Transparent),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
+                .clip(RoundedCornerShape(100.dp))
+                .clickable{
+                    // TODO: 백엔드 연결 로직
+                    onSubmit()
+                },
+            contentAlignment = Alignment.Center
+        ){
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(60.dp)
+                    .background(brush = buttonGradient)
+                    .blur(30.dp)
+                    .border(
+                        width = 2.dp,
+                        brush = Brush.verticalGradient(
+                            colors = listOf(
+                                Color.White.copy(alpha = 0.4f), // 테두리 위쪽 (빛남)
+                                Color.Transparent,             // 테두리 중간 (투명)
+                                Color.White.copy(alpha = 0.1f)  // 테두리 아래쪽 (은은함)
+                            )
+                        ),
+                        shape = RoundedCornerShape(24.dp)
+                    ),
+                contentAlignment = Alignment.Center
+            ){
+
+            }
+
             Text(
-                text = "1. 지금 정신이 얼마나 또렷한가요?",
+                text = "제출",
                 style = MaterialTheme.typography.bodyMedium.copy(
                     fontSize = 18.sp,
                     color = Color.White
-                ),
-            )
-
-            Spacer(modifier = Modifier.height(26.dp))
-
-
-
-            DifficultySelectorCustomDraggable(
-                value = feedback1,
-                onValueChange = { feedback1 = it },
-                answerList = answerList1
+                )
             )
 
         }
-        Spacer(modifier = Modifier.weight(65f))
-
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(140f)
-                .background(Color.Transparent),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            if (feedback1 != -1) {
-
-                Text("2. 지금 몸 상태는 어떤가요?",
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontSize = 18.sp,
-                        color = Color.White)
-                )
-
-                Spacer(modifier = Modifier.height(26.dp))
 
 
+        Spacer(Modifier.height(90.dp))
 
-                DifficultySelectorCustomDraggable(
-                    value = feedback2,
-                    onValueChange = { feedback2 = it },
-                    answerList = answerList2
-                )
-
-
-            }
-        }
-
-        Spacer(modifier = Modifier.weight(65f))
-
-
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(140f)
-                .background(Color.Transparent),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            if (feedback2 != -1) {
-
-                Text("3. 지금 졸린 정도는 어떤가요?",
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontSize = 18.sp,
-                        color = Color.White)
-                )
-
-                Spacer(modifier = Modifier.height(26.dp))
-
-
-                DifficultySelectorCustomDraggable(
-                    value = feedback3,
-                    onValueChange = { feedback3 = it },
-                    answerList = answerList3
-                )
-
-
-            }
-        }
-        Spacer(modifier = Modifier.weight(65f))
-
-
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(50f)
-                .background(Color.Transparent),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            if (feedback3 != -1) {
-
-
-                // 제출 버튼
-                Button(
-                    onClick = onSubmit,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp)
-                        .padding(horizontal = 25.dp),
-                    shape = RoundedCornerShape(100.dp),
-                    colors = ButtonDefaults.buttonColors().copy(
-                        containerColor = Color(0x0DFFFFFF),
-                        contentColor = Color(0xFFF2F6FA)
-                    )
-                ) {
-                    Text("제출")
-                }
-            }
-
-        }
-
-
-
-        Spacer(Modifier.weight(74f))
     }
 
 }
 
+@Composable
+fun SemiCircularSlider(
+    value: Float, // 0.0f ~ 1.0f
+    onValueChange: (Float) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val strokeWidth = 24.dp
+    val density = LocalDensity.current
+
+    // 점수에 따른 광원 색상
+    val glowColor = when {
+        value < 0.33f -> Color(0xFFFF5967)
+        value < 0.66f -> Color(0xFFFFE359)
+        else -> Color(0xFF59FF85)
+    }
+
+    val sliderGradient = horizontalGradient(
+        listOf(
+            Color(0xFF1C447C),
+            Color(0xFF050C16),
+
+            )
+    )
+
+    Box(
+        modifier = Modifier
+            .size(300.dp)
+            .clip(shape = CircleShape)
+            .background(color = Color.White)
+        ,
+        contentAlignment = Alignment.Center
+    ){
+        BoxWithConstraints(
+            modifier = modifier.size(265.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            val width = constraints.maxWidth.toFloat()
+            val strokeWidthPx = with(density) { strokeWidth.toPx() }
+
+            // ✅ 1. 조작 가능한 실제 가로 길이 및 마진 계산
+            // 트랙의 두께 절반 지점부터 반대쪽 두께 절반 지점까지를 100% 범위로 잡습니다.
+            val sideMarginPx = strokeWidthPx / 2
+            val usableWidth = width - (2 * sideMarginPx)
+
+            // ✅ 2. 트랙 중앙선 반지름 계산 (손잡이 정렬용)
+            val centerRadius = (width - strokeWidthPx) / 2f
+            val centerOffset = Offset(width / 2, width / 2)
+
+            Canvas(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(Unit) {
+                        detectDragGestures { change, _ ->
+                            // ✅ 3. 반원의 위쪽 영역(y <= 중심선)에서만 값 변경
+                            val touchY = change.position.y
+                            if (touchY <= width / 2f) {
+                                val touchX = change.position.x
+                                val normalized =
+                                    ((touchX - sideMarginPx) / usableWidth).coerceIn(0f, 1f)
+                                onValueChange(normalized)
+                            }
+                        }
+                    }
+            ) {
+                // A. 배경 트랙
+                drawArc(
+                    color = Color(0xFF050C16).copy(alpha = 0.1f),
+                    startAngle = 180f,
+                    sweepAngle = 180f,
+                    useCenter = false,
+                    topLeft = Offset(sideMarginPx, sideMarginPx),
+                    size = Size(centerRadius * 2, centerRadius * 2),
+                    style = Stroke(width = strokeWidthPx, cap = StrokeCap.Round)
+                )
+
+                // B. 활성 트랙 (애니메이션 없이 즉각 반응)
+                drawArc(
+                    brush = sliderGradient,
+                    startAngle = 180f,
+                    sweepAngle = 180f * value,
+                    useCenter = false,
+                    topLeft = Offset(sideMarginPx, sideMarginPx),
+                    size = Size(centerRadius * 2, centerRadius * 2),
+                    style = Stroke(width = strokeWidthPx, cap = StrokeCap.Round)
+                )
+
+                // C. ✅ 손잡이 좌표: 중앙선 반지름(centerRadius)을 기준으로 계산
+                val thumbAngle = Math.toRadians(180.0 + (180.0 * value))
+                val thumbX = centerOffset.x + centerRadius * kotlin.math.cos(thumbAngle).toFloat()
+                val thumbY = centerOffset.y + centerRadius * kotlin.math.sin(thumbAngle).toFloat()
+
+                // 손잡이 그림자
+                drawIntoCanvas { canvas ->
+                    val shadowPaint = Paint().asFrameworkPaint().apply {
+                        color = Color.Black.copy(alpha = 0.3f).toArgb()
+                        maskFilter = BlurMaskFilter(8.dp.toPx(), BlurMaskFilter.Blur.NORMAL)
+                    }
+                    canvas.nativeCanvas.drawCircle(thumbX, thumbY, 24.dp.toPx(), shadowPaint)
+                }
+
+                // 손잡이 본체
+                drawCircle(
+                    color = Color.White,
+                    radius = 20.dp.toPx(),
+                    center = Offset(thumbX, thumbY)
+                )
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 50.dp, start = 5.dp, end = 5.dp),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ){
+                Text(
+                    text = "-",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        color = Color(0xFF1C447C),
+                        fontSize = 25.sp
+                    )
+                )
+
+                Text(
+                    text = "+",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        color = Color(0xFF1C447C),
+                        fontSize = 25.sp
+                    )
+                )
+            }
+
+
+
+            // 5. 중앙 텍스트 (0 ~ 100점)
+            Row(
+                verticalAlignment = Alignment.Bottom) {
+                Text(
+                    modifier = Modifier.alignByBaseline(),
+                    text = "${(value * 100).toInt()}",
+                    style = MaterialTheme.typography.bodyLarge.copy(
+                        fontSize = 50.sp,
+                        color = Color.Black,
+                    ),
+
+                    )
+                Text(
+                    modifier = Modifier.alignByBaseline(),
+                    text = "점",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        color = Color.Black,
+                        fontSize = 25.sp,
+
+                        ))
+            }
+        }
+        // 4. 하단 광원 효과 (Glow)
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .height(60.dp)
+                .blur(10.dp)
+                .background(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(Color.Transparent, glowColor),
+                    )
+                )
+        )
+    }
+}
+
+/* R.I.P
 @Composable
 fun DifficultySelectorCustomDraggable(
     value: Int, // -1=무응답 0=쉬움, 1=보통, 2=어려움
@@ -373,3 +513,5 @@ fun DifficultySelectorCustomDraggable(
         }
     }
 }
+
+ */
