@@ -17,6 +17,15 @@ import com.leejang.sleeptandard.Permission.checkSetExactAlarms
 import com.leejang.sleeptandard.Prefs.AlarmPreferences
 import com.leejang.sleeptandard.backend.SupabaseClientProvider
 import io.github.jan.supabase.auth.auth
+import kotlinx.coroutines.runBlocking
+import android.widget.Toast
+import androidx.lifecycle.lifecycleScope
+import com.leejang.sleeptandard.Screen.ProfileInsert
+import io.github.jan.supabase.postgrest.postgrest
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
 // 마이크 테스트
 class MainActivity : ComponentActivity() {
 
@@ -52,12 +61,36 @@ class MainActivity : ComponentActivity() {
                 .start()
         }
 
+        val startDestination = getStartDestination(alarmPrefs)
+
+        // 자동 로그인으로 홈 화면에 진입한 경우 환영 메시지 띄우기
+        if (startDestination == Screen.Home.route) {
+            lifecycleScope.launch(Dispatchers.IO) {
+                try {
+                    val uid = SupabaseClientProvider.client.auth.currentUserOrNull()?.id ?: ""
+                    if (uid.isNotEmpty()) {
+                        val profile = SupabaseClientProvider.client.postgrest["profiles"]
+                            .select { filter { eq("id", uid) } }
+                            .decodeSingle<ProfileInsert>()
+                        
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(this@MainActivity, "${profile.nickname}님 환영합니다!", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(this@MainActivity, "환영합니다!", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }
+
         setContent {
             Sleeptandard_MVP_DemoTheme {
 
                 AppNav(
                     scheduler = AlarmScheduler(this),
-                    startDestination = getStartDestination(alarmPrefs), // 기존 로직을 함수로 분리
+                    startDestination = startDestination, // 기존 로직을 함수로 분리
                     initialAlarm = alarmPrefs.loadAlarm()
                 )
             }
@@ -70,8 +103,15 @@ class MainActivity : ComponentActivity() {
     ): String {
         val startDestinationFromIntent = intent.getStringExtra("startDestination")
 
-        // Supabase 세션이 남아있으면 로그인 건너뛰기
-        val isLoggedIn = SupabaseClientProvider.client.auth.currentSessionOrNull() != null
+        // Supabase 세션이 디바이스 저장소에서 비동기로 로드될 때까지 대기
+        val isLoggedIn = runBlocking {
+            try {
+                SupabaseClientProvider.client.auth.awaitInitialization()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+            SupabaseClientProvider.client.auth.currentSessionOrNull() != null
+        }
 
         return when {
             alarmPrefs.isFirstRun() -> Screen.Tutorial.route           // 1순위: 앱을 처음 실행한 경우
