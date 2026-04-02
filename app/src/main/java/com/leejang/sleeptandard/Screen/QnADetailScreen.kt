@@ -70,7 +70,8 @@ fun QnADetailScreen(
                 text = item.title,
                 color = Color.White,
                 style = MaterialTheme.typography.titleMedium.copy(
-                    fontSize = 18.sp)
+                    fontSize = 18.sp,
+                    lineHeight = 20.sp)
             )
         }
 

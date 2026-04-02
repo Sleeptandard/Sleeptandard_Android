@@ -26,8 +26,12 @@ import com.leejang.sleeptandard.Screen.HomeScreen
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -108,6 +112,9 @@ fun AppNav(
     val context = LocalContext.current
     val alarmPrefs = AlarmPreferences(context)
     val isAlarmSetted = alarmPrefs.isAlarmSet()
+
+    // 네비게이션바 블러처리 여부
+    var isBlurred by remember{ mutableStateOf(false) }
 
 
     val navGraph = rememberNavController.createGraph(startDestination = startDestination){
@@ -196,7 +203,6 @@ fun AppNav(
         composable(Screen.QnA.route){
             QnAScreen(
                 onBack = { rememberNavController.popBackStack() },
-                onClickAsk = { rememberNavController.navigate(Screen.Inquire.route) },
                 onClickItem = { id ->
                     rememberNavController.navigate(Screen.QnADetail.createRoute(id))
                 },
@@ -231,7 +237,10 @@ fun AppNav(
                     } catch (e: Exception) {
                         Toast.makeText(context, "이메일 앱을 찾을 수 없습니다.", Toast.LENGTH_SHORT).show()
                     }
-                }
+                },
+                showInquireModal = isBlurred,
+                onClickAsk = { isBlurred = true },
+                onDismiss = {isBlurred = false}
             )
         }
         composable(Screen.Inquire.route){
@@ -283,6 +292,7 @@ fun AppNav(
 
     }
 
+
     val navBackStackEntry by rememberNavController.currentBackStackEntryAsState()   // 최신 스택을 가져옴 (현재 위치한 경로)
     val currentRoute = navBackStackEntry?.destination?.route    // 최신 스택의 route를 가져옴 (현재 위치한 경로)
 
@@ -303,6 +313,7 @@ fun AppNav(
             // 위에 조건에 부합하면 바텀네바바를 띄움
             if (showBottom) {
                 AlarmBottomNavBar(
+                    isBlurred = isBlurred,
                     selectedIndex = when (currentRoute) {
                         Screen.Home.route -> 0
                         Screen.SettedAlarm.route -> 0
@@ -343,14 +354,16 @@ fun AppNav(
 
 @Composable
 fun AlarmBottomNavBar(
+    isBlurred: Boolean,
     selectedIndex: Int,
     onSelect: (Int) -> Unit,
 ) {
+    val blurRadius = if (isBlurred) 20.dp else 0.dp
     NavigationBar(
         containerColor = MaterialTheme.colorScheme.background
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().blur(blurRadius),
             horizontalArrangement = Arrangement.SpaceAround
         ) {
             StandaloneBottomItem(

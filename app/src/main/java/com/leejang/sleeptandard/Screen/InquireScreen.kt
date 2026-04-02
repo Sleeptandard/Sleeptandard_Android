@@ -457,6 +457,21 @@ fun InquireModalBottomSheet(
 
                 Spacer(Modifier.height(40.dp))
 
+                Box(
+                    modifier = Modifier
+                        .clickable{
+                            // 5. 제출 시 리스트 전체를 전달
+                            onSubmit(title, body, selectedImageUris)
+                        }
+                        .fillMaxWidth()
+                        .height(60.dp)
+                        .background(shape = RoundedCornerShape(100.dp), color = Color(0xFFAFF4F9)),
+                    contentAlignment = Alignment.Center
+                ){
+                    Text("제출", style = MaterialTheme.typography.bodyMedium.copy(fontSize = 18.sp, color = Color.Black))
+                }
+
+                /*
                 // ---- 제출 버튼
                 Button(
                     onClick = {
@@ -471,6 +486,8 @@ fun InquireModalBottomSheet(
                 ) {
                     Text("제출", style = MaterialTheme.typography.bodyMedium.copy(fontSize = 18.sp))
                 }
+
+                 */
 
                 Spacer(Modifier.height(40.dp))
             }
