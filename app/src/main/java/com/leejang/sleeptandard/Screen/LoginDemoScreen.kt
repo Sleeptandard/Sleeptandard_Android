@@ -1557,7 +1557,7 @@ fun IndicatorGlassBox(
         Box(
             modifier = Modifier
                 .matchParentSize()
-                .blur(100.dp) // 유리 뒤를 흐리게
+                .blur(10.dp) // 유리 뒤를 흐리게
                 .background(
                     color = backgroundColor
                     /*
@@ -1636,31 +1636,48 @@ fun AuthStepIndicator(
                 label = "step_highlight_move"
             )
 
+
+
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .drawWithContent{
+                        // ✅ 비율(0.0 ~ 1.0)을 계산합니다.
+                        val startRatio = animatedOffset / maxWidth
+                        val endRatio = (animatedOffset + stepWidth) / maxWidth
+
+                        // ✅ 실제 캔버스의 너비(size.width)를 곱해 픽셀 좌표로 변환합니다.
+                        val leftPx = startRatio * size.width
+                        val rightPx = endRatio * size.width
+
                         val eraseEdge = animatedOffset / maxWidth
                         val drawEdge = (animatedOffset + stepWidth) / maxWidth
 
                         Log.d("eraseEdge", "erase: ${eraseEdge}, draw: ${drawEdge}")
                         clipRect(
-                            left = eraseEdge,
-                            right = drawEdge
+                            left = leftPx,
+                            right = rightPx
                         ){
                             this@drawWithContent.drawContent()
                         }
                     },
                 contentAlignment = Alignment.Center,
             ){
-                Canvas(
-                    modifier = Modifier.fillMaxWidth().height(8.dp).blur(15.dp)
+                Column(
+                    modifier = Modifier.fillMaxWidth().height(16.dp).blur(20.dp),
+                    verticalArrangement = Arrangement.Center
                 ){
-                    drawRect(
-                        size = size,
-                        brush = barGradient
-                    )
+                    Canvas(
+                        modifier = Modifier.fillMaxWidth().height(8.dp),
+
+                        ){
+                        drawRect(
+                            size = Size(size.width, size.height),
+                            brush = barGradient
+                        )
+                    }
                 }
+
                 /*
                 Box(
                     modifier = Modifier
@@ -1673,9 +1690,11 @@ fun AuthStepIndicator(
                  */
             }
 
+
+
             IndicatorGlassBox(
                 modifier = Modifier
-                    .width(105.dp)
+                    .width(stepWidth)
                     .fillMaxHeight()
                     .offset(x = animatedOffset),
             ) {
