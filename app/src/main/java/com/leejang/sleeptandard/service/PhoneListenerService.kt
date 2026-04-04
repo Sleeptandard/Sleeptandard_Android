@@ -215,8 +215,9 @@ class PhoneListenerService : WearableListenerService() {
             // [디버깅] 파일 내용 검증
             validateReceivedFile(outputFile)
 
-            // [Supabase Storage] CSV 파일 서버에 업로드 (백그라운드 처리)
-            CsvUploadManager.uploadCsvFile(outputFile)
+            // [Supabase Storage] WorkManager에 업로드 작업 등록
+            // - 네트워크 연결 시에만 실행, 실패 시 자동 재시도
+            CsvUploadManager.enqueueUpload(applicationContext, outputFile)
             
             // 알림 표시
             showFileReceivedNotification(fileName, totalBytes)

@@ -99,6 +99,9 @@ dependencies {
     // 앱 시작 화면
     implementation("androidx.core:core-splashscreen:1.0.1")
 
+    // WorkManager (대용량 파일 백그라운드 업로드 + 네트워크 재시도)
+    implementation("androidx.work:work-runtime-ktx:2.9.0")
+
     implementation(libs.coil.compose)
 
     // Supabase
