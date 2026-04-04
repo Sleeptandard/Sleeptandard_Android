@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.foundation.layout.safeContentPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentSize
@@ -85,8 +86,11 @@ import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.kyant.backdrop.drawBackdrop
+import com.kyant.backdrop.effects.blur
 import com.kyant.backdrop.effects.lens
+import com.kyant.backdrop.effects.vibrancy
 import com.leejang.sleeptandard.Component.BirthDatePicker
+import com.leejang.sleeptandard.Component.LiquidGlassBox
 import com.leejang.sleeptandard.ui.theme.AppIcons
 import kotlinx.coroutines.launch
 import java.util.Locale
@@ -308,12 +312,30 @@ fun LoginDemoScreen(
         AuthStepIndicator(
             currentStep = authViewModel.currentStep,
             modifier = Modifier.padding(vertical = 24.dp),
-            backdrop = backdrop
+            //backdrop = backdrop
         )
 
         Spacer(Modifier.height(6.dp))
+/*
+        Box(
+            Modifier
+                .safeContentPadding()
+                .drawBackdrop(
+                    backdrop = backdrop,
+                    shape = { CircleShape },
+                    effects = {
+                        vibrancy()
+                        blur(4f.dp.toPx())
+                        lens(16f.dp.toPx(), 32f.dp.toPx())
+                    },
+                    onDrawSurface = { drawRect(Color.White.copy(alpha = 0.5f)) }
+                )
+                .height(64f.dp)
+                .fillMaxWidth()
+        )
 
 
+ */
         // 현재 스텝에 따른 UI 출력 with animation
         AnimatedContent(
             targetState = authViewModel.currentStep,
@@ -1602,7 +1624,7 @@ fun IndicatorGlassBox(
 
 @Composable
 fun AuthStepIndicator(
-    backdrop : Backdrop,
+    //backdrop : Backdrop,
     currentStep: AuthStep,
     modifier: Modifier = Modifier
 ) {
@@ -1650,61 +1672,6 @@ fun AuthStepIndicator(
 
 
 
-            /*
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .drawWithContent{
-                        // ✅ 비율(0.0 ~ 1.0)을 계산합니다.
-                        val startRatio = animatedOffset / maxWidth
-                        val endRatio = (animatedOffset + stepWidth) / maxWidth
-
-                        // ✅ 실제 캔버스의 너비(size.width)를 곱해 픽셀 좌표로 변환합니다.
-                        val leftPx = startRatio * size.width
-                        val rightPx = endRatio * size.width
-
-                        val eraseEdge = animatedOffset / maxWidth
-                        val drawEdge = (animatedOffset + stepWidth) / maxWidth
-
-                        Log.d("eraseEdge", "erase: ${eraseEdge}, draw: ${drawEdge}")
-                        clipRect(
-                            left = leftPx,
-                            right = rightPx
-                        ){
-                            this@drawWithContent.drawContent()
-                        }
-                    },
-                contentAlignment = Alignment.Center,
-            ){
-                Column(
-                    modifier = Modifier.fillMaxWidth().height(16.dp).blur(20.dp),
-                    verticalArrangement = Arrangement.Center
-                ){
-                    Canvas(
-                        modifier = Modifier.fillMaxWidth().height(8.dp),
-
-                        ){
-                        drawRect(
-                            size = Size(size.width, size.height),
-                            brush = barGradient
-                        )
-                    }
-                }
-
-                /*
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(8.dp)
-                        .clip(RoundedCornerShape(100.dp))
-                        .background(brush = barGradient)
-                )
-
-                 */
-            }
-
-             */
-
             // Rail
             Box(
                 modifier = Modifier.fillMaxSize(),
@@ -1715,6 +1682,22 @@ fun AuthStepIndicator(
                 )
             }
 
+            /*
+            LiquidGlassBox(
+                backdrop = backdrop
+            ) {
+                Text(
+                    text = stepLabels[currentIndex],
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        color = Color(0xFFAFF4F9),
+                        fontSize = 16.sp
+                    )
+                )
+            }
+
+             */
+
+/*
             Box(
                 modifier = Modifier
                     .width(stepWidth)
@@ -1734,6 +1717,7 @@ fun AuthStepIndicator(
                         .fillMaxSize()
                 )
 
+                /*
                 Box(
                     modifier = Modifier
                 ){
@@ -1745,10 +1729,11 @@ fun AuthStepIndicator(
                         )
                     )
                 }
+
+                 */
             }
 
-
-
+ */
 
             IndicatorGlassBox(
                 modifier = Modifier
@@ -1764,6 +1749,8 @@ fun AuthStepIndicator(
                     )
                 )
             }
+
+
 
             /*
             // 하이라이트 박스
