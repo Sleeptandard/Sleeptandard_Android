@@ -196,15 +196,13 @@ fun OptionsSection(
             ) {
                 // 전환 아이콘 (image_16cecb.png의 화살표 아이콘)
                 Icon(
-                    // AppIcons에 전환 아이콘이 없다면 임시로 제공된 아이콘 중 적절한 것을 사용하세요.
-                    painter = painterResource(AppIcons.HomeSwitch), // 예시입니다. 실제 아이콘으로 교체 필요
+                    painter = painterResource(AppIcons.HomeSwitch),
                     contentDescription = "Switch",
                     modifier = Modifier.size(11.dp),
                     tint = Color.White.copy(alpha = 0.7f)
                 )
                 // 반대 상태 텍스트 (작게 표시)
                 Text(
-                    modifier = Modifier.width(26.dp),
                     text = if(isRem) "N1" else "REM",
                     style = MaterialTheme.typography.bodySmall.copy(
                         fontSize = 12.sp,
@@ -995,7 +993,8 @@ fun DiamondStepSlider(
     onValueChange: (Int) -> Unit,
     modifier: Modifier = Modifier,
     valueRange: IntRange = 10..30,
-    step: Int = 1
+    step: Int = 1,
+    showIndicator: Boolean = true
 ) {
     val steps = remember { valueRange.step(step).toList() }
     val density = LocalDensity.current
@@ -1093,27 +1092,30 @@ fun DiamondStepSlider(
         )
 
         // indicator
-        Box(
-            modifier = Modifier
-            .offset { IntOffset(thumbCenterX.toInt() - 42.dp.toPx().toInt(), (-(32)).dp.toPx().toInt()) },
-            contentAlignment = Alignment.Center
+        if(showIndicator){
+            Box(
+                modifier = Modifier
+                    .offset { IntOffset(thumbCenterX.toInt() - 42.dp.toPx().toInt(), (-(32)).dp.toPx().toInt()) },
+                contentAlignment = Alignment.Center
             ){
-            Image(
-                modifier = Modifier
-                    .size(84.dp,45.dp),
-                painter = painterResource(AppIcons.HomeWindowIndicator),
-                contentDescription = "windowIndicator",
-            )
-            Text(
-                modifier = Modifier
-                    .offset(y = (-3).dp),
-                text = String.format("%d분 전", value),
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    fontSize = 14.sp
-                ),
+                Image(
+                    modifier = Modifier
+                        .size(84.dp,45.dp),
+                    painter = painterResource(AppIcons.HomeWindowIndicator),
+                    contentDescription = "windowIndicator",
+                )
+                Text(
+                    modifier = Modifier
+                        .offset(y = (-3).dp),
+                    text = String.format("%d분 전", value),
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 14.sp
+                    ),
 
-            )
+                    )
+            }
         }
+
     }
 }
 

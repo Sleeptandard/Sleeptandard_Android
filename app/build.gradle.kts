@@ -62,6 +62,8 @@ dependencies {
     implementation(libs.androidx.compose.ui.text)
     implementation(libs.androidx.compose.animation.core)
     implementation(libs.androidx.compose.animation)
+    implementation(libs.androidx.foundation.layout)
+    implementation(libs.androidx.animation.core)
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
@@ -89,6 +91,6 @@ dependencies {
 
     implementation(libs.coil.compose)
 
-    // 워치앱 선언 (현재  비활성화 중)
-    // wearApp(project(":wear"))
+    // 워치앱 선언 (현재 활성화 중)
+    wearApp(project(":wear"))
 }

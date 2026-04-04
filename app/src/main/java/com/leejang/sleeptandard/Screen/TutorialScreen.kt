@@ -2,16 +2,26 @@ package com.leejang.sleeptandard.Screen
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.keyframes
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -20,10 +30,12 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -36,16 +48,30 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.dropShadow
+import androidx.compose.ui.draw.innerShadow
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Brush.Companion.horizontalGradient
+import androidx.compose.ui.graphics.Brush.Companion.linearGradient
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.shadow.Shadow
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.leejang.sleeptandard.Component.CustomTimePicker
+import com.leejang.sleeptandard.Component.DiamondStepSlider
 import com.leejang.sleeptandard.ui.theme.AppIcons
 import com.leejang.sleeptandard.ui.theme.Pretandard
 
@@ -68,8 +94,14 @@ fun TutorialScreen(
         )
     )
 
+    val buttonGradient = linearGradient(
+        listOf(Color(0xFF437AC7),
+            Color(0xFFAFF4F9))
+    )
+
     var currentPage by remember { mutableIntStateOf(0) }
     val maxPage = 4 // 0: 시작, 1: 알람설정, 2: 취침, 3: 피드백, 4: 절전 상태 해제
+
 
     // ✅ 뒤로가기 제어 로직 추가
     // currentPage가 0보다 클 때만 이 핸들러가 동작합니다.
@@ -144,31 +176,56 @@ fun TutorialScreen(
             }
         }
 
-
-        // 3. 하단 버튼
         Button(
             modifier = Modifier
-                .fillMaxWidth(0.85f)
-                .height(56.dp)
-                .padding(bottom = 8.dp),
-            shape = RoundedCornerShape(100.dp),
-            // Material 3 버튼은 background 수정자 대신 colors 파라미터를 사용해야 안전합니다.
-            colors = ButtonDefaults.buttonColors(
-                containerColor = Color(0x1AFFFFFF),
-                contentColor = Color.White
-            ),
+                .padding(horizontal = 20.dp)
+                .clip(RoundedCornerShape(100.dp)),
             onClick = {
                 if (currentPage < maxPage) {
                     currentPage += 1
                 } else {
                     onFinish() // 마지막 페이지에서 누르면 홈으로 이동
                 }
+            },
+            contentPadding = PaddingValues(0.dp)
+        ){
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(100.dp))
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ){
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(60.dp)
+                        .background(brush = buttonGradient)
+                        .blur(30.dp)
+                        .border(
+                            width = 2.dp,
+                            brush = Brush.verticalGradient(
+                                colors = listOf(
+                                    Color.White.copy(alpha = 0.4f), // 테두리 위쪽 (빛남)
+                                    Color.Transparent,             // 테두리 중간 (투명)
+                                    Color.White.copy(alpha = 0.1f)  // 테두리 아래쪽 (은은함)
+                                )
+                            ),
+                            shape = RoundedCornerShape(24.dp)
+                        ),
+                    contentAlignment = Alignment.Center
+                ){
+
+                }
+
+                Text(
+                    text = if (currentPage < maxPage) "다음" else "시작하기",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 18.sp,
+                        color = Color.White
+
+                    )
+                )
             }
-        ) {
-            Text(
-                text = if (currentPage < maxPage) "다음" else "시작하기",
-                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 18.sp)
-            )
         }
 
         Spacer(Modifier.height(118.dp))
@@ -191,9 +248,10 @@ fun StartPage(){
             ) {
                 Text(
                     "알람의 정석",
-                    fontFamily = Pretandard,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 24.sp
+                    style = MaterialTheme.typography.bodyLarge.copy(
+                        fontSize = 24.sp,
+                        color = Color(0xFFAFF4F9)
+                    )
                 )
                 Text(
                     "은",
@@ -211,31 +269,125 @@ fun StartPage(){
 
             Spacer(Modifier.height(110.dp))
         }
+        BoxWithConstraints(modifier = Modifier.fillMaxWidth().height(24.dp)) {
+
+            val targetX = maxWidth * (51f / 72f) - 9.dp
+            val targetY = maxHeight * (1f / 2f) - 6.dp
+
+            // 1. 깜빡임(Pulse)을 위한 무한 애니메이션 설정
+            val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+            val alpha by infiniteTransition.animateFloat(
+                initialValue = 0.3f, // 가장 흐릴 때
+                targetValue = 0.9f,  // 가장 선명할 때
+                animationSpec = infiniteRepeatable(
+                    animation = tween(1500, easing = LinearEasing), // 1.5초 간격
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "alpha"
+            )
+            // 2. 드롭 쉐도우와 원을 겹치기 위한 Box
+            Box(
+                modifier = Modifier
+                    .offset(x = targetX, y = targetY),
+                contentAlignment = Alignment.Center) {
+
+                // ✅ 레이어 1: 깜빡이는 드롭 쉐도우 (광원 효과)
+                Box(
+                    modifier = Modifier
+                        .size(16.dp) // 원보다 약간 크게 설정하여 빛이 퍼지게 함
+                        .graphicsLayer {
+                            this.alpha = alpha // 애니메이션되는 투명도 적용
+                            compositingStrategy = CompositingStrategy.Offscreen // 블러 성능 최적화
+                        }
+                        .blur(radius = 25.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)
+                        .background(
+                            // "알람의 정석" 메인 테마인 민트/블루 그라데이션
+                            brush = Brush.radialGradient(listOf(Color(0xFF437AC7), Color(0xFFAAEDF2))),
+                            shape = CircleShape
+                        )
+                        /*
+                        .dropShadow(
+                            shape = CircleShape,
+                            shadow = Shadow(
+                                radius = 12.dp,
+                                spread = 1.dp,
+                                color = Color(0xFFAFF4F9).copy(alpha),
+                                offset = DpOffset(x = 0.dp, y = 0.dp)
+                            )
+                        )
+                         */
+                )
+
+                // ✅ 레이어 2: 실제 12.dp 크기의 흰색 원
+                Box(
+                    modifier = Modifier
+                        .size(12.dp)
+                        .background(Color.White, CircleShape)
+                )
+            }
+            /*
+            Box(
+                modifier = Modifier
+                    .offset(x = targetX, y = targetY) // 계산된 위치만큼 옆으로 밀기
+                    .size(12.dp)
+                    .background(Color(0xFFD9D9D9), CircleShape)
+                    .border(width = 1.dp, color = Color(0xFFAFF4F9), shape = CircleShape)
+                    .innerShadow(
+                        shape = CircleShape,
+                        shadow = Shadow(radius = 4.dp, color = Color(0xFFAFF4F9), spread = 3.dp)
+                    )
+                    .dropShadow(
+                        shape = CircleShape,
+                        shadow = Shadow(radius = 12.dp, color = Color(0xFFAFF4F9), spread = 1.dp)
+                    )
+            )
+
+             */
+        }
         Image(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(150.dp),
-            painter = painterResource(AppIcons.TutorialGraph),
+            painter = painterResource(AppIcons.TutorialGraph2),
             contentDescription = "그래프",
             contentScale = ContentScale.Fit
         )
         Column(
             modifier = Modifier
-                .fillMaxWidth()
+                .padding(start = 45.dp)
                 .weight(150f)
         ) {
-            Spacer(Modifier.height(110.dp))
+            Spacer(Modifier.height(64.dp))
+            Row(
+              modifier = Modifier
+                  .fillMaxWidth()
+            ) {
+                Text(
+                    text = "당신의 ",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 16.sp
+                    )
+                )
+                Text(
+                    text = "가장 얕은 수면",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 16.sp,
+                        color = Color(0xFFAFF4F9)
+                    )
+                )
+                Text(
+                    text = "을 감지하여",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 16.sp
+                    )
+                )
+            }
+
             Text(
-                modifier = Modifier
-                    .padding(start = 32.dp),
-                text = "당신의 가장 얕은 수면을 감지하여",
-                style = MaterialTheme.typography.bodyMedium
-            )
-            Text(
-                modifier = Modifier
-                    .padding(start = 32.dp),
                 text = "가볍게 깨워드려요",
-                style = MaterialTheme.typography.bodyMedium
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontSize = 16.sp
+                )
             )
 
             Spacer(Modifier.height(60.dp))
@@ -248,31 +400,132 @@ fun StartPage(){
 }
 @Composable
 fun AlarmSettingPart(){
+
+    val buttonGradient = horizontalGradient(
+        listOf(Color(0xFF437AC7),
+            Color(0xFF83B5B9)
+        )
+    )
+
     Column(
         modifier = Modifier.fillMaxSize(),
         horizontalAlignment = Alignment.CenterHorizontally
     ){
-        Spacer(Modifier.weight(3f))
+        Spacer(Modifier.weight(50f))
 
         Text("몇 시 이전에는 꼭 일어나야 하나요?",
-            style = MaterialTheme.typography.bodyMedium.copy(
+            style = MaterialTheme.typography.bodyLarge.copy(
                 color = MaterialTheme.colorScheme.onPrimary,
-                fontSize = 16.sp
+                fontSize = 18.sp
+            ))
+        Row(
+            modifier = Modifier.fillMaxWidth().height(24.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ){
+            Text(
+                text = "알람",
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    color = Color(0xFFAFF4F9),
+                    fontSize = 14.sp
+                )
+            )
+            Text("과 ",style = MaterialTheme.typography.bodyMedium.copy(
+                fontSize = 14.sp
+            ))
+            Text(
+                text = "기상 윈도우",
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    color = Color(0xFFAFF4F9),
+                    fontSize = 14.sp
+                )
+            )
+            Text("를 설정해주세요",style = MaterialTheme.typography.bodyMedium.copy(
+                fontSize = 14.sp
             ))
 
-        Spacer(Modifier.weight(8f))
+        }
 
-        CustomTimePicker(
-            onTimeChange = {h,m,ampm->{}},
-            scrollEnable = false,
-            itemHeight = 68.dp,
-            itemHeightAmPm = 52.dp,
-            defaultHour12 = 6,
-            defaultIsAm = true,
-            defaultMinute = 0,
+        Spacer(Modifier.weight(56f))
+
+        Box(
+            modifier = Modifier,
+            contentAlignment = Alignment.Center
+        ){
+            Box(
+                modifier = Modifier
+                    .size(300.dp, 240.dp)
+                    .background(brush = buttonGradient,RoundedCornerShape(24.dp))
+                    .blur(30.dp)
+                    .border(
+                        width = 2.dp,
+                        brush = Brush.verticalGradient(
+                            colors = listOf(
+                                Color.White.copy(alpha = 0.4f), // 테두리 위쪽 (빛남)
+                                Color.Transparent,             // 테두리 중간 (투명)
+                                Color.White.copy(alpha = 0.1f)  // 테두리 아래쪽 (은은함)
+                            )
+                        ),
+                        shape = RoundedCornerShape(24.dp)
+                    ),
+            ){}
+            CustomTimePicker(
+                defaultHour12 = 6,
+                defaultMinute = 0,
+                defaultIsAm = true,
+                onTimeChange = { h, m, ampm -> },
+                scrollEnable = false,
+                itemHeight = 60.dp,
+                itemHeightAmPm = 45.dp,
+                textStyle = MaterialTheme.typography.bodyLarge.copy(
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontSize = 32.sp
+                ),
+                fadedTextStyle = MaterialTheme.typography.bodyLarge.copy(
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                    fontSize = 30.sp
+                ),
+                ampmTextStyle = MaterialTheme.typography.bodyLarge.copy(
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontSize = 15.sp
+                ),
+                ampmFadedTextStyle = MaterialTheme.typography.bodyLarge.copy(
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                    fontSize = 14.sp
+                ),
+            )
+        }
+
+        Spacer(Modifier.weight(24f))
+
+
+        Text(
+            modifier = Modifier.fillMaxWidth().padding(end = 30.dp, bottom = 8.dp),
+            text = "20분 전",
+            style = MaterialTheme.typography.bodyMedium.copy(
+                fontSize = 14.sp,
+                color = Color(0xFFAFF4F9),
+                textAlign = TextAlign.End
+            )
         )
-        
-        Spacer(Modifier.weight(14f))
+
+        DiamondStepSlider(
+            modifier = Modifier.padding(horizontal = 10.dp),
+            value = 25,
+            onValueChange = {},
+            showIndicator = false
+        )
+
+        Text(
+            modifier = Modifier.fillMaxWidth().padding(top = 4.dp, start = 30.dp),
+            text = "오전 5:40 ~ 6:00 사이 알람",
+            style = MaterialTheme.typography.bodyMedium.copy(
+                fontSize = 16.sp,
+                textAlign = TextAlign.Start
+            )
+        )
+
+        Spacer(Modifier.weight(79f))
 
     }
 }
@@ -296,10 +549,10 @@ fun AlarmSettedPart(){
                     text = "설정 시간내 ",
                     style = MaterialTheme.typography.bodyMedium.copy(
                         color = MaterialTheme.colorScheme.onPrimary,
-                        fontSize = 16.sp
+                        fontSize = 18.sp
                     ))
                 Text(
-                    text ="가장 얕은 수면",
+                    text = "기상 골든 타임",
                     style = MaterialTheme.typography.bodyMedium.copy(
                         color = Color(0xFF8DF1E2),
                         fontSize = 18.sp
@@ -308,7 +561,7 @@ fun AlarmSettedPart(){
                     text = "에서 깨워드려요.",
                     style = MaterialTheme.typography.bodyMedium.copy(
                         color = MaterialTheme.colorScheme.onPrimary,
-                        fontSize = 16.sp
+                        fontSize = 18.sp
                     )
                 )
             }
@@ -319,21 +572,21 @@ fun AlarmSettedPart(){
                     text = "수면 측정을 위해, ",
                     style = MaterialTheme.typography.bodyMedium.copy(
                         color = MaterialTheme.colorScheme.onPrimary,
-                        fontSize = 16.sp
+                        fontSize = 15.sp
                     )
                 )
                 Text(
                     text = "워치",
                     style = MaterialTheme.typography.bodyMedium.copy(
-                        color = MaterialTheme.colorScheme.onPrimary,
-                        fontSize = 18.sp
+                        color = Color(0xFF8DF1E2),
+                        fontSize = 15.sp
                     )
                 )
                 Text(
                     text = "를 착용해주세요.",
                     style = MaterialTheme.typography.bodyMedium.copy(
                         color = MaterialTheme.colorScheme.onPrimary,
-                        fontSize = 16.sp
+                        fontSize = 15.sp
                     )
                 )
 
@@ -343,11 +596,8 @@ fun AlarmSettedPart(){
         
         Spacer(Modifier.weight(75f))
 
-        Image(
-            modifier = Modifier.padding(horizontal = 78.dp),
-            painter = painterResource(AppIcons.Tutorial30Min),
-            contentDescription = "30분 전부터 깨워준다는 그림",
-            contentScale = ContentScale.Fit
+        GraphAnimation(
+            modifier = Modifier.height(130.dp).padding(end = 50.dp)
         )
 
         Spacer(Modifier.weight(190f))
@@ -372,7 +622,7 @@ fun FeedbackPart(){
                  Text(
                      text = "당신의 ",
                      style = MaterialTheme.typography.bodyMedium.copy(
-                         fontSize = 16.sp
+                         fontSize = 18.sp
                      )
                  )
                  Text(
@@ -385,35 +635,28 @@ fun FeedbackPart(){
                  Text(
                      text = "으로",
                      style = MaterialTheme.typography.bodyMedium.copy(
-                         fontSize = 16.sp
+                         fontSize = 18.sp
                      )
                  )
              }
              Text(
-                 text = "맞춤형 알고리즘이 생성돼요.",
+                 text = "알고리즘이 개인 맞춤형으로 진화해요",
                      style = MaterialTheme.typography.bodyMedium.copy(
-                     fontSize = 16.sp
+                     fontSize = 18.sp
                      )
              )
          }
          
          Spacer(Modifier.weight(40f))
-         
-         Row(
-             modifier = Modifier.fillMaxWidth()
-         ) {
-             Spacer(Modifier.weight(75f))
-             Image(
-                 modifier = Modifier.weight(210f),
-                 painter = painterResource(AppIcons.TutorialFeedback),
-                 contentDescription = "피드백 이미지",
-                 contentScale = ContentScale.Fit
-             )
-             Spacer(Modifier.weight(75f))
-         }
-         
-         
-         
+
+
+         Image(
+
+             painter = painterResource(AppIcons.TutorialFeedback2),
+             contentDescription = "피드백"
+         )
+
+
          Spacer(Modifier.weight(60f))
      }
 }
@@ -555,5 +798,78 @@ fun WatchPowerSavingPage(){
 
 
 
+    }
+}
+
+@Composable
+fun GraphAnimation(
+    modifier: Modifier = Modifier
+) {
+    // 1. PNG 이미지용 페인터 생성 (AppIcons에 PNG 리소스 ID가 등록되어 있어야 함)
+    val graphPainter = painterResource(id = AppIcons.TutorialGraph3)
+    val animationDuration = 2000
+
+    val infiniteTransition = rememberInfiniteTransition(label = "graph_reveal")
+
+    // 그리기 및 지우기 진행률 로직은 기존과 동일
+    val drawProgress by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = keyframes {
+                durationMillis = 4000
+                0f at 0 using LinearEasing
+                1f at animationDuration using FastOutSlowInEasing
+                1f at 4000
+            },
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "draw_progress"
+    )
+
+    val eraseProgress by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = keyframes {
+                durationMillis = 4000
+                0f at 0
+                0f at animationDuration + 1000
+                1f at animationDuration + 1000 + animationDuration using FastOutSlowInEasing
+                1f at 4000
+            },
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "erase_progress"
+    )
+
+    Box(modifier = modifier) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .drawWithContent {
+                    val width = size.width
+                    val drawEdge = width * drawProgress
+                    val eraseEdge = width * eraseProgress
+
+                    // ✅ 클리핑 로직: PNG 이미지도 이 영역 안에서만 그려짐
+                    clipRect(
+                        left = eraseEdge,
+                        right = drawEdge
+                    ) {
+                        this@drawWithContent.drawContent()
+                    }
+                }
+        ) {
+            // ✅ 메인 레이어 (PNG 이미지)
+            Canvas(
+                modifier = Modifier
+                    .fillMaxSize()
+            ) {
+                with(graphPainter) {
+                    draw(size = size)
+                }
+            }
+        }
     }
 }

@@ -1,6 +1,7 @@
 package com.leejang.sleeptandard.ui.theme
 
 import androidx.annotation.DrawableRes
+import com.leejang.sleeptandard.Component.Screen
 import com.leejang.sleeptandard.R
 
 
@@ -48,6 +49,12 @@ object AppIcons {
     @DrawableRes val SettingsQuestion = R.drawable.ic_settings_question
     @DrawableRes val SettingsActivity = R.drawable.ic_settings_activity
 
+    @DrawableRes val SettingsAccountManagement = R.drawable.ic_setting_account_management
+    @DrawableRes val SettingsCustomerService = R.drawable.ic_setting_customer_service
+    @DrawableRes val SettingsDataSending = R.drawable.ic_setting_data_sending
+    @DrawableRes val SettingsSysAccessibility = R.drawable.ic_setting_system_accessibilty
+    @DrawableRes val SettingsTutorial = R.drawable.ic_setting_tutorial
+
     // QnA
     @DrawableRes val QnAArrowBack = R.drawable.ic_qna_arrowback
     @DrawableRes val QnAQ = R.drawable.ic_qna_q
@@ -69,9 +76,23 @@ object AppIcons {
 
     // 튜토리얼
     @DrawableRes val TutorialGraph = R.drawable.image_tutorial_graph
+    @DrawableRes val TutorialGraph2 = R.drawable.image_tutorial_graph2
+    @DrawableRes val TutorialGraph3 = R.drawable.image_tutorial_graph3
     @DrawableRes val Tutorial30Min = R.drawable.image_tutorial_30min
     @DrawableRes val TutorialFeedback = R.drawable.image_tutorial_feedback
+    @DrawableRes val TutorialFeedback2 = R.drawable.image_tutorial_feedback2
     @DrawableRes val TutorialPowerSaving1 = R.drawable.image_tutorial_power_saving1
     @DrawableRes val TutorialPowerSaving2 = R.drawable.image_tutorial_power_saving2
+
+
+    // 로그인/회원가입 화면
+    @DrawableRes val RegisterClock = R.drawable.image_register_clock
+    @DrawableRes val RegisterLogo = R.drawable.image_register_logo
+    @DrawableRes val RegisterWarning = R.drawable.ic_login_warning
+    @DrawableRes val RegisterInvisible = R.drawable.ic_register_invisible
+    @DrawableRes val RegisterVisible = R.drawable.ic_register_visible
+    @DrawableRes val RegisterCancel = R.drawable.ic_register_cancel
+    @DrawableRes val RegisterOK = R.drawable.ic_nickname_ok
+    @DrawableRes val RegisterMail = R.drawable.ic_login_mail
 
 }

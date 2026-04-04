@@ -178,7 +178,8 @@ fun ReviewAlarmScreen(
 fun SemiCircularSlider(
     value: Float, // 0.0f ~ 1.0f
     onValueChange: (Float) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    touchEnabled: Boolean = true
 ) {
     val strokeWidth = 24.dp
     val density = LocalDensity.current

@@ -64,6 +64,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.res.vectorResource
+import androidx.compose.ui.text.style.BaselineShift
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.sp
 
@@ -105,28 +106,29 @@ fun SettedAlarmScreen(
 
             Row(
                 modifier = Modifier,
-                verticalAlignment = Alignment.CenterVertically,
+                verticalAlignment = Alignment.Bottom,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ){
                 Text(
                     text = "~",
                     style = MaterialTheme.typography.bodyMedium.copy(
                         fontSize = 48.sp,
-                        color = Color(0xCCF1F4F9)
+                        color = Color(0xCCF1F4F9),
                     )
                 )
                 Text(
-                    text = "${alarm.hour}:${alarm.minute}",
+                    text = String.format(Locale.getDefault(),"%d : %02d",alarm.hour,alarm.minute),
                     style = MaterialTheme.typography.bodyMedium.copy(
                         fontSize = 48.sp,
-                        color = Color(0xCCF1F4F9)
+                        color = Color(0xCCF1F4F9),
                     )
                 )
                 Text(
                     text = "사이 알람",
                     style = MaterialTheme.typography.bodyMedium.copy(
                         fontSize = 16.sp,
-                        color = Color(0xCCF1F4F9)
+                        color = Color(0xCCF1F4F9),
+                        baselineShift = BaselineShift(0.5f)
                     )
                 )
             }
@@ -309,7 +311,7 @@ fun SettedAlarmScreen(
 }
 
 @Composable
-private fun ActivityAnimation(
+fun ActivityAnimation(
     modifier: Modifier = Modifier
 ){
     val graphIcon: ImageVector = ImageVector.vectorResource(id = AppIcons.SettedActivityGraph)
