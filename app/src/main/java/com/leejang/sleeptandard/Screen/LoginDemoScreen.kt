@@ -34,6 +34,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
@@ -80,6 +81,11 @@ import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.kyant.backdrop.Backdrop
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.kyant.backdrop.drawBackdrop
+import com.kyant.backdrop.effects.lens
 import com.leejang.sleeptandard.Component.BirthDatePicker
 import com.leejang.sleeptandard.ui.theme.AppIcons
 import kotlinx.coroutines.launch
@@ -283,12 +289,16 @@ fun LoginDemoScreen(
         )
     )
 
+    // 리퀴드 글래스 드가자
+    val backdrop = rememberLayerBackdrop()
+
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(brush = linearGradation)
             .padding(horizontal = 20.dp)
+            .layerBackdrop(backdrop)
         ,
         horizontalAlignment = Alignment.CenterHorizontally
     ){
@@ -297,7 +307,8 @@ fun LoginDemoScreen(
         // ✅ 상단에 단계 인디케이터 배치
         AuthStepIndicator(
             currentStep = authViewModel.currentStep,
-            modifier = Modifier.padding(vertical = 24.dp)
+            modifier = Modifier.padding(vertical = 24.dp),
+            backdrop = backdrop
         )
 
         Spacer(Modifier.height(6.dp))
@@ -1591,6 +1602,7 @@ fun IndicatorGlassBox(
 
 @Composable
 fun AuthStepIndicator(
+    backdrop : Backdrop,
     currentStep: AuthStep,
     modifier: Modifier = Modifier
 ) {
@@ -1638,6 +1650,7 @@ fun AuthStepIndicator(
 
 
 
+            /*
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -1689,6 +1702,51 @@ fun AuthStepIndicator(
 
                  */
             }
+
+             */
+
+            // Rail
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ){
+                Box(
+                    modifier = Modifier.fillMaxWidth().height(8.dp).background(brush = barGradient, shape = RoundedCornerShape(10.dp))
+                )
+            }
+
+            Box(
+                modifier = Modifier
+                    .width(stepWidth)
+                    .fillMaxHeight()
+                    .offset(x = animatedOffset),
+                contentAlignment = Alignment.Center
+            ){
+                Box(
+                    modifier = Modifier
+                        .drawBackdrop(
+                            backdrop = backdrop,
+                            shape = { CircleShape },
+                            effects = {
+                                lens(16f.dp.toPx(), 32f.dp.toPx())
+                            }
+                        )
+                        .fillMaxSize()
+                )
+
+                Box(
+                    modifier = Modifier
+                ){
+                    Text(
+                        text = stepLabels[currentIndex],
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            color = Color(0xFFAFF4F9),
+                            fontSize = 16.sp
+                        )
+                    )
+                }
+            }
+
 
 
 
