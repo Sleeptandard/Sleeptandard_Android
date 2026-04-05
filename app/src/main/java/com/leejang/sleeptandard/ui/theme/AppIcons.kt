@@ -73,6 +73,10 @@ object AppIcons {
     @DrawableRes val MemoNap = R.drawable.ic_memo_nap
     @DrawableRes val MemoPill = R.drawable.ic_memo_pill
     @DrawableRes val MemoDrink = R.drawable.ic_memo_drink
+    @DrawableRes val HomeHand = R.drawable.ic_home_point_hand
+    @DrawableRes val HomeDoubleArrow = R.drawable.ic_home_double_arrow
+    @DrawableRes val HomeCheck = R.drawable.ic_home_check
+    @DrawableRes val HomeX = R.drawable.ic_home_x
 
     // 튜토리얼
     @DrawableRes val TutorialGraph = R.drawable.image_tutorial_graph

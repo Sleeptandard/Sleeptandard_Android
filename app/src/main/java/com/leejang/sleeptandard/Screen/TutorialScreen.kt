@@ -88,12 +88,6 @@ fun TutorialScreen(
         )
     )
 
-    val circleGradation = Brush.radialGradient(
-        colors = listOf(
-            Color(0x00F1F1F1),
-            Color(0x1AF1F1F1)
-        )
-    )
 
     val buttonGradient = linearGradient(
         listOf(Color(0xFF437AC7),
@@ -976,10 +970,10 @@ fun GraphAnimation(
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
             animation = keyframes {
-                durationMillis = 4000
+                durationMillis = 6000
                 0f at 0 using LinearEasing
                 1f at animationDuration using FastOutSlowInEasing
-                1f at 4000
+                1f at 6000
             },
             repeatMode = RepeatMode.Restart
         ),
@@ -991,11 +985,11 @@ fun GraphAnimation(
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
             animation = keyframes {
-                durationMillis = 4000
+                durationMillis = 6000
                 0f at 0
                 0f at animationDuration + 1000
                 1f at animationDuration + 1000 + animationDuration using FastOutSlowInEasing
-                1f at 4000
+                1f at 6000
             },
             repeatMode = RepeatMode.Restart
         ),
