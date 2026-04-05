@@ -1,10 +1,13 @@
 package com.leejang.sleeptandard.Component
 
 import android.graphics.BlurMaskFilter
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.keyframes
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
@@ -43,6 +46,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Surface
 import androidx.compose.material3.SwitchDefaults
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -71,6 +75,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
 import java.util.Calendar
 import kotlin.math.abs
 
@@ -1230,20 +1235,31 @@ fun WindowTutorial(
     var selectedHour by remember { mutableIntStateOf(8) }
     var selectedMinute by remember { mutableIntStateOf(30) }
     var selectedIsAm by remember { mutableStateOf(true) }
-    // ✅ 1. 무한 애니메이션 정의 (10분 <-> 30분 왕복)
-    val infiniteTransition = rememberInfiniteTransition(label = "hand_movement")
-    val animatedMinutes by infiniteTransition.animateFloat(
-        initialValue = 20f,
-        targetValue = 30f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(2000, easing = FastOutSlowInEasing), // 2초 동안 이동
-            repeatMode = RepeatMode.Reverse // 왔다 갔다 반복
-        ),
-        label = "minutes"
-    )
+
+    // 1. ✅ rememberInfiniteTransition 대신 Animatable을 사용하여 수동 제어 상태를 만듭니다.
+    val animatedMinutes = remember { Animatable(30f) }
+
+    // 2. ✅ LaunchedEffect를 통해 화면 진입 시 한 번만 실행되는 시퀀스를 정의합니다.
+    LaunchedEffect(Unit) {
+        delay(1500) // 사용자가 화면을 인식할 수 있도록 아주 잠깐 대기합니다.
+
+        // [왕복 1단계] 30분 -> 10분으로 이동 (2초간 부드럽게)
+        animatedMinutes.animateTo(
+            targetValue = 10f,
+            animationSpec = tween(durationMillis = 1000, easing = LinearEasing)
+        )
+
+        delay(2500) // 10분 지점에서 잠시 멈춰 강조 효과를 줍니다.
+
+        // [왕복 2단계] 10분 -> 30분으로 다시 복귀 (2초간)
+        animatedMinutes.animateTo(
+            targetValue = 30f,
+            animationSpec = tween(durationMillis = 1000, easing = LinearEasing)
+        )
+    }
 
     // 애니메이션되는 float 값을 정수로 변환하여 기존 로직에 전달
-    val earlyWakeUpMinutes = animatedMinutes.toInt()
+    val earlyWakeUpMinutes = animatedMinutes.value.toInt()
     var isChecked by remember { mutableStateOf(true) }
 
     var checkBackground = if (isChecked) Color(0xFF050C16) else Color.White
@@ -1255,7 +1271,7 @@ fun WindowTutorial(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(color = Color(0xFF050C16).copy(alpha = 0.75f))
+                .background(color = Color(0xFF050C16).copy(alpha = 0.7f))
         ) {
             Box(
                 modifier = Modifier
@@ -1298,7 +1314,7 @@ fun WindowTutorial(
                     val fullWidth = constraints.maxWidth.toFloat()
 
                     // 1. WakeUpWindow의 Row 패딩 반영 (양옆 15.dp)
-                    val rowPaddingPx = with(density) { 15.dp.toPx() }
+                    val rowPaddingPx = with(density) { 35.dp.toPx() }
                     val rowWidth = fullWidth - (rowPaddingPx * 2)
 
                     // 2. 슬라이더가 차지하는 80% 영역 계산 (중앙 정렬됨)
@@ -1329,7 +1345,7 @@ fun WindowTutorial(
                      */
                     Icon(
                         modifier = Modifier
-                            .offset { IntOffset(thumbCenterX.toInt() - 25.dp.toPx().toInt(), thumbCenterY.toInt() + 5.dp.toPx().toInt()) },
+                            .offset { IntOffset(thumbCenterX.toInt() - 12.dp.toPx().toInt(), thumbCenterY.toInt() + 5.dp.toPx().toInt()) },
                         painter = painterResource(AppIcons.HomeHand),
                         contentDescription = "손모양"
                     )
