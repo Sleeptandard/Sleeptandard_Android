@@ -1674,13 +1674,6 @@ fun AuthStepIndicator(
     }
 
     val numberOfSteps = stepLabels.size
-    val containerColor = Color(0xFF1B2432)
-    val highlightColor = Color(0xFFAAEDF2)
-
-    val barGradient = linearGradient(
-        listOf(Color(0xFF437AC7),
-            Color(0xFFAFF4F9))
-    )
 
     if(currentIndex < 3){
         BoxWithConstraints(
@@ -1771,94 +1764,6 @@ fun AuthStepIndicator(
                     )
                 )
             }
-
-
-/*
-            Box(
-                modifier = Modifier
-                    .width(stepWidth)
-                    .fillMaxHeight()
-                    .offset(x = animatedOffset),
-                contentAlignment = Alignment.Center
-            ){
-                Box(
-                    modifier = Modifier
-                        .drawBackdrop(
-                            backdrop = backdrop,
-                            shape = { CircleShape },
-                            effects = {
-                                lens(16f.dp.toPx(), 32f.dp.toPx())
-                            }
-                        )
-                        .fillMaxSize()
-                )
-
-                /*
-                Box(
-                    modifier = Modifier
-                ){
-                    Text(
-                        text = stepLabels[currentIndex],
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            color = Color(0xFFAFF4F9),
-                            fontSize = 16.sp
-                        )
-                    )
-                }
-
-                 */
-            }
-
- */
-
-            /*
-            IndicatorGlassBox(
-                modifier = Modifier
-                    .width(stepWidth)
-                    .fillMaxHeight()
-                    .offset(x = animatedOffset),
-            ) {
-                Text(
-                    text = stepLabels[currentIndex],
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        color = Color(0xFFAFF4F9),
-                        fontSize = 16.sp
-                    )
-                )
-            }
-
-             */
-
-
-
-            /*
-            // 하이라이트 박스
-            Box(
-                modifier = Modifier
-                    .width(stepWidth)
-                    .fillMaxHeight()
-                    .offset(x = animatedOffset)
-                    .background(highlightColor, RoundedCornerShape(100.dp))
-            )
-
-            // 텍스트 레이어
-            Row(modifier = Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
-                stepLabels.forEachIndexed { index, label ->
-                    val isSelected = index == currentIndex
-                    Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                        Text(
-                            text = label,
-                            style = TextStyle(
-                                fontSize = 13.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                color = if (isSelected) Color(0xFF111111) else Color.White.copy(alpha = 0.6f)
-                            )
-                        )
-                    }
-                }
-            }
-
-             */
         }
     }
 
