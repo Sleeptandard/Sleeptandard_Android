@@ -5,6 +5,7 @@ import android.util.Log
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -66,6 +67,7 @@ import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.draw
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
@@ -293,117 +295,144 @@ fun LoginDemoScreen(
         )
     )
 
+    val barGradient = linearGradient(
+        listOf(Color(0xFF437AC7),
+            Color(0xFFAFF4F9))
+    )
+
+    val backgroundColor = Color.White
+
     // 리퀴드 글래스 드가자
-    val backdrop = rememberLayerBackdrop()
+    val backdrop = rememberLayerBackdrop {
+        drawRect(backgroundColor)
+        drawContent()
+    }
 
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(brush = linearGradation)
-            .padding(horizontal = 20.dp)
             .layerBackdrop(backdrop)
-        ,
+    ){
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(brush = linearGradation)
+                .padding(horizontal = 20.dp)
+            ,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ){
+            Spacer(Modifier.height(50.dp))
+
+            /*
+            // ✅ 상단에 단계 인디케이터 배치
+            AuthStepIndicator(
+                currentStep = authViewModel.currentStep,
+                modifier = Modifier.padding(vertical = 24.dp),
+                //backdrop = backdrop
+            )
+
+             */
+
+            // Rail
+            Box(
+                modifier = Modifier.height(52.dp).padding(top = 9.dp),
+                contentAlignment = Alignment.Center
+            ){
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(8.dp)
+                        .background(brush = barGradient, shape = RoundedCornerShape(10.dp))
+                )
+            }
+
+            Spacer(Modifier.height(6.dp))
+
+            // 현재 스텝에 따른 UI 출력 with animation
+            AnimatedContent(
+                targetState = authViewModel.currentStep,
+                transitionSpec = {
+                    fadeIn(animationSpec = tween(400)).togetherWith(fadeOut(animationSpec = tween(400)))
+                },
+                label = "AuthStepTransition"
+            ) { step ->
+                when (step) {
+
+                    is AuthStep.EmailInput -> EmailInputStep(
+                        // TODO: 이메일 탐색 백엔드 통신
+                        // AuthViewModel의 이메일 탐색 더미 로직
+                        viewModel = authViewModel)
+
+                    is AuthStep.LoginPassword -> LoginPasswordStep(
+                        viewModel = authViewModel,
+                        onLoginSuccess = { nickname ->
+                            onConfirm("$nickname 님, 환영합니다!")
+                        },
+                        onLoginError = {
+                            Toast.makeText(context, "비밀번호가 틀렸습니다.", Toast.LENGTH_SHORT).show()
+                        },
+                        onPwChange = {
+                            // TODO: 비밀번호 재설정 메일 송신 로직 넣어야함
+                            authViewModel.findingPassword()
+                        }
+                    )
+
+                    is AuthStep.FindPassword -> PasswordChangeStep(
+                        viewModel = authViewModel,
+                        onConfirm = {
+                            /** 확인버튼 필요 없지 않음? **/
+                            // 일단 재설정 창 확인용으로만 존재
+                            authViewModel.resetPassword()
+                        },
+                        onResend = {
+                            // TODO: 비밀번호 재설정 메일 송신 로직 넣어야함
+                        }
+                    )
+
+                    is AuthStep.PasswordReset -> PasswordResetStep(
+                        viewModel = authViewModel,
+                        onReset = {
+                            // TODO: 비밀번호 재설정 로직 백엔드 연결 필요
+                            authViewModel.backToEmail()
+                        }
+                    )
+
+                    is AuthStep.SignupPassword -> SignupPasswordStep(viewModel = authViewModel)
+
+                    is AuthStep.SignupNickname -> NicknameStep(
+                        viewModel = authViewModel
+                    )
+
+                    is AuthStep.SignupGenderBirth -> GenderBirthStep(
+                        viewModel = authViewModel
+                    )
+
+                    is AuthStep.Completed -> CompletedStep(
+                        nickname = step.nickname,
+                        onConfirm = { onConfirm(it) }
+                    )
+                }
+            }
+
+            Spacer(Modifier.weight(1f))
+        }
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ){
         Spacer(Modifier.height(50.dp))
 
-        // ✅ 상단에 단계 인디케이터 배치
         AuthStepIndicator(
+            modifier = Modifier,
             currentStep = authViewModel.currentStep,
-            modifier = Modifier.padding(vertical = 24.dp),
-            //backdrop = backdrop
+            backdrop = backdrop,
         )
-
-        Spacer(Modifier.height(6.dp))
-/*
-        Box(
-            Modifier
-                .safeContentPadding()
-                .drawBackdrop(
-                    backdrop = backdrop,
-                    shape = { CircleShape },
-                    effects = {
-                        vibrancy()
-                        blur(4f.dp.toPx())
-                        lens(16f.dp.toPx(), 32f.dp.toPx())
-                    },
-                    onDrawSurface = { drawRect(Color.White.copy(alpha = 0.5f)) }
-                )
-                .height(64f.dp)
-                .fillMaxWidth()
-        )
-
-
- */
-        // 현재 스텝에 따른 UI 출력 with animation
-        AnimatedContent(
-            targetState = authViewModel.currentStep,
-            transitionSpec = {
-                fadeIn(animationSpec = tween(400)).togetherWith(fadeOut(animationSpec = tween(400)))
-            },
-            label = "AuthStepTransition"
-        ) { step ->
-            when (step) {
-
-                is AuthStep.EmailInput -> EmailInputStep(
-                    // TODO: 이메일 탐색 백엔드 통신
-                    // AuthViewModel의 이메일 탐색 더미 로직
-                    viewModel = authViewModel)
-
-                is AuthStep.LoginPassword -> LoginPasswordStep(
-                    viewModel = authViewModel,
-                    onLoginSuccess = { nickname ->
-                        onConfirm("$nickname 님, 환영합니다!")
-                    },
-                    onLoginError = {
-                        Toast.makeText(context, "비밀번호가 틀렸습니다.", Toast.LENGTH_SHORT).show()
-                    },
-                    onPwChange = {
-                        // TODO: 비밀번호 재설정 메일 송신 로직 넣어야함
-                        authViewModel.findingPassword()
-                    }
-                )
-
-                is AuthStep.FindPassword -> PasswordChangeStep(
-                    viewModel = authViewModel,
-                    onConfirm = {
-                        /** 확인버튼 필요 없지 않음? **/
-                        // 일단 재설정 창 확인용으로만 존재
-                        authViewModel.resetPassword()
-                    },
-                    onResend = {
-                        // TODO: 비밀번호 재설정 메일 송신 로직 넣어야함
-                    }
-                )
-
-                is AuthStep.PasswordReset -> PasswordResetStep(
-                    viewModel = authViewModel,
-                    onReset = {
-                        // TODO: 비밀번호 재설정 로직 백엔드 연결 필요
-                        authViewModel.backToEmail()
-                    }
-                )
-
-                is AuthStep.SignupPassword -> SignupPasswordStep(viewModel = authViewModel)
-
-                is AuthStep.SignupNickname -> NicknameStep(
-                    viewModel = authViewModel
-                )
-
-                is AuthStep.SignupGenderBirth -> GenderBirthStep(
-                    viewModel = authViewModel
-                )
-
-                is AuthStep.Completed -> CompletedStep(
-                    nickname = step.nickname,
-                    onConfirm = { onConfirm(it) }
-                )
-            }
-        }
-
-        Spacer(Modifier.weight(1f))
     }
+
 }
 
 @Composable
@@ -1624,7 +1653,7 @@ fun IndicatorGlassBox(
 
 @Composable
 fun AuthStepIndicator(
-    //backdrop : Backdrop,
+    backdrop : Backdrop,
     currentStep: AuthStep,
     modifier: Modifier = Modifier
 ) {
@@ -1657,11 +1686,12 @@ fun AuthStepIndicator(
         BoxWithConstraints(
             modifier = modifier
                 .fillMaxWidth()
-                .height(56.dp)
+                .height(52.dp)
         ) {
-
+            val glassWidth = 105.dp
             val stepWidth = (maxWidth) / numberOfSteps
-            val targetOffset = stepWidth * currentIndex
+            val diff = (stepWidth - glassWidth)/2
+            val targetOffset = stepWidth * currentIndex + diff * currentIndex
 
             // 위치 이동 애니메이션
             val animatedOffset by animateDpAsState(
@@ -1672,19 +1702,66 @@ fun AuthStepIndicator(
 
 
 
-            // Rail
+
             Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
+                modifier = Modifier
+                    .padding(horizontal = 10.dp)
+                    .fillMaxSize()
             ){
-                Box(
-                    modifier = Modifier.fillMaxWidth().height(8.dp).background(brush = barGradient, shape = RoundedCornerShape(10.dp))
-                )
+                Row(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ){
+                    stepLabels.forEachIndexed { index, step ->
+
+                        val isSelected = index == currentIndex
+
+                        // 1. 투명도 애니메이션 (선택되면 0, 아니면 1)
+                        val textAlpha by animateFloatAsState(
+                            targetValue = if (isSelected) 0f else 1f,
+                            animationSpec = tween(durationMillis = 300),
+                            label = "text_alpha"
+                        )
+
+                        // 2. 수직 이동 애니메이션 (선택되면 아래로 20dp 이동)
+                        val textOffset by animateDpAsState(
+                            targetValue = if (isSelected) 20.dp else 0.dp,
+                            animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
+                            label = "text_offset"
+                        )
+
+                        Box(
+                            modifier = Modifier.weight(1f), // 화면을 정확히 1:1:1로 나눕니다.
+                            contentAlignment = when (index) {
+                                0 -> Alignment.CenterStart // 첫 번째: 왼쪽 정렬
+                                1 -> Alignment.Center      // 두 번째: 무조건 중앙 정렬
+                                else -> Alignment.CenterEnd // 세 번째: 오른쪽 정렬ㅅ
+                            }
+                        ) {
+                            Text(
+                                text = step,
+                                modifier = Modifier
+                                    .graphicsLayer {
+                                        alpha = textAlpha            // 투명도 적용
+                                        translationY = textOffset.toPx() // 아래로 사라지는 이동 적용
+                                    },
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    color = Color.White,
+                                    fontSize = 14.sp
+                                )
+                            )
+                        }
+                    }
+                }
             }
 
-            /*
             LiquidGlassBox(
-                backdrop = backdrop
+                modifier = Modifier
+                    .width(glassWidth)
+                    .padding(top = 9.dp)
+                    .fillMaxHeight()
+                    .offset(x = animatedOffset),
+                backdrop = backdrop,
             ) {
                 Text(
                     text = stepLabels[currentIndex],
@@ -1695,7 +1772,6 @@ fun AuthStepIndicator(
                 )
             }
 
-             */
 
 /*
             Box(
@@ -1735,6 +1811,7 @@ fun AuthStepIndicator(
 
  */
 
+            /*
             IndicatorGlassBox(
                 modifier = Modifier
                     .width(stepWidth)
@@ -1749,6 +1826,8 @@ fun AuthStepIndicator(
                     )
                 )
             }
+
+             */
 
 
 
