@@ -65,9 +65,11 @@ import com.leejang.sleeptandard.ui.theme.AppIcons
 @Composable
 fun QnAScreen(
     onBack: () -> Unit = {},
-    onClickAsk: () -> Unit = {},
+    onClickAsk: () -> Unit,
+    onDismiss: () -> Unit,
     onClickItem: (String) -> Unit = {},
-    onSubmit: (title: String, body: String, imageUris: List<Uri>) -> Unit
+    onSubmit: (title: String, body: String, imageUris: List<Uri>) -> Unit,
+    showInquireModal: Boolean
 ) {
     // 사용자가 입력하는 값
     var query by remember { mutableStateOf("") }
@@ -84,7 +86,7 @@ fun QnAScreen(
         else allItems.filter { it.title.contains(q, ignoreCase = true) }
     }
 
-    var showInquireModal by remember{ mutableStateOf(false)}
+    // var showInquireModal by remember{ mutableStateOf(false)}
     val modalBlur = if(showInquireModal) 20.dp else 0.dp
 
     // 흰색 그림자
@@ -267,8 +269,7 @@ fun QnAScreen(
             ) {
                 Button(
                     onClick = {
-                        showInquireModal = true
-                        //onClickAsk
+                        onClickAsk()
                     },
                     modifier = Modifier
                         .fillMaxWidth()
@@ -292,7 +293,7 @@ fun QnAScreen(
 
             if(showInquireModal){
                 InquireModalBottomSheet(
-                    onDismiss = { showInquireModal = false },
+                    onDismiss = { onDismiss() },
                     onSubmit = onSubmit
                 )
             }
