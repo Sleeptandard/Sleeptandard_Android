@@ -1,11 +1,14 @@
 package com.leejang.sleeptandard.Screen
 
+import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.keyframes
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -33,12 +36,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -52,8 +55,6 @@ import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.draw.dropShadow
-import androidx.compose.ui.draw.innerShadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Brush.Companion.horizontalGradient
 import androidx.compose.ui.graphics.Brush.Companion.linearGradient
@@ -61,19 +62,19 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.shadow.Shadow
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.kyant.backdrop.Backdrop
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.leejang.sleeptandard.Component.CustomTimePicker
 import com.leejang.sleeptandard.Component.DiamondStepSlider
+import com.leejang.sleeptandard.Component.LiquidGlassBox
 import com.leejang.sleeptandard.ui.theme.AppIcons
-import com.leejang.sleeptandard.ui.theme.Pretandard
 
 @Composable
 fun TutorialScreen(
@@ -87,17 +88,22 @@ fun TutorialScreen(
         )
     )
 
-    val circleGradation = Brush.radialGradient(
-        colors = listOf(
-            Color(0x00F1F1F1),
-            Color(0x1AF1F1F1)
-        )
-    )
 
     val buttonGradient = linearGradient(
         listOf(Color(0xFF437AC7),
             Color(0xFFAFF4F9))
     )
+
+    val barGradient = linearGradient(
+        listOf(Color(0xFF437AC7),
+            Color(0xFFAFF4F9))
+    )
+
+    // 리퀴드 글래스 드가자
+    val backdrop = rememberLayerBackdrop {
+        drawRect(Color.White)
+        drawContent()
+    }
 
     var currentPage by remember { mutableIntStateOf(0) }
     val maxPage = 4 // 0: 시작, 1: 알람설정, 2: 취침, 3: 피드백, 4: 절전 상태 해제
@@ -109,127 +115,274 @@ fun TutorialScreen(
         currentPage -= 1
     }
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(linearGradation),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ){
+            .layerBackdrop(backdrop)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(linearGradation),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
 
-        Spacer(Modifier.height(60.dp))
+            Spacer(Modifier.height(60.dp))
 
-        if(currentPage in 1..3){
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(0.9f)
-                    .height(55.dp)
-                    .background(color = Color(0x1AFFFFFF), shape = RoundedCornerShape(50.dp))
-                    .padding(4.dp)
-            ){
-                Row(modifier = Modifier.fillMaxSize()) {
-                    listOf("알람설정", "취침", "피드백").forEachIndexed { index, title ->
-                        val pageNum = index + 1
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxHeight()
-                                .clip(RoundedCornerShape(50.dp))
-                                // 현재 페이지일 때만 배경 브러시 적용
-                                .background(
-                                    if (currentPage == pageNum) circleGradation else Brush.linearGradient(
-                                        listOf(Color.Transparent, Color.Transparent)
+            if(currentPage in 1..3) {
+                // Rail
+                Box(
+                    modifier = Modifier.height(52.dp).padding(top = 9.dp, start = 20.dp, end = 20.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(8.dp)
+                            .background(brush = barGradient, shape = RoundedCornerShape(10.dp))
+                    )
+                }
+            }
+
+            /*
+            if (currentPage in 1..3) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.9f)
+                        .height(55.dp)
+                        .background(color = Color(0x1AFFFFFF), shape = RoundedCornerShape(50.dp))
+                        .padding(4.dp)
+                ) {
+                    Row(modifier = Modifier.fillMaxSize()) {
+                        listOf("알람설정", "취침", "피드백").forEachIndexed { index, title ->
+                            val pageNum = index + 1
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight()
+                                    .clip(RoundedCornerShape(50.dp))
+                                    // 현재 페이지일 때만 배경 브러시 적용
+                                    .background(
+                                        if (currentPage == pageNum) circleGradation else Brush.linearGradient(
+                                            listOf(Color.Transparent, Color.Transparent)
+                                        )
+                                    )
+                                    .clickable { currentPage = pageNum },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = title,
+                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                        fontSize = 15.sp,
+                                        color = if (currentPage == pageNum) Color.White else Color.White.copy(
+                                            alpha = 0.5f
+                                        )
                                     )
                                 )
-                                .clickable { currentPage = pageNum },
-                            contentAlignment = Alignment.Center
+                            }
+                        }
+                    }
+                }
+            }
+
+             */
+            Spacer(Modifier.height(40.dp))
+
+            // 2. 페이지 내용 (애니메이션 적용 영역)
+            Box(modifier = Modifier.weight(1f)) {
+                AnimatedContent(
+                    targetState = currentPage,
+                    transitionSpec = {
+                        fadeIn(tween(500)).togetherWith(fadeOut(tween(500)))
+                    },
+                    label = "TutorialPageTransition"
+                ) { targetPage ->
+                    // targetPage 상태에 따라 화면을 그립니다.
+                    when (targetPage) {
+                        0 -> StartPage()
+                        1 -> AlarmSettingPart()
+                        2 -> AlarmSettedPart()
+                        3 -> FeedbackPart()
+                        4 -> WatchPowerSavingPage()
+                    }
+                }
+            }
+
+            Button(
+                modifier = Modifier
+                    .padding(horizontal = 20.dp)
+                    .clip(RoundedCornerShape(100.dp)),
+                onClick = {
+                    if (currentPage < maxPage) {
+                        Log.d("wtf", "currentPage: ${currentPage}")
+                        currentPage += 1
+                    } else {
+                        onFinish() // 마지막 페이지에서 누르면 홈으로 이동
+                    }
+                },
+                contentPadding = PaddingValues(0.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(100.dp))
+                        .fillMaxWidth(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(60.dp)
+                            .background(brush = buttonGradient)
+                            .blur(30.dp)
+                            .border(
+                                width = 2.dp,
+                                brush = Brush.verticalGradient(
+                                    colors = listOf(
+                                        Color.White.copy(alpha = 0.4f), // 테두리 위쪽 (빛남)
+                                        Color.Transparent,             // 테두리 중간 (투명)
+                                        Color.White.copy(alpha = 0.1f)  // 테두리 아래쪽 (은은함)
+                                    )
+                                ),
+                                shape = RoundedCornerShape(24.dp)
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+
+                    }
+
+                    Text(
+                        text = if (currentPage < maxPage) "다음" else "시작하기",
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontSize = 18.sp,
+                            color = Color.White
+
+                        )
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(118.dp))
+        }
+    }
+
+    // 인디케이터
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ){
+        Spacer(Modifier.height(60.dp))
+
+        TutorialIndicator(
+            modifier = Modifier,
+            currentPage = currentPage,
+            backdrop = backdrop,
+        )
+    }
+}
+@Composable
+fun TutorialIndicator(
+    backdrop : Backdrop,
+    currentPage: Int,
+    modifier: Modifier = Modifier
+) {
+    // 1. 표시할 텍스트 리스트 (로그인/회원가입 공통 단계로 구성)
+    val stepLabels = listOf("알람설정", "취침", "피드백")
+
+    val numberOfSteps = stepLabels.size
+
+    if(currentPage in 1..3){
+        BoxWithConstraints(
+            modifier = modifier
+                .fillMaxWidth()
+                .height(52.dp)
+        ) {
+            val glassWidth = 105.dp
+            val stepWidth = (maxWidth) / numberOfSteps
+            val diff = (stepWidth - glassWidth)/2
+            val targetOffset = stepWidth * (currentPage - 1) + diff * (currentPage - 1)
+
+            // 위치 이동 애니메이션
+            val animatedOffset by animateDpAsState(
+                targetValue = targetOffset,
+                animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
+                label = "step_highlight_move"
+            )
+
+            Box(
+                modifier = Modifier
+                    .padding(horizontal = 10.dp)
+                    .fillMaxSize()
+            ){
+                Row(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ){
+                    stepLabels.forEachIndexed { index, step ->
+
+                        val isSelected = index == (currentPage - 1)
+
+                        // 1. 투명도 애니메이션 (선택되면 0, 아니면 1)
+                        val textAlpha by animateFloatAsState(
+                            targetValue = if (isSelected) 0f else 1f,
+                            animationSpec = tween(durationMillis = 300),
+                            label = "text_alpha"
+                        )
+
+                        // 2. 수직 이동 애니메이션 (선택되면 아래로 20dp 이동)
+                        val textOffset by animateDpAsState(
+                            targetValue = if (isSelected) 20.dp else 0.dp,
+                            animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
+                            label = "text_offset"
+                        )
+
+                        Box(
+                            modifier = Modifier.weight(1f), // 화면을 정확히 1:1:1로 나눕니다.
+                            contentAlignment = when (index) {
+                                0 -> Alignment.CenterStart // 첫 번째: 왼쪽 정렬
+                                1 -> Alignment.Center      // 두 번째: 무조건 중앙 정렬
+                                else -> Alignment.CenterEnd // 세 번째: 오른쪽 정렬ㅅ
+                            }
                         ) {
                             Text(
-                                text = title,
+                                text = step,
+                                modifier = Modifier
+                                    .graphicsLayer {
+                                        alpha = textAlpha            // 투명도 적용
+                                        translationY = textOffset.toPx() // 아래로 사라지는 이동 적용
+                                    },
                                 style = MaterialTheme.typography.bodyMedium.copy(
-                                    fontSize = 15.sp,
-                                    color = if (currentPage == pageNum) Color.White else Color.White.copy(alpha = 0.5f)
+                                    color = Color.White,
+                                    fontSize = 14.sp
                                 )
                             )
                         }
                     }
                 }
             }
-        }
-        Spacer(Modifier.height(40 .dp))
 
-        // 2. 페이지 내용 (애니메이션 적용 영역)
-        Box(modifier = Modifier.weight(1f)) {
-            AnimatedContent(
-                targetState = currentPage,
-                transitionSpec = {
-                    fadeIn(tween(500)).togetherWith(fadeOut(tween(500))) },
-                label = "TutorialPageTransition"
-            ) { targetPage ->
-                // targetPage 상태에 따라 화면을 그립니다.
-                when (targetPage) {
-                    0 -> StartPage()
-                    1 -> AlarmSettingPart()
-                    2 -> AlarmSettedPart()
-                    3 -> FeedbackPart()
-                    4 -> WatchPowerSavingPage()
-                }
-            }
-        }
-
-        Button(
-            modifier = Modifier
-                .padding(horizontal = 20.dp)
-                .clip(RoundedCornerShape(100.dp)),
-            onClick = {
-                if (currentPage < maxPage) {
-                    currentPage += 1
-                } else {
-                    onFinish() // 마지막 페이지에서 누르면 홈으로 이동
-                }
-            },
-            contentPadding = PaddingValues(0.dp)
-        ){
-            Box(
+            LiquidGlassBox(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(100.dp))
-                    .fillMaxWidth(),
-                contentAlignment = Alignment.Center
-            ){
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(60.dp)
-                        .background(brush = buttonGradient)
-                        .blur(30.dp)
-                        .border(
-                            width = 2.dp,
-                            brush = Brush.verticalGradient(
-                                colors = listOf(
-                                    Color.White.copy(alpha = 0.4f), // 테두리 위쪽 (빛남)
-                                    Color.Transparent,             // 테두리 중간 (투명)
-                                    Color.White.copy(alpha = 0.1f)  // 테두리 아래쪽 (은은함)
-                                )
-                            ),
-                            shape = RoundedCornerShape(24.dp)
-                        ),
-                    contentAlignment = Alignment.Center
-                ){
-
-                }
-
+                    .width(glassWidth)
+                    .padding(top = 9.dp)
+                    .fillMaxHeight()
+                    .offset(x = animatedOffset),
+                backdrop = backdrop,
+            ) {
                 Text(
-                    text = if (currentPage < maxPage) "다음" else "시작하기",
+                    text = stepLabels[currentPage-1],
                     style = MaterialTheme.typography.bodyMedium.copy(
-                        fontSize = 18.sp,
-                        color = Color.White
-
+                        color = Color(0xFFAFF4F9),
+                        fontSize = 16.sp
                     )
                 )
             }
-        }
 
-        Spacer(Modifier.height(118.dp))
+        }
     }
+
+
 }
 
 @Composable
@@ -817,10 +970,10 @@ fun GraphAnimation(
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
             animation = keyframes {
-                durationMillis = 4000
+                durationMillis = 6000
                 0f at 0 using LinearEasing
                 1f at animationDuration using FastOutSlowInEasing
-                1f at 4000
+                1f at 6000
             },
             repeatMode = RepeatMode.Restart
         ),
@@ -832,11 +985,11 @@ fun GraphAnimation(
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
             animation = keyframes {
-                durationMillis = 4000
+                durationMillis = 6000
                 0f at 0
                 0f at animationDuration + 1000
                 1f at animationDuration + 1000 + animationDuration using FastOutSlowInEasing
-                1f at 4000
+                1f at 6000
             },
             repeatMode = RepeatMode.Restart
         ),

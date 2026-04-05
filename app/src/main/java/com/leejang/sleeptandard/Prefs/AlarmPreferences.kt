@@ -63,4 +63,20 @@ class AlarmPreferences(private val context: Context) {
     fun isAlarmSet(): Boolean {
         return prefs.getBoolean("hasAlarm", false)
     }
+    /** * 기상 윈도우 튜토리얼 노출 여부를 가져옵니다.
+     * 기본값은 true로 설정하여 처음에는 무조건 보이게 합니다.
+     */
+    fun getShowWindowTutorial(): Boolean {
+        return prefs.getBoolean("show_window_tutorial", true)
+    }
+
+    /**
+     * 기상 윈도우 튜토리얼 노출 여부를 저장합니다.
+     * 체크박스 선택 여부에 따라 true 또는 false를 저장합니다.
+     */
+    fun setShowWindowTutorial(show: Boolean) {
+        prefs.edit()
+            .putBoolean("show_window_tutorial", show)
+            .apply()
+    }
 }
