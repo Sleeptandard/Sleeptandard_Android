@@ -3,6 +3,7 @@ package com.leejang.sleeptandard.backend
 import android.content.Context
 import android.util.Log
 import androidx.work.CoroutineWorker
+import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import com.leejang.sleeptandard.BuildConfig
 import io.github.jan.supabase.auth.auth
@@ -19,16 +20,15 @@ import java.util.concurrent.TimeUnit
 /**
  * CsvUploadWorker
  *
- * WorkManager에 의해 실행되는 CSV 업로드 작업 단위.
- * - OkHttp + file.asRequestBody()를 사용한 진짜 스트리밍 업로드
- *   → 파일 전체를 메모리에 올리지 않아 26MB+ 파일도 OOM 없이 안전하게 전송
- * - 네트워크 연결 시에만 실행 (WorkManager 제약 조건)
+ * WorkManager(Expedited)에 의해 실행되는 CSV 업로드 작업 단위.
+ * - Expedited 작업으로 Doze 모드를 우회 (Android 12+)
+ * - OkHttp file.asRequestBody() 스트리밍: 파일 전체를 메모리에 올리지 않음
  * - 실패 시 최대 3회 자동 재시도 (Exponential Backoff)
  */
 class CsvUploadWorker(
-    context: Context,
+    private val appContext: Context,
     params: WorkerParameters
-) : CoroutineWorker(context, params) {
+) : CoroutineWorker(appContext, params) {
 
     companion object {
         private const val TAG = "CsvUploadWorker"
@@ -36,12 +36,19 @@ class CsvUploadWorker(
         const val KEY_FILE_PATH = "csv_file_path"
     }
 
-    // 타임아웃을 넉넉하게 설정 (26MB 전송 시 시간이 걸릴 수 있음)
+    // 타임아웃을 넉넉하게 설정 (대용량 파일 고려)
     private val okHttpClient = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
-        .writeTimeout(10, TimeUnit.MINUTES)  // 대용량 파일 업로드를 고려한 여유로운 타임아웃
+        .writeTimeout(10, TimeUnit.MINUTES)
         .readTimeout(60, TimeUnit.SECONDS)
         .build()
+
+    /**
+     * Expedited 작업 실행을 위해 반드시 필요한 ForegroundInfo 반환
+     */
+    override suspend fun getForegroundInfo(): ForegroundInfo {
+        return CsvUploadManager.createForegroundInfo(appContext, "수면 데이터 업로드 중...")
+    }
 
     override suspend fun doWork(): Result {
         val filePath = inputData.getString(KEY_FILE_PATH)
@@ -55,26 +62,18 @@ class CsvUploadWorker(
 
         return try {
             val supabaseClient = SupabaseClientProvider.client
-
-            // 로그인된 유저 UID (없으면 "anonymous")
             val userId = supabaseClient.auth.currentUserOrNull()?.id ?: "anonymous"
-
-            // 액세스 토큰 (로그인 시 JWT, 없으면 anon key 사용)
             val accessToken = supabaseClient.auth.currentSessionOrNull()?.accessToken
                 ?: BuildConfig.SUPABASE_ANON_KEY
 
-            // Storage 경로: {userId}/{날짜}/{파일명}
             val dateFolder = LocalDate.now().toString()
             val storagePath = "$userId/$dateFolder/${file.name}"
-
-            // Supabase Storage REST API 업로드 URL
             val uploadUrl = "${BuildConfig.SUPABASE_URL}/storage/v1/object/$BUCKET_NAME/$storagePath"
 
             Log.i(TAG, "📤 Uploading: $storagePath (${file.length() / 1024}KB)")
 
-            // [핵심] OkHttp file.asRequestBody()
-            // - 파일을 통째로 메모리에 올리지 않고 디스크에서 네트워크로 직접 스트리밍
-            // - 어떤 크기의 파일이든 OOM 없이 안전하게 전송 가능
+            // OkHttp 스트리밍 업로드 - 파일을 디스크에서 네트워크로 직접 전송
+            // file.asRequestBody() = OOM 없는 진짜 스트리밍
             val mediaType = "text/csv; charset=utf-8".toMediaTypeOrNull()
             val requestBody = file.asRequestBody(mediaType)
 
