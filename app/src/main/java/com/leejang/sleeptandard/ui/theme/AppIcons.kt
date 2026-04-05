@@ -1,6 +1,7 @@
 package com.leejang.sleeptandard.ui.theme
 
 import androidx.annotation.DrawableRes
+import com.leejang.sleeptandard.Component.Screen
 import com.leejang.sleeptandard.R
 
 
@@ -72,12 +73,30 @@ object AppIcons {
     @DrawableRes val MemoNap = R.drawable.ic_memo_nap
     @DrawableRes val MemoPill = R.drawable.ic_memo_pill
     @DrawableRes val MemoDrink = R.drawable.ic_memo_drink
+    @DrawableRes val HomeHand = R.drawable.ic_home_point_hand
+    @DrawableRes val HomeDoubleArrow = R.drawable.ic_home_double_arrow
+    @DrawableRes val HomeCheck = R.drawable.ic_home_check
+    @DrawableRes val HomeX = R.drawable.ic_home_x
 
     // 튜토리얼
     @DrawableRes val TutorialGraph = R.drawable.image_tutorial_graph
+    @DrawableRes val TutorialGraph2 = R.drawable.image_tutorial_graph2
+    @DrawableRes val TutorialGraph3 = R.drawable.image_tutorial_graph3
     @DrawableRes val Tutorial30Min = R.drawable.image_tutorial_30min
     @DrawableRes val TutorialFeedback = R.drawable.image_tutorial_feedback
+    @DrawableRes val TutorialFeedback2 = R.drawable.image_tutorial_feedback2
     @DrawableRes val TutorialPowerSaving1 = R.drawable.image_tutorial_power_saving1
     @DrawableRes val TutorialPowerSaving2 = R.drawable.image_tutorial_power_saving2
+
+
+    // 로그인/회원가입 화면
+    @DrawableRes val RegisterClock = R.drawable.image_register_clock
+    @DrawableRes val RegisterLogo = R.drawable.image_register_logo
+    @DrawableRes val RegisterWarning = R.drawable.ic_login_warning
+    @DrawableRes val RegisterInvisible = R.drawable.ic_register_invisible
+    @DrawableRes val RegisterVisible = R.drawable.ic_register_visible
+    @DrawableRes val RegisterCancel = R.drawable.ic_register_cancel
+    @DrawableRes val RegisterOK = R.drawable.ic_nickname_ok
+    @DrawableRes val RegisterMail = R.drawable.ic_login_mail
 
 }

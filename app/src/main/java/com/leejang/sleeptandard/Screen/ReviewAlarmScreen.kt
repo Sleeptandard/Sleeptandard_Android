@@ -1,6 +1,7 @@
 package com.leejang.sleeptandard.Screen
 
 import android.graphics.BlurMaskFilter
+import android.util.Log
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -32,7 +33,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -61,6 +64,8 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.leejang.sleeptandard.ui.theme.AppIcons
+import kotlin.math.abs
+import kotlin.math.log
 import kotlin.math.roundToInt
 
 @Composable
@@ -173,7 +178,8 @@ fun ReviewAlarmScreen(
 fun SemiCircularSlider(
     value: Float, // 0.0f ~ 1.0f
     onValueChange: (Float) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    touchEnabled: Boolean = true
 ) {
     val strokeWidth = 24.dp
     val density = LocalDensity.current
@@ -193,6 +199,15 @@ fun SemiCircularSlider(
             )
     )
 
+    // ✅ 1. 'Stale Closure' 방지를 위해 최신 상태를 담는 홀더를 만듭니다.
+    val currentValue by rememberUpdatedState(value)
+    val currentOnValueChange by rememberUpdatedState(onValueChange)
+    // ✅ 상태 관리 변수
+    var accumulatedDelta by remember { mutableFloatStateOf(0f) } // x: 각도의 변화량
+    var startValueAtDrag by remember { mutableFloatStateOf(0f) } // y를 구하기 위한 시작 시점의 value
+    var lastAngle by remember { mutableFloatStateOf(0f) }        // 이전 프레임의 각도
+
+
     Box(
         modifier = Modifier
             .size(300.dp)
@@ -211,23 +226,61 @@ fun SemiCircularSlider(
             // ✅ 1. 조작 가능한 실제 가로 길이 및 마진 계산
             // 트랙의 두께 절반 지점부터 반대쪽 두께 절반 지점까지를 100% 범위로 잡습니다.
             val sideMarginPx = strokeWidthPx / 2
-            val usableWidth = width - (2 * sideMarginPx)
+            // val usableWidth = width - (2 * sideMarginPx)
 
             // ✅ 2. 트랙 중앙선 반지름 계산 (손잡이 정렬용)
             val centerRadius = (width - strokeWidthPx) / 2f
             val centerOffset = Offset(width / 2, width / 2)
+            val centerX = width / 2f
+            val centerY = width / 2f // 원의 중심
+
+            // 9시 방향을 0도로 계산하기 위한 헬퍼 함수
+            fun getAngleFrom9OClock(offset: Offset): Float {
+                val rawAngle = Math.toDegrees(
+                    Math.atan2((offset.y - centerY).toDouble(), (offset.x - centerX).toDouble())
+                ).toFloat()
+                // atan2는 9시 방향이 -180도, 3시 방향이 0도이므로 180을 더해 0~180 범위로 만듭니다.
+                return rawAngle + 180f
+            }
+
+            // C. ✅ 손잡이 좌표: 중앙선 반지름(centerRadius)을 기준으로 계산
+            val thumbAngle = Math.toRadians(180.0 + (180.0 * value))
+            val thumbX = centerOffset.x + centerRadius * kotlin.math.cos(thumbAngle).toFloat()
+            val thumbY = centerOffset.y + centerRadius * kotlin.math.sin(thumbAngle).toFloat()
+
 
             Canvas(
                 modifier = Modifier
                     .fillMaxSize()
                     .pointerInput(Unit) {
-                        detectDragGestures { change, _ ->
-                            // ✅ 3. x축 변화값만 사용하여 비율 계산
-                            val touchX = change.position.x
-                            val normalized =
-                                ((touchX - sideMarginPx) / usableWidth).coerceIn(0f, 1f)
-                            onValueChange(normalized)
-                        }
+                        detectDragGestures(
+                            onDragStart = { offset ->
+                                lastAngle = getAngleFrom9OClock(offset)
+
+                                // ✅ 2. 0.5f 고정값이 아닌, 업데이트된 최신 값을 시작점으로 잡습니다.
+                                startValueAtDrag = currentValue
+
+                                accumulatedDelta = 0f
+                            },
+                            onDrag = { change, _ ->
+                                val currentAngle = getAngleFrom9OClock(change.position)
+
+                                var delta = currentAngle - lastAngle
+                                if (delta > 180f) delta -= 360f
+                                else if (delta < -180f) delta += 360f
+
+                                accumulatedDelta += delta
+                                lastAngle = currentAngle
+
+                                val x = accumulatedDelta
+                                val y = startValueAtDrag * 180f
+
+                                val newNormalized = ((x + y).coerceIn(0f, 180f)) / 180f
+
+                                // ✅ 3. 콜백도 최신 상태를 유지하도록 호출합니다.
+                                currentOnValueChange(newNormalized)
+                            }
+                        )
                     }
             ) {
                 // A. 배경 트랙
@@ -252,10 +305,6 @@ fun SemiCircularSlider(
                     style = Stroke(width = strokeWidthPx, cap = StrokeCap.Round)
                 )
 
-                // C. ✅ 손잡이 좌표: 중앙선 반지름(centerRadius)을 기준으로 계산
-                val thumbAngle = Math.toRadians(180.0 + (180.0 * value))
-                val thumbX = centerOffset.x + centerRadius * kotlin.math.cos(thumbAngle).toFloat()
-                val thumbY = centerOffset.y + centerRadius * kotlin.math.sin(thumbAngle).toFloat()
 
                 // 손잡이 그림자
                 drawIntoCanvas { canvas ->
@@ -336,179 +385,3 @@ fun SemiCircularSlider(
         )
     }
 }
-
-/* R.I.P
-@Composable
-fun DifficultySelectorCustomDraggable(
-    value: Int, // -1=무응답 0=쉬움, 1=보통, 2=어려움
-    onValueChange: (Int) -> Unit,
-    answerList: List<String>,
-    modifier: Modifier = Modifier,
-) {
-    var trackWidthPx by remember { mutableIntStateOf(0) }
-    val steps = answerList.size
-    val lastIndex = steps - 1
-
-    val faceResId = listOf(AppIcons.ReviewBad, AppIcons.ReviewMeh, AppIcons.ReviewSmile)
-
-    // 각 점의 x 위치(px)를 계산
-    val thumbRadiusPx = with(LocalDensity.current) { 9.dp.toPx() }
-
-    // 2. 각 인덱스의 정확한 X 좌표 계산 함수
-    fun getXForIndex(index: Int, width: Int): Float {
-        if (width <= 0) return 0f
-        // 인덱스가 -1인 초기 상태라면 중앙이나 첫번째 위치에 둠
-        val safeIndex = if (index == -1) 0 else index
-        val usableWidth = (width - 2 * thumbRadiusPx).coerceAtLeast(0f)
-        val step = usableWidth / lastIndex
-        return thumbRadiusPx + (step * safeIndex)
-    }
-
-    // 3. 현재 좌표를 기반으로 가장 가까운 인덱스 찾기
-    fun getIndexForX(x: Float, width: Int): Int {
-        if (width <= 0) return 0
-        val usableWidth = (width - 2 * thumbRadiusPx).coerceAtLeast(0f)
-        val step = usableWidth / lastIndex
-
-        // 픽셀 위치를 인덱스 범위(0..2)로 변환 후 반올림
-        val relativeX = (x - thumbRadiusPx).coerceIn(0f, usableWidth)
-        return (relativeX / step).roundToInt().coerceIn(0, lastIndex)
-    }
-
-
-
-    val usableWidth = (trackWidthPx.toFloat() - 2 * thumbRadiusPx).coerceAtLeast(0f)
-
-    // 점과 텍스트의 중심이 될 X 좌표 계산 함수 (일관성 유지)
-    fun anchorX(index: Int, totalWidth: Int): Float {
-        if (totalWidth <= 0) return 0f
-        val usableWidth = (totalWidth.toFloat() - 2 * thumbRadiusPx).coerceAtLeast(0f)
-        val step = usableWidth / lastIndex
-        // index가 -1일 경우 첫 번째 위치(0)를 기본값으로 보여줌
-        val safeIndex = if (index == -1) 0 else index
-        return thumbRadiusPx + (step * safeIndex)
-    }
-
-    // 현재 value에 해당하는 thumb 위치
-    val targetX = getXForIndex(value, trackWidthPx)
-
-    val animatedX by animateFloatAsState(
-        targetValue = targetX,
-        label = "thumbX",
-        // 드래그 중일 때는 애니메이션을 끄거나 아주 빠르게 설정해야 반응성이 좋습니다.
-    )
-
-    Column(
-        modifier = modifier.fillMaxWidth(),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        // === 트랙 영역(드래그 받는 곳) ===
-        Box(
-            modifier = Modifier
-                .fillMaxWidth(0.72f)
-                .height(48.dp) // 터치 영역 확보를 위해 높이 조절
-                .onSizeChanged { trackWidthPx = it.width }
-                .pointerInput(trackWidthPx) {
-                    detectDragGestures(
-                        onDragStart = { offset ->
-                            onValueChange(getIndexForX(offset.x, trackWidthPx))
-                        },
-                        onDrag = { change, _ ->
-                            // change.position.x는 절대 좌표를 제공하므로 누적 계산이 필요 없음
-                            val newIdx = getIndexForX(change.position.x, trackWidthPx)
-                            if (newIdx != value) onValueChange(newIdx)
-                        }
-                    )
-                }
-                // 클릭 시에도 이동하도록 추가
-                .pointerInput(trackWidthPx) {
-                    detectTapGestures { offset ->
-                        onValueChange(getIndexForX(offset.x, trackWidthPx))
-                    }
-                },
-            contentAlignment = Alignment.CenterStart
-        ) {
-            // 트랙 라인
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 2.dp)
-                    .height(2.dp)
-                    // .align(Alignment.Center)
-                    .background(Color.White.copy(alpha = 0.4f))
-            )
-
-            // 고정 점(3개)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                repeat(steps) { idx ->
-                    val selected = idx == value
-
-                    Box(
-                        modifier = Modifier
-                            .size(10.dp)
-                            .graphicsLayer {
-                                scaleX = if (selected) 1.2f else 1f
-                            }
-                            .background(Color(0xFFCBCBCB), CircleShape)
-                    )
-                }
-            }
-
-            // Thumb
-            if (value != -1) {
-                Box(
-                    modifier = Modifier
-                        .offset { IntOffset((animatedX - thumbRadiusPx).roundToInt(), 0) }
-                        .size(26.dp)
-                        .shadow(12.dp, CircleShape)
-                        .background(Color.White, CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        painter = painterResource(faceResId[value]),
-                        contentDescription = null,
-                        tint = Color.Unspecified
-                    )
-                }
-            }
-        }
-
-        Spacer(Modifier.height(10.dp))
-
-        // === 라벨 영역 (수정된 부분) ===
-        // 트랙과 똑같은 너비를 가지도록 설정 (0.72f)
-        Box(
-            modifier = Modifier
-                .fillMaxWidth(0.72f)
-                .height(24.dp)
-        ) {
-            answerList.forEachIndexed { idx, text ->
-                val selected = idx == value
-                val xPos = anchorX(idx, trackWidthPx) // 트랙의 점과 동일한 X 좌표
-
-                Text(
-                    text = text,
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontSize = 16.sp,
-                        color = if (selected) Color.White else Color.White.copy(alpha = 0.55f)
-                    ),
-                    modifier = Modifier
-                        .layout { measurable, constraints ->
-                            val placeable = measurable.measure(constraints)
-                            layout(placeable.width, placeable.height) {
-                                // 텍스트의 중심이 xPos에 오도록 (xPos - 너비의 절반) 위치에 배치
-                                val xPosition = xPos - (placeable.width / 2f)
-                                placeable.placeRelative(xPosition.roundToInt(), 0)
-                            }
-                        }
-                )
-            }
-        }
-    }
-}
-
- */

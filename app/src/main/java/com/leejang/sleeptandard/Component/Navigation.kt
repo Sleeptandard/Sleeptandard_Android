@@ -117,6 +117,11 @@ fun AppNav(
     var isBlurred by remember{ mutableStateOf(false) }
 
 
+    // ✅ 1. 영구 저장소에서 초기 값을 가져와 세션 상태로 관리합니다.
+    // getShowWindowTutorial()은 SharedPreferences에서 값을 읽어오는 가상의 함수입니다.
+    var showWindowTutorial by remember { mutableStateOf(alarmPrefs.getShowWindowTutorial()) }
+
+
     val navGraph = rememberNavController.createGraph(startDestination = startDestination){
 
         /* 컴포즈 스플래시
@@ -133,7 +138,7 @@ fun AppNav(
         /** 로그인 데모 **/
         composable(Screen.LoginDemo.route){
             LoginDemoScreen(
-                onComplete = { greeting ->
+                onConfirm = { greeting ->
                     rememberNavController.navigate(Screen.Home.route)
                     Toast.makeText(context, greeting, Toast.LENGTH_SHORT).show()
                 }
@@ -151,6 +156,15 @@ fun AppNav(
                 },
                 goExperimentScreen = {
                     rememberNavController.navigate(Screen.Experiment.route)
+                },
+                showWindowTutorial = showWindowTutorial,
+                onDismissTutorial = { isChecked ->
+                    // 2번 요구사항: 체크박스를 체크하고 닫았다면 영구적으로 보이지 않게 저장
+                    if (isChecked) {
+                        alarmPrefs.setShowWindowTutorial(false)
+                    }
+                    // 현재 세션에서 창 닫기
+                    showWindowTutorial = false
                 }
             )
         }
@@ -254,9 +268,27 @@ fun AppNav(
             TutorialScreen(
                 onFinish = {
                     alarmPrefs.setFirstRunCompleted()
+                    // ✅ 3번 요구사항: TutorialScreen 완료 시 튜토리얼을 볼 수 있게 설정
+                    alarmPrefs.setShowWindowTutorial(true) // 영구 저장소 업데이트
+                    showWindowTutorial = true               // 세션 상태 업데이트
+
+                    rememberNavController.navigate(Screen.Home.route) {
+                        popUpTo(Screen.Tutorial.route) { inclusive = true }
+                    }
+                }
+                /*
+                onFinish = {
+                    alarmPrefs.setFirstRunCompleted()
                     rememberNavController.popBackStack()
+                    when{
+                        // TODO: 로그인 정보가 없는경우 -> Screen.LoginDemo.route
+                        alarmPrefs.isFirstRun() -> Screen.Tutorial.route
+                        else -> Screen.Home.route
+                    }
                     rememberNavController.navigate(Screen.Home.route)
                 }
+
+                 */
             )
         }
         composable(Screen.SendingData.route) {
