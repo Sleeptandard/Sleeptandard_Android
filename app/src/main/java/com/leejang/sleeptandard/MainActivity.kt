@@ -1,6 +1,7 @@
 package com.leejang.sleeptandard
 
 import android.os.Bundle
+import java.io.File
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -90,9 +91,42 @@ class MainActivity : ComponentActivity() {
 
                 AppNav(
                     scheduler = AlarmScheduler(this),
-                    startDestination = startDestination, // 기존 로직을 함수로 분리
+                    startDestination = startDestination,
                     initialAlarm = alarmPrefs.loadAlarm()
                 )
+            }
+        }
+
+        // [안전망] 앱 실행 시 미전송 CSV 파일 자동 재업로드
+        // WorkManager가 대용량 파일 전송 중 시스템에 의해 종료된 경우를 대비
+        enqueueUnsentCsvFiles()
+    }
+
+    /**
+     * filesDir에 남아 있는 received_*.csv 파일을 스캔하여 WorkManager에 업로드 등록
+     * 이미 업로드된 파일은 .uploaded 마커 파일로 구분하여 중복 업로드 방지
+     */
+    private fun enqueueUnsentCsvFiles() {
+        lifecycleScope.launch(Dispatchers.IO) {
+            val csvFiles = filesDir.listFiles { file ->
+                file.name.startsWith("received_") && file.name.endsWith(".csv")
+            } ?: return@launch
+
+            val unsentFiles = csvFiles.filter { file ->
+                // .uploaded 마커 파일이 없는 것만 업로드 대상
+                !File(file.parent, "${file.name}.uploaded").exists()
+            }
+
+            if (unsentFiles.isEmpty()) {
+                android.util.Log.i("MainActivity", "✅ No unsent CSV files found")
+                return@launch
+            }
+
+            android.util.Log.i("MainActivity", "📋 Found ${unsentFiles.size} unsent CSV files - re-enqueueing...")
+
+            unsentFiles.forEach { file ->
+                com.leejang.sleeptandard.backend.CsvUploadManager.enqueueUpload(applicationContext, file)
+                android.util.Log.i("MainActivity", "  → Re-enqueued: ${file.name} (${file.length() / 1024}KB)")
             }
         }
     }

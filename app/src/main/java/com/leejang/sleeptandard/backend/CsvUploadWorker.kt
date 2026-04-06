@@ -62,6 +62,15 @@ class CsvUploadWorker(
 
         return try {
             val supabaseClient = SupabaseClientProvider.client
+
+            // [핵심] 세션 강제 갱신 - 백그라운드에서 오래 대기 시 토큰 만료 방지
+            try {
+                supabaseClient.auth.refreshCurrentSession()
+                Log.i(TAG, "🔄 Session refreshed successfully")
+            } catch (e: Exception) {
+                Log.w(TAG, "⚠️ Session refresh failed (will try with existing/anon): ${e.message}")
+            }
+
             val userId = supabaseClient.auth.currentUserOrNull()?.id ?: "anonymous"
             val accessToken = supabaseClient.auth.currentSessionOrNull()?.accessToken
                 ?: BuildConfig.SUPABASE_ANON_KEY
@@ -92,6 +101,8 @@ class CsvUploadWorker(
 
             if (response.isSuccessful) {
                 Log.i(TAG, "✅ Upload complete: $BUCKET_NAME/$storagePath (${file.length() / 1024}KB)")
+                // 업로드 성공 마커 파일 생성 → MainActivity에서 중복 재업로드 방지용
+                File(file.parent, "${file.name}.uploaded").createNewFile()
                 Result.success()
             } else {
                 val errorBody = response.body?.string() ?: "unknown error"
