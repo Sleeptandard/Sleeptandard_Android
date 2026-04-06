@@ -5,6 +5,7 @@ import android.util.Log
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -29,11 +30,13 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.foundation.layout.safeContentPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
@@ -64,6 +67,7 @@ import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.draw
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
@@ -80,7 +84,15 @@ import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.kyant.backdrop.Backdrop
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.kyant.backdrop.drawBackdrop
+import com.kyant.backdrop.effects.blur
+import com.kyant.backdrop.effects.lens
+import com.kyant.backdrop.effects.vibrancy
 import com.leejang.sleeptandard.Component.BirthDatePicker
+import com.leejang.sleeptandard.Component.LiquidGlassBox
 import com.leejang.sleeptandard.ui.theme.AppIcons
 import kotlinx.coroutines.launch
 import java.util.Locale
@@ -283,94 +295,144 @@ fun LoginDemoScreen(
         )
     )
 
+    val barGradient = linearGradient(
+        listOf(Color(0xFF437AC7),
+            Color(0xFFAFF4F9))
+    )
 
-    Column(
+    val backgroundColor = Color.White
+
+    // 리퀴드 글래스 드가자
+    val backdrop = rememberLayerBackdrop {
+        drawRect(backgroundColor)
+        drawContent()
+    }
+
+
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(brush = linearGradation)
-            .padding(horizontal = 20.dp)
-        ,
+            .layerBackdrop(backdrop)
+    ){
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(brush = linearGradation)
+                .padding(horizontal = 20.dp)
+            ,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ){
+            Spacer(Modifier.height(50.dp))
+
+            /*
+            // ✅ 상단에 단계 인디케이터 배치
+            AuthStepIndicator(
+                currentStep = authViewModel.currentStep,
+                modifier = Modifier.padding(vertical = 24.dp),
+                //backdrop = backdrop
+            )
+
+             */
+
+            // Rail
+            Box(
+                modifier = Modifier.height(52.dp).padding(top = 9.dp),
+                contentAlignment = Alignment.Center
+            ){
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(8.dp)
+                        .background(brush = barGradient, shape = RoundedCornerShape(10.dp))
+                )
+            }
+
+            Spacer(Modifier.height(6.dp))
+
+            // 현재 스텝에 따른 UI 출력 with animation
+            AnimatedContent(
+                targetState = authViewModel.currentStep,
+                transitionSpec = {
+                    fadeIn(animationSpec = tween(400)).togetherWith(fadeOut(animationSpec = tween(400)))
+                },
+                label = "AuthStepTransition"
+            ) { step ->
+                when (step) {
+
+                    is AuthStep.EmailInput -> EmailInputStep(
+                        // TODO: 이메일 탐색 백엔드 통신
+                        // AuthViewModel의 이메일 탐색 더미 로직
+                        viewModel = authViewModel)
+
+                    is AuthStep.LoginPassword -> LoginPasswordStep(
+                        viewModel = authViewModel,
+                        onLoginSuccess = { nickname ->
+                            onConfirm("$nickname 님, 환영합니다!")
+                        },
+                        onLoginError = {
+                            Toast.makeText(context, "비밀번호가 틀렸습니다.", Toast.LENGTH_SHORT).show()
+                        },
+                        onPwChange = {
+                            // TODO: 비밀번호 재설정 메일 송신 로직 넣어야함
+                            authViewModel.findingPassword()
+                        }
+                    )
+
+                    is AuthStep.FindPassword -> PasswordChangeStep(
+                        viewModel = authViewModel,
+                        onConfirm = {
+                            /** 확인버튼 필요 없지 않음? **/
+                            // 일단 재설정 창 확인용으로만 존재
+                            authViewModel.resetPassword()
+                        },
+                        onResend = {
+                            // TODO: 비밀번호 재설정 메일 송신 로직 넣어야함
+                        }
+                    )
+
+                    is AuthStep.PasswordReset -> PasswordResetStep(
+                        viewModel = authViewModel,
+                        onReset = {
+                            // TODO: 비밀번호 재설정 로직 백엔드 연결 필요
+                            authViewModel.backToEmail()
+                        }
+                    )
+
+                    is AuthStep.SignupPassword -> SignupPasswordStep(viewModel = authViewModel)
+
+                    is AuthStep.SignupNickname -> NicknameStep(
+                        viewModel = authViewModel
+                    )
+
+                    is AuthStep.SignupGenderBirth -> GenderBirthStep(
+                        viewModel = authViewModel
+                    )
+
+                    is AuthStep.Completed -> CompletedStep(
+                        nickname = step.nickname,
+                        onConfirm = { onConfirm(it) }
+                    )
+                }
+            }
+
+            Spacer(Modifier.weight(1f))
+        }
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ){
         Spacer(Modifier.height(50.dp))
 
-        // ✅ 상단에 단계 인디케이터 배치
         AuthStepIndicator(
+            modifier = Modifier,
             currentStep = authViewModel.currentStep,
-            modifier = Modifier.padding(vertical = 24.dp)
+            backdrop = backdrop,
         )
-
-        Spacer(Modifier.height(6.dp))
-
-
-        // 현재 스텝에 따른 UI 출력 with animation
-        AnimatedContent(
-            targetState = authViewModel.currentStep,
-            transitionSpec = {
-                fadeIn(animationSpec = tween(400)).togetherWith(fadeOut(animationSpec = tween(400)))
-            },
-            label = "AuthStepTransition"
-        ) { step ->
-            when (step) {
-
-                is AuthStep.EmailInput -> EmailInputStep(
-                    // TODO: 이메일 탐색 백엔드 통신
-                    // AuthViewModel의 이메일 탐색 더미 로직
-                    viewModel = authViewModel)
-
-                is AuthStep.LoginPassword -> LoginPasswordStep(
-                    viewModel = authViewModel,
-                    onLoginSuccess = { nickname ->
-                        onConfirm("$nickname 님, 환영합니다!")
-                    },
-                    onLoginError = {
-                        Toast.makeText(context, "비밀번호가 틀렸습니다.", Toast.LENGTH_SHORT).show()
-                    },
-                    onPwChange = {
-                        // TODO: 비밀번호 재설정 메일 송신 로직 넣어야함
-                        authViewModel.findingPassword()
-                    }
-                )
-
-                is AuthStep.FindPassword -> PasswordChangeStep(
-                    viewModel = authViewModel,
-                    onConfirm = {
-                        /** 확인버튼 필요 없지 않음? **/
-                        // 일단 재설정 창 확인용으로만 존재
-                        authViewModel.resetPassword()
-                    },
-                    onResend = {
-                        // TODO: 비밀번호 재설정 메일 송신 로직 넣어야함
-                    }
-                )
-
-                is AuthStep.PasswordReset -> PasswordResetStep(
-                    viewModel = authViewModel,
-                    onReset = {
-                        // TODO: 비밀번호 재설정 로직 백엔드 연결 필요
-                        authViewModel.backToEmail()
-                    }
-                )
-
-                is AuthStep.SignupPassword -> SignupPasswordStep(viewModel = authViewModel)
-
-                is AuthStep.SignupNickname -> NicknameStep(
-                    viewModel = authViewModel
-                )
-
-                is AuthStep.SignupGenderBirth -> GenderBirthStep(
-                    viewModel = authViewModel
-                )
-
-                is AuthStep.Completed -> CompletedStep(
-                    nickname = step.nickname,
-                    onConfirm = { onConfirm(it) }
-                )
-            }
-        }
-
-        Spacer(Modifier.weight(1f))
     }
+
 }
 
 @Composable
@@ -1557,7 +1619,7 @@ fun IndicatorGlassBox(
         Box(
             modifier = Modifier
                 .matchParentSize()
-                .blur(100.dp) // 유리 뒤를 흐리게
+                .blur(10.dp) // 유리 뒤를 흐리게
                 .background(
                     color = backgroundColor
                     /*
@@ -1591,6 +1653,7 @@ fun IndicatorGlassBox(
 
 @Composable
 fun AuthStepIndicator(
+    backdrop : Backdrop,
     currentStep: AuthStep,
     modifier: Modifier = Modifier
 ) {
@@ -1611,23 +1674,17 @@ fun AuthStepIndicator(
     }
 
     val numberOfSteps = stepLabels.size
-    val containerColor = Color(0xFF1B2432)
-    val highlightColor = Color(0xFFAAEDF2)
-
-    val barGradient = linearGradient(
-        listOf(Color(0xFF437AC7),
-            Color(0xFFAFF4F9))
-    )
 
     if(currentIndex < 3){
         BoxWithConstraints(
             modifier = modifier
                 .fillMaxWidth()
-                .height(56.dp)
+                .height(52.dp)
         ) {
-
+            val glassWidth = 105.dp
             val stepWidth = (maxWidth) / numberOfSteps
-            val targetOffset = stepWidth * currentIndex
+            val diff = (stepWidth - glassWidth)/2
+            val targetOffset = stepWidth * currentIndex + diff * currentIndex
 
             // 위치 이동 애니메이션
             val animatedOffset by animateDpAsState(
@@ -1636,48 +1693,68 @@ fun AuthStepIndicator(
                 label = "step_highlight_move"
             )
 
+
+
+
             Box(
                 modifier = Modifier
+                    .padding(horizontal = 10.dp)
                     .fillMaxSize()
-                    .drawWithContent{
-                        val eraseEdge = animatedOffset / maxWidth
-                        val drawEdge = (animatedOffset + stepWidth) / maxWidth
-
-                        Log.d("eraseEdge", "erase: ${eraseEdge}, draw: ${drawEdge}")
-                        clipRect(
-                            left = eraseEdge,
-                            right = drawEdge
-                        ){
-                            this@drawWithContent.drawContent()
-                        }
-                    },
-                contentAlignment = Alignment.Center,
             ){
-                Canvas(
-                    modifier = Modifier.fillMaxWidth().height(8.dp).blur(15.dp)
+                Row(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ){
-                    drawRect(
-                        size = size,
-                        brush = barGradient
-                    )
-                }
-                /*
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(8.dp)
-                        .clip(RoundedCornerShape(100.dp))
-                        .background(brush = barGradient)
-                )
+                    stepLabels.forEachIndexed { index, step ->
 
-                 */
+                        val isSelected = index == currentIndex
+
+                        // 1. 투명도 애니메이션 (선택되면 0, 아니면 1)
+                        val textAlpha by animateFloatAsState(
+                            targetValue = if (isSelected) 0f else 1f,
+                            animationSpec = tween(durationMillis = 300),
+                            label = "text_alpha"
+                        )
+
+                        // 2. 수직 이동 애니메이션 (선택되면 아래로 20dp 이동)
+                        val textOffset by animateDpAsState(
+                            targetValue = if (isSelected) 20.dp else 0.dp,
+                            animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
+                            label = "text_offset"
+                        )
+
+                        Box(
+                            modifier = Modifier.weight(1f), // 화면을 정확히 1:1:1로 나눕니다.
+                            contentAlignment = when (index) {
+                                0 -> Alignment.CenterStart // 첫 번째: 왼쪽 정렬
+                                1 -> Alignment.Center      // 두 번째: 무조건 중앙 정렬
+                                else -> Alignment.CenterEnd // 세 번째: 오른쪽 정렬ㅅ
+                            }
+                        ) {
+                            Text(
+                                text = step,
+                                modifier = Modifier
+                                    .graphicsLayer {
+                                        alpha = textAlpha            // 투명도 적용
+                                        translationY = textOffset.toPx() // 아래로 사라지는 이동 적용
+                                    },
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    color = Color.White,
+                                    fontSize = 14.sp
+                                )
+                            )
+                        }
+                    }
+                }
             }
 
-            IndicatorGlassBox(
+            LiquidGlassBox(
                 modifier = Modifier
-                    .width(105.dp)
+                    .width(glassWidth)
+                    .padding(top = 9.dp)
                     .fillMaxHeight()
                     .offset(x = animatedOffset),
+                backdrop = backdrop,
             ) {
                 Text(
                     text = stepLabels[currentIndex],
@@ -1687,35 +1764,6 @@ fun AuthStepIndicator(
                     )
                 )
             }
-
-            /*
-            // 하이라이트 박스
-            Box(
-                modifier = Modifier
-                    .width(stepWidth)
-                    .fillMaxHeight()
-                    .offset(x = animatedOffset)
-                    .background(highlightColor, RoundedCornerShape(100.dp))
-            )
-
-            // 텍스트 레이어
-            Row(modifier = Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
-                stepLabels.forEachIndexed { index, label ->
-                    val isSelected = index == currentIndex
-                    Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                        Text(
-                            text = label,
-                            style = TextStyle(
-                                fontSize = 13.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                color = if (isSelected) Color(0xFF111111) else Color.White.copy(alpha = 0.6f)
-                            )
-                        )
-                    }
-                }
-            }
-
-             */
         }
     }
 

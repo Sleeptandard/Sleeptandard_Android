@@ -26,8 +26,12 @@ import com.leejang.sleeptandard.Screen.HomeScreen
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -109,6 +113,14 @@ fun AppNav(
     val alarmPrefs = AlarmPreferences(context)
     val isAlarmSetted = alarmPrefs.isAlarmSet()
 
+    // 네비게이션바 블러처리 여부
+    var isBlurred by remember{ mutableStateOf(false) }
+
+
+    // ✅ 1. 영구 저장소에서 초기 값을 가져와 세션 상태로 관리합니다.
+    // getShowWindowTutorial()은 SharedPreferences에서 값을 읽어오는 가상의 함수입니다.
+    var showWindowTutorial by remember { mutableStateOf(alarmPrefs.getShowWindowTutorial()) }
+
 
     val navGraph = rememberNavController.createGraph(startDestination = startDestination){
 
@@ -144,6 +156,15 @@ fun AppNav(
                 },
                 goExperimentScreen = {
                     rememberNavController.navigate(Screen.Experiment.route)
+                },
+                showWindowTutorial = showWindowTutorial,
+                onDismissTutorial = { isChecked ->
+                    // 2번 요구사항: 체크박스를 체크하고 닫았다면 영구적으로 보이지 않게 저장
+                    if (isChecked) {
+                        alarmPrefs.setShowWindowTutorial(false)
+                    }
+                    // 현재 세션에서 창 닫기
+                    showWindowTutorial = false
                 }
             )
         }
@@ -196,7 +217,6 @@ fun AppNav(
         composable(Screen.QnA.route){
             QnAScreen(
                 onBack = { rememberNavController.popBackStack() },
-                onClickAsk = { rememberNavController.navigate(Screen.Inquire.route) },
                 onClickItem = { id ->
                     rememberNavController.navigate(Screen.QnADetail.createRoute(id))
                 },
@@ -231,7 +251,10 @@ fun AppNav(
                     } catch (e: Exception) {
                         Toast.makeText(context, "이메일 앱을 찾을 수 없습니다.", Toast.LENGTH_SHORT).show()
                     }
-                }
+                },
+                showInquireModal = isBlurred,
+                onClickAsk = { isBlurred = true },
+                onDismiss = {isBlurred = false}
             )
         }
         composable(Screen.Inquire.route){
@@ -245,6 +268,17 @@ fun AppNav(
             TutorialScreen(
                 onFinish = {
                     alarmPrefs.setFirstRunCompleted()
+                    // ✅ 3번 요구사항: TutorialScreen 완료 시 튜토리얼을 볼 수 있게 설정
+                    alarmPrefs.setShowWindowTutorial(true) // 영구 저장소 업데이트
+                    showWindowTutorial = true               // 세션 상태 업데이트
+
+                    rememberNavController.navigate(Screen.Home.route) {
+                        popUpTo(Screen.Tutorial.route) { inclusive = true }
+                    }
+                }
+                /*
+                onFinish = {
+                    alarmPrefs.setFirstRunCompleted()
                     rememberNavController.popBackStack()
                     when{
                         // TODO: 로그인 정보가 없는경우 -> Screen.LoginDemo.route
@@ -253,6 +287,8 @@ fun AppNav(
                     }
                     rememberNavController.navigate(Screen.Home.route)
                 }
+
+                 */
             )
         }
         composable(Screen.SendingData.route) {
@@ -288,6 +324,7 @@ fun AppNav(
 
     }
 
+
     val navBackStackEntry by rememberNavController.currentBackStackEntryAsState()   // 최신 스택을 가져옴 (현재 위치한 경로)
     val currentRoute = navBackStackEntry?.destination?.route    // 최신 스택의 route를 가져옴 (현재 위치한 경로)
 
@@ -308,6 +345,7 @@ fun AppNav(
             // 위에 조건에 부합하면 바텀네바바를 띄움
             if (showBottom) {
                 AlarmBottomNavBar(
+                    isBlurred = isBlurred,
                     selectedIndex = when (currentRoute) {
                         Screen.Home.route -> 0
                         Screen.SettedAlarm.route -> 0
@@ -348,14 +386,16 @@ fun AppNav(
 
 @Composable
 fun AlarmBottomNavBar(
+    isBlurred: Boolean,
     selectedIndex: Int,
     onSelect: (Int) -> Unit,
 ) {
+    val blurRadius = if (isBlurred) 20.dp else 0.dp
     NavigationBar(
         containerColor = MaterialTheme.colorScheme.background
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().blur(blurRadius),
             horizontalArrangement = Arrangement.SpaceAround
         ) {
             StandaloneBottomItem(
