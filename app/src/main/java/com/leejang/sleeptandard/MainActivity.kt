@@ -73,7 +73,7 @@ class MainActivity : ComponentActivity() {
             // TODO: 2순위: 로그인 정보가 없는경우 -> Screen.LoginDemo.Route
             alarmPrefs.isAlarmSet() -> Screen.SettedAlarm.route       // 3순위: 알람이 설정되어 있는 경우
             startDestinationFromIntent != null -> startDestinationFromIntent // 4순위: 알람을 끄고 온 경우 (피드백 화면)
-            /** 로그인 데모 **/
+            /** 로그인 비활성화 **/
             //else -> Screen.LoginDemo.route
             else -> Screen.Home.route                                 // 5순위: 일반적인 경우
         }

@@ -83,12 +83,16 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(32.dp))
 
+        /****  계정 설정 비활성화  ****/
+        /*
         SettingSection(
             title = "계정",
             elementList = listOf(
                 SettingElements(1, "계정관리", AppIcons.SettingsAccountManagement, {})
             )
         )
+
+         */
 
         Spacer(Modifier.height(30.dp))
 
