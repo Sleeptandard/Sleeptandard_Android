@@ -3,6 +3,7 @@ package com.leejang.sleeptandard.Component
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,8 +26,12 @@ import com.leejang.sleeptandard.Screen.HomeScreen
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -48,6 +53,7 @@ import com.leejang.sleeptandard.Prefs.AlarmPreferences
 import com.leejang.sleeptandard.Screen.ExperimentScreen
 import com.leejang.sleeptandard.Screen.InquireScreen
 import com.leejang.sleeptandard.Screen.JournalScreen
+import com.leejang.sleeptandard.Screen.LoginDemoScreen
 import com.leejang.sleeptandard.Screen.QnAScreen
 import com.leejang.sleeptandard.Screen.QnADetailScreen
 import com.leejang.sleeptandard.Screen.ReviewAlarmScreen
@@ -78,6 +84,9 @@ sealed class Screen(val route: String, val showBottomBar: Boolean = true) {
 
 
     object Experiment : Screen("experiment", showBottomBar = false)
+
+    /** 로그인 데모 **/
+    object LoginDemo : Screen("loginDemo", showBottomBar = false)
 }
 
 @Composable
@@ -104,6 +113,15 @@ fun AppNav(
     val alarmPrefs = AlarmPreferences(context)
     val isAlarmSetted = alarmPrefs.isAlarmSet()
 
+    // 네비게이션바 블러처리 여부
+    var isBlurred by remember{ mutableStateOf(false) }
+
+
+    // ✅ 1. 영구 저장소에서 초기 값을 가져와 세션 상태로 관리합니다.
+    // getShowWindowTutorial()은 SharedPreferences에서 값을 읽어오는 가상의 함수입니다.
+    var showWindowTutorial by remember { mutableStateOf(alarmPrefs.getShowWindowTutorial()) }
+
+
     val navGraph = rememberNavController.createGraph(startDestination = startDestination){
 
         /* 컴포즈 스플래시
@@ -117,6 +135,15 @@ fun AppNav(
             SplashScreen()
         }
          */
+        /** 로그인 데모 **/
+        composable(Screen.LoginDemo.route){
+            LoginDemoScreen(
+                onConfirm = { greeting ->
+                    rememberNavController.navigate(Screen.Home.route)
+                    Toast.makeText(context, greeting, Toast.LENGTH_SHORT).show()
+                }
+            )
+        }
 
         composable(Screen.Home.route){
             HomeScreen(
@@ -129,6 +156,15 @@ fun AppNav(
                 },
                 goExperimentScreen = {
                     rememberNavController.navigate(Screen.Experiment.route)
+                },
+                showWindowTutorial = showWindowTutorial,
+                onDismissTutorial = { isChecked ->
+                    // 2번 요구사항: 체크박스를 체크하고 닫았다면 영구적으로 보이지 않게 저장
+                    if (isChecked) {
+                        alarmPrefs.setShowWindowTutorial(false)
+                    }
+                    // 현재 세션에서 창 닫기
+                    showWindowTutorial = false
                 }
             )
         }
@@ -181,10 +217,44 @@ fun AppNav(
         composable(Screen.QnA.route){
             QnAScreen(
                 onBack = { rememberNavController.popBackStack() },
-                onClickAsk = { rememberNavController.navigate(Screen.Inquire.route) },
                 onClickItem = { id ->
                     rememberNavController.navigate(Screen.QnADetail.createRoute(id))
-                }
+                },
+                onSubmit = { title, body, uris ->
+                    val emailIntent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+                        // 1. 수신자 설정
+                        putExtra(Intent.EXTRA_EMAIL, arrayOf("studyjun0224@gmail.com"))
+
+                        // 2. 제목 설정
+                        putExtra(Intent.EXTRA_SUBJECT, "[문의사항] $title")
+
+                        // 3. 본문 설정
+                        putExtra(Intent.EXTRA_TEXT, body)
+
+                        // 4. 첨부 파일(이미지) 추가
+                        // Intent는 ArrayList 형태의 Uri를 받습니다.
+                        putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(uris))
+
+                        // 5. 타입 설정 (이미지 및 메시지 형식)
+                        type = "message/rfc822" // 또는 "image/*"
+
+                        // 첨부 파일에 대한 읽기 권한 부여
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+
+                    try {
+                        // 이메일 앱 선택창 띄우기
+                        context.startActivity(Intent.createChooser(emailIntent, "이메일 앱을 선택하세요"))
+
+                        // 제출 후 화면 뒤로 가기 (선택 사항)
+                        rememberNavController.popBackStack()
+                    } catch (e: Exception) {
+                        Toast.makeText(context, "이메일 앱을 찾을 수 없습니다.", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                showInquireModal = isBlurred,
+                onClickAsk = { isBlurred = true },
+                onDismiss = {isBlurred = false}
             )
         }
         composable(Screen.Inquire.route){
@@ -198,9 +268,27 @@ fun AppNav(
             TutorialScreen(
                 onFinish = {
                     alarmPrefs.setFirstRunCompleted()
+                    // ✅ 3번 요구사항: TutorialScreen 완료 시 튜토리얼을 볼 수 있게 설정
+                    alarmPrefs.setShowWindowTutorial(true) // 영구 저장소 업데이트
+                    showWindowTutorial = true               // 세션 상태 업데이트
+
+                    rememberNavController.navigate(Screen.Home.route) {
+                        popUpTo(Screen.Tutorial.route) { inclusive = true }
+                    }
+                }
+                /*
+                onFinish = {
+                    alarmPrefs.setFirstRunCompleted()
                     rememberNavController.popBackStack()
+                    when{
+                        // TODO: 로그인 정보가 없는경우 -> Screen.LoginDemo.route
+                        alarmPrefs.isFirstRun() -> Screen.Tutorial.route
+                        else -> Screen.Home.route
+                    }
                     rememberNavController.navigate(Screen.Home.route)
                 }
+
+                 */
             )
         }
         composable(Screen.SendingData.route) {
@@ -236,6 +324,7 @@ fun AppNav(
 
     }
 
+
     val navBackStackEntry by rememberNavController.currentBackStackEntryAsState()   // 최신 스택을 가져옴 (현재 위치한 경로)
     val currentRoute = navBackStackEntry?.destination?.route    // 최신 스택의 route를 가져옴 (현재 위치한 경로)
 
@@ -245,8 +334,10 @@ fun AppNav(
             val showBottom = when (currentRoute) {
                 Screen.Home.route,
                 Screen.Journal.route,
-                Screen.Settings.route,
                 Screen.SettedAlarm.route,
+                Screen.Settings.route,
+                Screen.QnA.route,
+                Screen.QnADetail.route,
                 Screen.SendingData.route -> true
                 else -> false
             }
@@ -254,11 +345,14 @@ fun AppNav(
             // 위에 조건에 부합하면 바텀네바바를 띄움
             if (showBottom) {
                 AlarmBottomNavBar(
+                    isBlurred = isBlurred,
                     selectedIndex = when (currentRoute) {
                         Screen.Home.route -> 0
                         Screen.SettedAlarm.route -> 0
                         Screen.Journal.route -> 1
                         Screen.Settings.route -> 2
+                        Screen.QnA.route -> 2
+                        Screen.QnADetail.route -> 2
                         Screen.SendingData.route -> 2
 
                         else -> 2
@@ -292,14 +386,16 @@ fun AppNav(
 
 @Composable
 fun AlarmBottomNavBar(
+    isBlurred: Boolean,
     selectedIndex: Int,
     onSelect: (Int) -> Unit,
 ) {
+    val blurRadius = if (isBlurred) 20.dp else 0.dp
     NavigationBar(
         containerColor = MaterialTheme.colorScheme.background
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().blur(blurRadius),
             horizontalArrangement = Arrangement.SpaceAround
         ) {
             StandaloneBottomItem(

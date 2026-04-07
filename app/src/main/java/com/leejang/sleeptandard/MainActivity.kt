@@ -15,7 +15,7 @@ import com.leejang.sleeptandard.Permission.checkFullScreenIntentPermission
 import com.leejang.sleeptandard.Permission.checkNotificationPermission
 import com.leejang.sleeptandard.Permission.checkSetExactAlarms
 import com.leejang.sleeptandard.Prefs.AlarmPreferences
-
+// 마이크 테스트
 class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -70,9 +70,12 @@ class MainActivity : ComponentActivity() {
 
         return when {
             alarmPrefs.isFirstRun() -> Screen.Tutorial.route           // 1순위: 앱을 처음 실행한 경우
-            alarmPrefs.isAlarmSet() -> Screen.SettedAlarm.route       // 2순위: 알람이 설정되어 있는 경우
-            startDestinationFromIntent != null -> startDestinationFromIntent // 3순위: 알람을 끄고 온 경우 (피드백 화면)
-            else -> Screen.Home.route                                 // 4순위: 일반적인 경우
+            // TODO: 2순위: 로그인 정보가 없는경우 -> Screen.LoginDemo.Route
+            alarmPrefs.isAlarmSet() -> Screen.SettedAlarm.route       // 3순위: 알람이 설정되어 있는 경우
+            startDestinationFromIntent != null -> startDestinationFromIntent // 4순위: 알람을 끄고 온 경우 (피드백 화면)
+            /** 로그인 비활성화 **/
+            //else -> Screen.LoginDemo.route
+            else -> Screen.Home.route                                 // 5순위: 일반적인 경우
         }
     }
 
