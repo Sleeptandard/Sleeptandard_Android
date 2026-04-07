@@ -63,8 +63,13 @@ class CsvUploadWorker(
         return try {
             val supabaseClient = SupabaseClientProvider.client
 
-            // [핵심] 세션 강제 갱신 - 백그라운드에서 오래 대기 시 토큰 만료 방지
+            // [핵심 해결책] 백그라운드에서 앱 프로세스가 시작되었을 때,
+            // Supabase 플러그인이 로컬 디스크에서 세션을 읽어오기를 기다려야 함
+            supabaseClient.auth.awaitInitialization()
+
+            // 세션 강제 갱신 - 백그라운드에서 오래 대기 시 토큰 만료 방지
             try {
+                // awaitInitialization() 이후라야 refreshCurrentSession 이 어떤 세션을 갱신할지 압니다.
                 supabaseClient.auth.refreshCurrentSession()
                 Log.i(TAG, "🔄 Session refreshed successfully")
             } catch (e: Exception) {
