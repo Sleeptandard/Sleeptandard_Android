@@ -121,11 +121,9 @@ fun OptionsSection(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ){
-
         Box(
             modifier = Modifier
                 .zIndex(3f)
-                .size(100.dp)
                 .neumorphicBackground(
                     highlightColor = Color(0xFFB9C8DF).copy(alpha = 0.1f),
                     blurRadius1 = 20.dp,
@@ -140,46 +138,53 @@ fun OptionsSection(
                         offset = DpOffset(x = 5.dp, 6.dp)
                     )
                 )
-                .clickable {
-                    onRemCheckedChange(!isRem)
-                }
-            ,
-            contentAlignment = Alignment.Center
         ){
-            Text(
-                modifier = Modifier,
-                text = if(isRem) "REM" else "N1",
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    fontSize = 15.sp
-                ),
-            )
-            // 2. 우측 하단에 배치될 전환 정보 (아이콘 + 반대 상태 텍스트)
-            Row(
+            Box(
                 modifier = Modifier
-                    .align(Alignment.BottomEnd) // ✅ 우측 하단 정렬
-                    .padding(bottom = 12.dp, end = 12.dp), // 적절한 여백 추가
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                // 전환 아이콘 (image_16cecb.png의 화살표 아이콘)
-                Icon(
-                    painter = painterResource(AppIcons.HomeSwitch),
-                    contentDescription = "Switch",
-                    modifier = Modifier.size(11.dp),
-                    tint = Color.White.copy(alpha = 0.7f)
-                )
-                // 반대 상태 텍스트 (작게 표시)
+                    .clip(RoundedCornerShape(28.dp))
+                    .size(100.dp)
+                    .clickable {
+                        onRemCheckedChange(!isRem)
+                    }
+                ,
+                contentAlignment = Alignment.Center
+            ){
                 Text(
-                    text = if(isRem) "N1" else "REM",
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        fontSize = 12.sp,
-                        color = Color.White.copy(alpha = 0.7f),
-                        textAlign = TextAlign.Center
-                    )
+                    modifier = Modifier,
+                    text = if(isRem) "REM" else "N1",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 15.sp
+                    ),
                 )
-            }
+                // 2. 우측 하단에 배치될 전환 정보 (아이콘 + 반대 상태 텍스트)
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd) // ✅ 우측 하단 정렬
+                        .padding(bottom = 12.dp, end = 12.dp), // 적절한 여백 추가
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    // 전환 아이콘 (image_16cecb.png의 화살표 아이콘)
+                    Icon(
+                        painter = painterResource(AppIcons.HomeSwitch),
+                        contentDescription = "Switch",
+                        modifier = Modifier.size(11.dp),
+                        tint = Color.White.copy(alpha = 0.7f)
+                    )
+                    // 반대 상태 텍스트 (작게 표시)
+                    Text(
+                        text = if(isRem) "N1" else "REM",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontSize = 12.sp,
+                            color = Color.White.copy(alpha = 0.7f),
+                            textAlign = TextAlign.Center
+                        )
+                    )
+                }
 
+            }
         }
+
 
 
         Column(
