@@ -2,6 +2,16 @@ package com.leejang.sleeptandard.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
+/******** 새로 정의한 색상들2 *******/
+
+val Key = Color(0xFF050C16)
+val Neon = Color(0xFFAFF4F9)
+val Red = Color(0xFFFF5967)
+val White2 = Color(0xFFF1F4F9)
+val Green = Color(0xFF59FF85)
+val Yellow = Color(0xFFFFE359)
+
+
 /********* 새로 정의한 색상들 ********/
 
 val LightBackground = Color(0xFFF2F6FA)

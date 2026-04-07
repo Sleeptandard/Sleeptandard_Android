@@ -34,6 +34,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -94,6 +95,7 @@ import com.leejang.sleeptandard.Component.OptionsSection
 import com.leejang.sleeptandard.Component.WakeUpWindow
 import com.leejang.sleeptandard.Component.WindowTutorial
 import com.leejang.sleeptandard.Component.calculateWakeUpRangeText
+import com.leejang.sleeptandard.Component.neumorphicBackground
 import com.leejang.sleeptandard.Permission.isAllEssentialPermissionsGranted
 import com.leejang.sleeptandard.Permission.openAppSettings
 import com.leejang.sleeptandard.Prefs.AlarmPreferences
@@ -161,35 +163,6 @@ fun HomeScreen(
     // TODO: 하나만 선택되게 해야하나?
     var customText by remember { mutableStateOf("") }
 
-    // "직접추가"에서 체크박스 상태
-    // var customChecked by remember { mutableStateOf(false) }
-
-    /*
-    // 커스텀으로 추가된 옵션들
-    var customOptions by remember { mutableStateOf(listOf<SituationOption>()) }
-    val customIdSet = remember(customOptions) { customOptions.map { it.id }.toSet() }   // id만 따로 모아놓음
-
-    // 편집 모드 트리거
-    var isEditMode by remember { mutableStateOf(false) }
-
-    // 삭제 대상으로 체크한 커스텀 옵션 id들
-    var selectedCustomForDelete by remember { mutableStateOf(setOf<String>()) }
-
-    // "직접추가"한 상황들을 담고 있는 Prefs
-    val customSituationPrefs = remember { CustomSituationPreferences(context) }
-
-    // 커스텀으로 추가한 아이템이 있는지 여부
-    val hasCustom = customOptions.isNotEmpty()
-    // 모달창에서 추가한 아이템이 있다면 4행을 보여주고 없다면 3행을 보여줌
-    val visibleRows = if (hasCustom) 4 else 3
-
-
-    // 모달창 lazycolumn 크기 수치
-    val itemHeight = 88.dp
-    val spacing = 12.dp
-    val gridHeight = itemHeight * visibleRows + spacing * (visibleRows - 1)
-
-     */
 
     /** 사운드 설정창 띄우는 트리거 **/
     var showSoundSheet by remember { mutableStateOf(false) }
@@ -219,21 +192,6 @@ fun HomeScreen(
         }
     }
 
-    /*
-    // CustomSituationPrefs 불러오기
-    LaunchedEffect(Unit) {
-        val loaded = customSituationPrefs.load()
-        customOptions = loaded.map {
-            SituationOption(
-                id = it.id,
-                label = it.label,
-                iconRes = null
-            )
-        }
-    }
-
-     */
-
     // 알람뷰모델에 저장되어 있는 알람 설정값들과 화면 상태 동기화
     LaunchedEffect(alarmViewModel.alarm) { // alarm 객체 전체를 관찰
         val alarm = alarmViewModel.alarm
@@ -261,64 +219,9 @@ fun HomeScreen(
         )
         Box(
             modifier = Modifier
-                .size(336.dp, 273.dp)
-                .drawBehind {
-                    // 흰색 그림자
-                    val highlightColor1 = Color(0xFFB9C8DF).copy(alpha = 0.15f)
-                    val blurRadius1 = 20.dp.toPx()
-                    val offsetX1 = (-5).dp.toPx()
-                    val offsetY1 = (-5).dp.toPx()
-
-                    drawIntoCanvas { canvas ->
-                        val paint = Paint().asFrameworkPaint().apply {
-                            color = highlightColor1.toArgb()
-                            maskFilter = BlurMaskFilter(blurRadius1, BlurMaskFilter.Blur.NORMAL)
-                        }
-
-                        canvas.nativeCanvas.drawRoundRect(
-                            offsetX1, offsetY1,
-                            size.width + offsetX1, size.height + offsetY1,
-                            30.dp.toPx(), 30.dp.toPx(),
-                            paint
-                        )
-                    }
-
-                    // 검은색 그림자
-                    val highlightColor2 = Color(0xFF020710).copy(alpha = 0.9f)
-                    val blurRadius2 = 15.dp.toPx()
-                    val offsetX2 = (8).dp.toPx()
-                    val offsetY2 = (8).dp.toPx()
-
-                    drawIntoCanvas { canvas ->
-                        val paint = Paint().asFrameworkPaint().apply {
-                            color = highlightColor2.toArgb()
-                            maskFilter = BlurMaskFilter(blurRadius2, BlurMaskFilter.Blur.NORMAL)
-                        }
-
-                        canvas.nativeCanvas.drawRoundRect(
-                            offsetX2, offsetY2,
-                            size.width + offsetX2, size.height + offsetY2,
-                            30.dp.toPx(), 30.dp.toPx(),
-                            paint
-                        )
-                    }
-
-                    val gradient = Brush.linearGradient(
-                        colors = listOf(
-                            Color(0xFF07101E),
-                            Color(0xFF101A2A)
-                        ),
-                        // 시작점을 박스의 정중앙(Center)으로 설정
-                        start = Offset(size.width / 2, size.height / 2),
-                        // 끝점을 박스의 우측 하단(BottomEnd)으로 설정
-                        end = Offset(size.width, size.height * 2 / 3)
-                    )
-                    drawRoundRect(
-                        brush = gradient,
-                        cornerRadius = CornerRadius(30.dp.toPx(), 30.dp.toPx()) // 30dp만큼 둥글게
-                    )
-                }
-                // Inner shadow
+                .fillMaxWidth()
+                .aspectRatio(320f/260f)
+                .neumorphicBackground()
                 .innerShadow(
                     shape = RoundedCornerShape(30.dp),
                     shadow = Shadow(
@@ -1004,7 +907,7 @@ fun HomeScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color(0xFF050C16).copy(alpha = 0.8f))
+                    .background(Color(0xFF050C16).copy(alpha = 0.75f))
             ) {
                 // 튜토리얼 내용 (image_52f063.png 스타일)
                 WindowTutorial(

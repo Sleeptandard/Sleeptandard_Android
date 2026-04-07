@@ -223,21 +223,21 @@ fun CustomTimePicker(
     onTimeChange: (hour12: Int, minute: Int, isAm: Boolean) -> Unit,
     stopSignal: Int = 0, // ✅ 추가
     scrollEnable: Boolean = true,
-    itemHeight: Dp = 62.dp,
+    itemHeight: Dp = 65.dp,
     itemHeightAmPm: Dp = 42.dp,
-    textStyle: TextStyle = MaterialTheme.typography.bodyLarge.copy(
-        fontSize = 40.sp
+    textStyle: TextStyle = MaterialTheme.typography.bodyMedium.copy(
+        fontSize = 44.sp
     ),
-    fadedTextStyle: TextStyle = MaterialTheme.typography.bodyLarge.copy(
+    fadedTextStyle: TextStyle = MaterialTheme.typography.bodyMedium.copy(
         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f),
-        fontSize = 38.sp
+        fontSize = 41.sp
     ),
-    ampmTextStyle: TextStyle = MaterialTheme.typography.bodyLarge.copy(
-        fontSize = 20.sp
+    ampmTextStyle: TextStyle = MaterialTheme.typography.bodyMedium.copy(
+        fontSize = 22.sp
     ),
-    ampmFadedTextStyle: TextStyle = MaterialTheme.typography.bodyLarge.copy(
+    ampmFadedTextStyle: TextStyle = MaterialTheme.typography.bodyMedium.copy(
         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f),
-        fontSize = 19.sp
+        fontSize = 21.sp
     ),
 ) {
     val ampmItems = listOf("AM", "PM")
@@ -270,9 +270,9 @@ fun CustomTimePicker(
     ) {
         Spacer(Modifier.weight(1f))
         WheelPicker(
-            modifier = Modifier.width(36.dp),
+            modifier = Modifier.width(40.dp),
             items = ampmItems,
-            itemHeight = itemHeightAmPm,
+            itemHeight = itemHeight,
             selectedIndex = ampmIndex,
             onSelectedIndexChange = { ampmIndex = it },
             textStyle = ampmTextStyle,
@@ -284,7 +284,7 @@ fun CustomTimePicker(
         Spacer(Modifier.width(12.dp))
 
         WheelPicker(
-            modifier = Modifier.width(60.dp),
+            modifier = Modifier.width(66.dp),
             items = hourItems,
             selectedIndex = hourIndex,
             onSelectedIndexChange = { hourIndex = it },
@@ -309,7 +309,7 @@ fun CustomTimePicker(
         Spacer(Modifier.width(10.dp))
 
         WheelPicker(
-            modifier = Modifier.width(60.dp),
+            modifier = Modifier.width(66.dp),
             items = minuteItems,
             selectedIndex = minuteIndex,
             onSelectedIndexChange = { minuteIndex = it },
