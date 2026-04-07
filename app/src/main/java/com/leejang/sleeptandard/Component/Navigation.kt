@@ -392,6 +392,10 @@ fun AlarmBottomNavBar(
 ) {
     val blurRadius = if (isBlurred) 20.dp else 0.dp
     NavigationBar(
+        modifier = Modifier
+            .neumorphicBackground(
+                highlightColor = Color(0xFF12253F).copy(alpha = 0.3f)
+            ),
         containerColor = MaterialTheme.colorScheme.background
     ) {
         Row(
