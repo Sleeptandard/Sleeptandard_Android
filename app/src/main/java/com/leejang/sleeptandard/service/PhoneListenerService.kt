@@ -239,17 +239,33 @@ class PhoneListenerService : WearableListenerService() {
     
     /**
      * 수신된 파일 검증 및 디버깅 정보 출력
+     * (OOM 방지를 위해 readLines 대신 라인별로 직접 카운트)
      */
     private fun validateReceivedFile(file: File) {
         try {
             val fileSize = file.length()
-            val allLines = file.readLines()
-            val lineCount = allLines.size
+            
+            // OOM 방지를 위해 readLines() 대신 스트리밍 방식으로 라인 수 계산
+            var lineCount = 0
+            var previewLine: String? = null
+            
+            file.useLines { lines ->
+                val iterator = lines.iterator()
+                if (iterator.hasNext()) {
+                    previewLine = iterator.next()
+                    lineCount++
+                }
+                while (iterator.hasNext()) {
+                    iterator.next()
+                    lineCount++
+                }
+            }
             
             Log.i(TAG, "📊 File Validation:")
             Log.i(TAG, "  - Name: ${file.name}")
-            Log.i(TAG, "  - Size: $fileSize bytes (${fileSize / 1024.0} KB)")
-            Log.i(TAG, "  - Lines: $lineCount")
+            Log.i(TAG, "  - Size: ${fileSize / 1024} KB")
+            Log.i(TAG, "  - Total Lines: $lineCount")
+            Log.i(TAG, "  - First Line Preview: ${previewLine?.take(50)}")
             
             // 파일이 너무 작으면 경고
             if (fileSize < 100) {
@@ -263,22 +279,6 @@ class PhoneListenerService : WearableListenerService() {
                 Log.e(TAG, "❌ This will cause 'Unsupported' error when sharing")
             } else if (lineCount < 5) {
                 Log.w(TAG, "⚠️ WARNING: File has very little data ($lineCount lines)")
-            }
-            
-            // 처음 5줄 내용 출력 (디버깅용)
-            val previewLines = allLines.take(5)
-            Log.i(TAG, "  - First ${previewLines.size} lines:")
-            previewLines.forEachIndexed { index, line ->
-                Log.i(TAG, "    [${index + 1}] $line")
-            }
-            
-            // 마지막 2줄도 출력 (데이터가 끝까지 쓰여졌는지 확인)
-            if (allLines.size > 5) {
-                val lastLines = allLines.takeLast(2)
-                Log.i(TAG, "  - Last ${lastLines.size} lines:")
-                lastLines.forEachIndexed { index, line ->
-                    Log.i(TAG, "    [${allLines.size - lastLines.size + index + 1}] $line")
-                }
             }
             
         } catch (e: Exception) {
