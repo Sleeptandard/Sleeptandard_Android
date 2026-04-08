@@ -56,21 +56,33 @@ class LogFileTransferManager(private val context: Context) {
 
             var successCount = 0
             
-            // 각 파일 전송
+            // 각 파일 전송 (실패 시 최대 3회 재시도)
             logFiles.forEach { file ->
-                try {
-                    transferFile(phoneNodeId, file)
-                    successCount++
-                    Log.i(TAG, "✅ Successfully transferred: ${file.name}")
-                    
-                    // 전송 성공 시 파일 삭제
-                    if (file.delete()) {
-                        Log.i(TAG, "🗑️ Deleted transferred file: ${file.name}")
-                    } else {
-                        Log.w(TAG, "Failed to delete file: ${file.name}")
+                var transferred = false
+                for (attempt in 1..3) {
+                    try {
+                        transferFile(phoneNodeId, file)
+                        successCount++
+                        transferred = true
+                        Log.i(TAG, "✅ Successfully transferred: ${file.name} (attempt $attempt)")
+                        
+                        // 전송 성공 시 파일 삭제
+                        if (file.delete()) {
+                            Log.i(TAG, "🗑️ Deleted transferred file: ${file.name}")
+                        } else {
+                            Log.w(TAG, "Failed to delete file: ${file.name}")
+                        }
+                        break
+                    } catch (e: Exception) {
+                        Log.e(TAG, "❌ Transfer attempt $attempt/3 failed for ${file.name}: ${e.message}")
+                        if (attempt < 3) {
+                            Log.i(TAG, "🔄 Retrying in 3 seconds...")
+                            kotlinx.coroutines.delay(3000L)
+                        }
                     }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to transfer ${file.name}", e)
+                }
+                if (!transferred) {
+                    Log.e(TAG, "❌ All 3 attempts failed for: ${file.name}")
                 }
             }
 
