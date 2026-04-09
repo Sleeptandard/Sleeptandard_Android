@@ -654,6 +654,20 @@ fun WindowTutorial(
                         .fillMaxWidth()
 
                 ) {
+                    val fullWidth = constraints.maxWidth.toFloat()
+
+                    // ✅ [최적화 1] 변하지 않는 값들은 람다 밖에서 한 번만 계산합니다.
+                    val rowPaddingPx = with(density) { 35.dp.toPx() }
+                    val sliderWidth = (fullWidth - (rowPaddingPx * 2)) * 0.8f
+                    val sliderStartOffset = rowPaddingPx + ((fullWidth - (rowPaddingPx * 2)) * 0.1f)
+                    val internalSideMarginPx = with(density) { 12.dp.toPx() } // 원래는 15.dp인데 뭔가 비율이 안맞아서 임의로 내린 값
+                    val usableWidth = sliderWidth - (internalSideMarginPx * 2)
+                    val thumbCenterY = with(density) { 48.dp.toPx() / 2 }
+
+                    val fraction = (earlyWakeUpMinutes - 10).toFloat() / 20f
+                    val thumbCenterX = sliderStartOffset + internalSideMarginPx + (usableWidth * fraction)
+
+
                     WakeUpWindow(
                         onValueChange = {  },
                         modifier = Modifier,
@@ -663,41 +677,14 @@ fun WindowTutorial(
                         earlyWakeUpMinutes = earlyWakeUpMinutes,
                         enabled = false
                     )
-                    val fullWidth = constraints.maxWidth.toFloat()
 
-                    // 1. WakeUpWindow의 Row 패딩 반영 (양옆 15.dp)
-                    val rowPaddingPx = with(density) { 35.dp.toPx() }
-                    val rowWidth = fullWidth - (rowPaddingPx * 2)
-
-                    // 2. 슬라이더가 차지하는 80% 영역 계산 (중앙 정렬됨)
-                    val sliderWidth = rowWidth * 0.8f
-                    val sliderStartOffset = rowPaddingPx + (rowWidth * 0.1f) // 왼쪽 여백 10% 추가
-
-                    // 3. DiamondStepSlider 내부의 sideMarginPx 반영 (15.dp)
-                    val internalSideMarginPx = with(density) { 15.dp.toPx() }
-                    val usableWidth = sliderWidth - (internalSideMarginPx * 2)
-
-                    // 4. 현재 값(분)에 따른 비율 계산 (10~30분 범위)
-                    val fraction = (earlyWakeUpMinutes - 10).toFloat() / 20f
-
-                    // ✅ 최종 손잡이 중심 X 좌표
-                    val thumbCenterX = sliderStartOffset + internalSideMarginPx + (usableWidth * fraction)
-
-                    // ✅ 최종 Y 좌표 (슬라이더 트랙의 높이 48.dp 기준 중앙)
-                    val thumbCenterY = with(density) { 48.dp.toPx() / 2 }
-
-                    /*
                     Icon(
                         modifier = Modifier
-                            .offset{IntOffset((fullWidth/2).toInt() - 50.dp.toPx().toInt(), thumbCenterY.toInt() + 20.dp.toPx().toInt())},
-                        painter = painterResource(AppIcons.HomeDoubleArrow),
-                        contentDescription = "양방향 화살표"
-                    )
-
-                     */
-                    Icon(
-                        modifier = Modifier
-                            .offset { IntOffset(thumbCenterX.toInt() - 12.dp.toPx().toInt(), thumbCenterY.toInt() + 5.dp.toPx().toInt()) },
+                            .graphicsLayer {
+                                // 실제 위치 이동 (레이아웃 재계산 없음)
+                                translationX = thumbCenterX - 12.dp.toPx()
+                                translationY = thumbCenterY + 5.dp.toPx()
+                            },
                         painter = painterResource(AppIcons.HomeHand),
                         contentDescription = "손모양"
                     )
