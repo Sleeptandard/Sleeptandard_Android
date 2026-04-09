@@ -7,8 +7,10 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.util.Log
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
@@ -182,8 +184,18 @@ class PhoneListenerService : WearableListenerService() {
 
     /**
      * Channel을 통해 로그 파일 수신 및 저장
+     * (전송 중 폰이 잠들지 않도록 WakeLock 사용)
      */
     private suspend fun receiveLogFile(channel: ChannelClient.Channel) {
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        val wakeLock = powerManager.newWakeLock(
+            PowerManager.PARTIAL_WAKE_LOCK,
+            "SleepStandard:PhoneLogTransferWakeLock"
+        )
+        
+        // 최대 15분 동안만 WakeLock 유지 (안전장치)
+        wakeLock.acquire(15 * 60 * 1000L)
+        
         try {
             // 경로에서 파일명 추출 (예: /sleep_log_transfer/sensor_log_xxx.csv)
             val fileName = channel.path.substringAfterLast("/")
@@ -233,6 +245,11 @@ class PhoneListenerService : WearableListenerService() {
                 Wearable.getChannelClient(this).close(channel).await()
             } catch (closeError: Exception) {
                 Log.e(TAG, "Failed to close channel", closeError)
+            }
+        } finally {
+            if (wakeLock.isHeld) {
+                wakeLock.release()
+                Log.d(TAG, "WakeLock released")
             }
         }
     }
