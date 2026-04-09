@@ -116,7 +116,7 @@ fun HomeScreen(
     alarmViewModel: AlarmViewModel,
     scheduler: AlarmScheduler,
     onClickConfirm: ()-> Unit,
-    goExperimentScreen: ()-> Unit,
+    goExperimentScreen: ()-> Unit = {},
     showWindowTutorial: Boolean,
     onDismissTutorial: (Boolean) -> Unit, // ✅ Boolean 인자 추가
 ) {
@@ -160,9 +160,7 @@ fun HomeScreen(
     var isCustomMode by remember { mutableStateOf(false) }
 
     // "직접추가"에서 입력한 텍스트
-    // TODO: 하나만 선택되게 해야하나?
     var customText by remember { mutableStateOf("") }
-
 
     /** 사운드 설정창 띄우는 트리거 **/
     var showSoundSheet by remember { mutableStateOf(false) }

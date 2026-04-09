@@ -118,23 +118,11 @@ fun AppNav(
 
 
     // ✅ 1. 영구 저장소에서 초기 값을 가져와 세션 상태로 관리합니다.
-    // getShowWindowTutorial()은 SharedPreferences에서 값을 읽어오는 가상의 함수입니다.
     var showWindowTutorial by remember { mutableStateOf(alarmPrefs.getShowWindowTutorial()) }
 
 
     val navGraph = rememberNavController.createGraph(startDestination = startDestination){
 
-        /* 컴포즈 스플래시
-        composable(Screen.Splash.route){
-            LaunchedEffect(Unit) {
-                delay(900) // 0.9초 보여주기
-                rememberNavController.navigate("home") {
-                    popUpTo("splash") { inclusive = true } // 스플래시를 backstack에서 제거
-                }
-            }
-            SplashScreen()
-        }
-         */
         /** 로그인 데모 **/
         composable(Screen.LoginDemo.route){
             LoginDemoScreen(
