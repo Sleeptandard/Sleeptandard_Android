@@ -50,6 +50,7 @@ import com.leejang.sleeptandard.ClassFile.Alarm
 import com.leejang.sleeptandard.ClassFile.AlarmScheduler
 import com.leejang.sleeptandard.ClassFile.QnARepository
 import com.leejang.sleeptandard.Prefs.AlarmPreferences
+import com.leejang.sleeptandard.Screen.AccountManagementScreen
 import com.leejang.sleeptandard.Screen.ExperimentScreen
 import com.leejang.sleeptandard.Screen.InquireScreen
 import com.leejang.sleeptandard.Screen.JournalScreen
@@ -72,6 +73,7 @@ sealed class Screen(val route: String, val showBottomBar: Boolean = true) {
     object QnADetail : Screen("qna_detail/{id}", showBottomBar = true) {
         fun createRoute(id: String) = "qna_detail/$id"
     }
+    object AccountManagement : Screen("accont_management", showBottomBar = true)
 
     // 컴포즈 스플래시 화면
     // object Splash : Screen("splash" , showBottomBar = false)
@@ -189,6 +191,9 @@ fun AppNav(
         composable(Screen.Settings.route) {
 
             SettingsScreen(
+                onClickAccount = {
+                    rememberNavController.navigate(Screen.AccountManagement.route)
+                },
                 onClickQnA = {
                     rememberNavController.navigate(Screen.QnA.route)
                 },
@@ -199,6 +204,12 @@ fun AppNav(
                 }
                     context.startActivity(intent)},
                 onClickSendingData = {rememberNavController.navigate(Screen.SendingData.route)}
+            )
+        }
+
+        composable(Screen.AccountManagement.route){
+            AccountManagementScreen(
+                onBack = {rememberNavController.popBackStack()}
             )
         }
 
