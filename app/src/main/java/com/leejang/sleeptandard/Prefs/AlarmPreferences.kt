@@ -1,6 +1,7 @@
 package com.leejang.sleeptandard.Prefs
 
 import android.content.Context
+import android.media.RingtoneManager
 import com.leejang.sleeptandard.ClassFile.Alarm
 
 class AlarmPreferences(private val context: Context) {
@@ -30,12 +31,15 @@ class AlarmPreferences(private val context: Context) {
     }
 
     fun loadAlarm(): Alarm {
+        // 1. 시스템 기본 알람음 URI를 가져옵니다. (없을 경우를 대비해 null 체크)
+        val defaultRingtoneUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)?.toString() ?: ""
+
         return Alarm(
             id = 1,
             hour = prefs.getInt("hour", 8),
             minute = prefs.getInt("minute", 30),
             isAm = prefs.getBoolean("isAm", true),
-            ringtoneUri = prefs.getString("ringtoneUri", "") ?: "",
+            ringtoneUri = prefs.getString("ringtoneUri", defaultRingtoneUri) ?: defaultRingtoneUri,
             volume = prefs.getInt("volume", 5), // ✅ 불러오기 추가
             vibrationEnabled = prefs.getBoolean("vibrationEnabled", true),
             earlyWakeUpMinutes = prefs.getInt("earlyWakeUpMinutes", 30)

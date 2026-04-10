@@ -79,7 +79,6 @@ fun AlarmSoundSettingContent(
 ) {
     val context = LocalContext.current
 
-    // currentUriString → Uri?
     val initialUri = remember(currentUriString) {
         currentUriString.takeIf { it.isNotBlank() }?.toUri()
     }

@@ -94,7 +94,7 @@ fun AppNav(
     scheduler: AlarmScheduler,
     // 실험중
     startDestination: String = Screen.Home.route,
-    initialAlarm: Alarm? = null   // ✨ 추가
+    initialAlarm: Alarm? = null
 ){
 
     /*** 기존에 있던 코드 ***/
