@@ -50,6 +50,7 @@ import com.leejang.sleeptandard.ClassFile.Alarm
 import com.leejang.sleeptandard.ClassFile.AlarmScheduler
 import com.leejang.sleeptandard.ClassFile.QnARepository
 import com.leejang.sleeptandard.Prefs.AlarmPreferences
+import com.leejang.sleeptandard.Prefs.UserInfoPreferences
 import com.leejang.sleeptandard.Screen.AccountManagementScreen
 import com.leejang.sleeptandard.Screen.ExperimentScreen
 import com.leejang.sleeptandard.Screen.InquireScreen
@@ -62,7 +63,9 @@ import com.leejang.sleeptandard.Screen.SendingDataScreen
 import com.leejang.sleeptandard.Screen.SettedAlarmScreen
 import com.leejang.sleeptandard.Screen.SettingsScreen
 import com.leejang.sleeptandard.Screen.TutorialScreen
+import com.leejang.sleeptandard.Screen.User
 import com.leejang.sleeptandard.ViewModel.AlarmViewModel
+import com.leejang.sleeptandard.ViewModel.AuthViewModel
 import com.leejang.sleeptandard.ui.theme.AppIcons
 
 sealed class Screen(val route: String, val showBottomBar: Boolean = true) {
@@ -96,12 +99,14 @@ fun AppNav(
     scheduler: AlarmScheduler,
     // 실험중
     startDestination: String = Screen.Home.route,
-    initialAlarm: Alarm? = null
+    initialAlarm: Alarm? = null,
+    userInfo: User? = null
 ){
-
     /*** 기존에 있던 코드 ***/
     val rememberNavController = rememberNavController()
     val alarmViewModel: AlarmViewModel = viewModel()
+    val authViewModel: AuthViewModel = viewModel()
+
 
     // 앱 시작 시, initialAlarm이 있으면 ViewModel에 세팅
     LaunchedEffect(initialAlarm) {
@@ -110,10 +115,17 @@ fun AppNav(
         }
     }
 
+    LaunchedEffect(userInfo) {
+        if (userInfo != null){
+            authViewModel.loadUserInfo(userInfo)
+        }
+    }
+
     // AlarmPreference를 위한 컨텍스트
     val context = LocalContext.current
     val alarmPrefs = AlarmPreferences(context)
     val isAlarmSetted = alarmPrefs.isAlarmSet()
+    val userPrefs = remember(context) { UserInfoPreferences(context) }  // 알람 SharedPreference 가져오기
 
     // 네비게이션바 블러처리 여부
     var isBlurred by remember{ mutableStateOf(false) }
@@ -128,9 +140,10 @@ fun AppNav(
         /** 로그인 데모 **/
         composable(Screen.LoginDemo.route){
             LoginDemoScreen(
-                onConfirm = { greeting ->
+                onConfirm = { user ->
+                    userPrefs.saveUserInfo(user)
                     rememberNavController.navigate(Screen.Home.route)
-                    Toast.makeText(context, greeting, Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, user.nickname, Toast.LENGTH_SHORT).show()
                 }
             )
         }
@@ -209,7 +222,9 @@ fun AppNav(
 
         composable(Screen.AccountManagement.route){
             AccountManagementScreen(
-                onBack = {rememberNavController.popBackStack()}
+                onBack = {rememberNavController.popBackStack()},
+                userViewModel = authViewModel,
+                onEmailUpdate = {userPrefs.saveUserInfo(authViewModel.getUserInformation())}
             )
         }
 
