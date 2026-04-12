@@ -198,7 +198,7 @@ class AuthViewModel : ViewModel() {
         email = user.email
         password = user.pw
         nickname = user.nickname
-        gender = user.nickname
+        gender = user.gender
         birthdate = user.birthdate
     }
 

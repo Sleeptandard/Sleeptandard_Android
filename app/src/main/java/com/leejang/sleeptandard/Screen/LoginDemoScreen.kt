@@ -124,16 +124,6 @@ fun LoginDemoScreen(
         ){
             Spacer(Modifier.height(50.dp))
 
-            /*
-            // ✅ 상단에 단계 인디케이터 배치
-            AuthStepIndicator(
-                currentStep = authViewModel.currentStep,
-                modifier = Modifier.padding(vertical = 24.dp),
-                //backdrop = backdrop
-            )
-
-             */
-
             // Rail
             Box(
                 modifier = Modifier
@@ -162,31 +152,39 @@ fun LoginDemoScreen(
                 when (step) {
 
                     is AuthStep.EmailInput -> EmailInputStep(
+                        viewModel = authViewModel,
+
                         // TODO: 이메일 탐색 백엔드 통신
                         // AuthViewModel의 이메일 탐색 더미 로직
-                        viewModel = authViewModel)
+                        onEmailCheck = {authViewModel.checkEmail()},
+                        )
 
                     is AuthStep.LoginPassword -> LoginPasswordStep(
                         viewModel = authViewModel,
-                        onLoginSuccess = { onConfirm(it) },
-                        onLoginError = {
-                            Toast.makeText(context, "비밀번호가 틀렸습니다.", Toast.LENGTH_SHORT).show()
+                        onLoginSend = {
+                            // TODO: 백엔드 로그인 처리
+                            // AuthViewModel의 로그인 처리 더미 로직
+                            authViewModel.performLogin(
+                                onSuccess = {onConfirm(it)},
+                                onError = {Toast.makeText(context, "비밀번호가 틀렸습니다.", Toast.LENGTH_SHORT).show()}
+                            )
                         },
                         onPwChange = {
-                            // TODO: 비밀번호 재설정 메일 송신 로직 넣어야함
+                            // TODO: 비밀번호 재설정 메일 송신 로직
                             authViewModel.findingPassword()
                         }
                     )
 
                     is AuthStep.FindPassword -> PasswordChangeStep(
                         viewModel = authViewModel,
-                        onConfirm = {
+                        onBackToEmail = {
                             /** 확인버튼 필요 없지 않음? **/
                             // 일단 재설정 창 확인용으로만 존재
-                            authViewModel.resetPassword()
+                            // authViewModel.resetPassword()
+                            authViewModel.backToEmail()
                         },
                         onResend = {
-                            // TODO: 비밀번호 재설정 메일 송신 로직 넣어야함
+                            // TODO: 비밀번호 재설정 메일 송신 로직
                         }
                     )
 
@@ -198,21 +196,40 @@ fun LoginDemoScreen(
                         }
                     )
 
-                    is AuthStep.SignupPassword -> SignupPasswordStep(viewModel = authViewModel)
+                    is AuthStep.SignupPassword -> SignupPasswordStep(
+                        viewModel = authViewModel,
+                        onSubmit = {
+                            // 다음 단계(닉네임 설정단계)로 진행
+                            authViewModel.setSignupPassword()
+                        }
+                        )
 
                     is AuthStep.SignupNickname -> NicknameStep(
-                        viewModel = authViewModel
+                        viewModel = authViewModel,
+                        onSubmit = {
+                            // 다음 단계(성별,생년월일 설정단계)로 진행
+                            authViewModel.setSignupGenderBirth()
+                        }
                     )
 
                     is AuthStep.SignupGenderBirth -> GenderBirthStep(
-                        viewModel = authViewModel
+                        viewModel = authViewModel,
+                        onSubmit = {
+                            // TODO: 백엔드 회원가입 처리 로직
+                            // AuthViewModel의 최종 회원가입 처리 더미 로직
+                            authViewModel.completeSignup { nickname ->
+                                Log.d("Signup", "$nickname 가입 완료")
+                            }
+                        },
                     )
 
                     is AuthStep.Completed -> CompletedStep(
                         viewModel = authViewModel,
                         onTermsOfUse = {},
                         onPrivatePolicy = {},
-                        onConfirm = { onConfirm(it)
+                        onConfirm = {
+                            // 회원가입을 마치고 홈 화면으로 진입
+                            onConfirm(it)
                         }
                     )
                 }
@@ -353,7 +370,10 @@ fun WhiteTextField(
 
 // 이메일 입력 화면
 @Composable
-fun EmailInputStep(viewModel: AuthViewModel) {
+fun EmailInputStep(
+    viewModel: AuthViewModel,
+    onEmailCheck: () -> Unit,
+) {
 
     val buttonGradient = linearGradient(
         listOf(Color(0xFF437AC7),
@@ -402,7 +422,7 @@ fun EmailInputStep(viewModel: AuthViewModel) {
                 .clip(RoundedCornerShape(100.dp)),
             enabled = viewModel.isEmailValid,
             onClick = {
-                viewModel.checkEmail()
+                onEmailCheck()
             },
             contentPadding = PaddingValues(0.dp)
         ){
@@ -458,8 +478,9 @@ fun EmailInputStep(viewModel: AuthViewModel) {
 @Composable
 fun LoginPasswordStep(
     viewModel: AuthViewModel,
-    onLoginSuccess: (User) -> Unit,
-    onLoginError: () -> Unit,
+    onLoginSend: () -> Unit,
+    //onLoginSuccess: (User) -> Unit,
+    //onLoginError: () -> Unit,
     onPwChange: () -> Unit,
 ) {
     val buttonGradient = linearGradient(
@@ -519,11 +540,7 @@ fun LoginPasswordStep(
                 .clip(RoundedCornerShape(100.dp)),
             enabled = (viewModel.isPasswordValid),
             onClick = {
-                // ✅ 이메일과 비번이 이미 VM에 있으므로 파라미터 없이 로그인을 시도합니다.
-                viewModel.performLogin(
-                    onSuccess = onLoginSuccess,
-                    onError = onLoginError
-                )
+                onLoginSend()
             },
             contentPadding = PaddingValues(0.dp)
         ){
@@ -578,7 +595,7 @@ fun LoginPasswordStep(
 @Composable
 fun PasswordChangeStep(
     viewModel: AuthViewModel,
-    onConfirm: () -> Unit,
+    onBackToEmail: () -> Unit,
     onResend: () -> Unit,
 ) {
 
@@ -627,7 +644,7 @@ fun PasswordChangeStep(
             modifier = Modifier
                 .clip(RoundedCornerShape(100.dp)),
             onClick = {
-                onConfirm()
+                onBackToEmail()
             },
             contentPadding = PaddingValues(0.dp)
         ){
@@ -660,7 +677,7 @@ fun PasswordChangeStep(
                 }
 
                 Text(
-                    text = "확인",
+                    text = "로그인 화면으로",
                     style = MaterialTheme.typography.bodyMedium.copy(
                         fontSize = 18.sp,
                         color = Color.White
@@ -815,7 +832,10 @@ fun PasswordResetStep(
 }
 
 @Composable
-fun SignupPasswordStep(viewModel: AuthViewModel) {
+fun SignupPasswordStep(
+    viewModel: AuthViewModel,
+    onSubmit: () -> Unit
+) {
 
     val buttonGradient = linearGradient(
         listOf(Color(0xFF437AC7),
@@ -891,7 +911,7 @@ fun SignupPasswordStep(viewModel: AuthViewModel) {
             modifier = Modifier
                 .clip(RoundedCornerShape(100.dp)),
             enabled = isAllOk,
-            onClick = { viewModel.setSignupPassword() },
+            onClick = onSubmit,
             contentPadding = PaddingValues(0.dp)
         ){
             Box(
@@ -944,7 +964,9 @@ fun SignupPasswordStep(viewModel: AuthViewModel) {
 
 @Composable
 fun NicknameStep(
-    viewModel: AuthViewModel) {
+    viewModel: AuthViewModel,
+    onSubmit: () -> Unit
+) {
 
     val buttonGradient = linearGradient(
         listOf(Color(0xFF437AC7),
@@ -1011,9 +1033,7 @@ fun NicknameStep(
             modifier = Modifier
                 .clip(RoundedCornerShape(100.dp)),
             enabled =  viewModel.nickname.isNotBlank() && viewModel.isNicknameValid , // 간단한 유효성 검사
-            onClick = {
-                viewModel.setSignupGenderBirth()
-            },
+            onClick = onSubmit,
             contentPadding = PaddingValues(0.dp)
         ){
             Box(
@@ -1065,7 +1085,10 @@ fun NicknameStep(
 }
 
 @Composable
-fun GenderBirthStep(viewModel: AuthViewModel) {
+fun GenderBirthStep(
+    viewModel: AuthViewModel,
+    onSubmit: () -> Unit
+    ) {
     val buttonGradient = linearGradient(
         listOf(Color(0xFF437AC7), Color(0xFFAFF4F9))
     )
@@ -1198,12 +1221,7 @@ fun GenderBirthStep(viewModel: AuthViewModel) {
             modifier = Modifier
                 .clip(RoundedCornerShape(100.dp)),
             enabled =  isEnabled, // 간단한 유효성 검사
-            onClick = {
-                // ✅ 최종 회원가입 실행
-                viewModel.completeSignup { nickname ->
-                    Log.d("Signup", "$nickname 가입 완료")
-                }
-            },
+            onClick = onSubmit,
             contentPadding = PaddingValues(0.dp)
         ){
             Box(
