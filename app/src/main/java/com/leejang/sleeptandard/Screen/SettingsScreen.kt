@@ -83,10 +83,11 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(32.dp))
 
+
         SettingSection(
             title = "계정",
             elementList = listOf(
-                SettingElements(1, "계정관리", AppIcons.SettingsAccountManagement, {})
+                SettingElements(1, "계정관리", AppIcons.SettingsAccountManagement, onClickAccount)
             )
         )
 

@@ -26,8 +26,12 @@ import com.leejang.sleeptandard.Screen.HomeScreen
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -45,7 +49,10 @@ import com.leejang.sleeptandard.AlarmRingScreen
 import com.leejang.sleeptandard.ClassFile.Alarm
 import com.leejang.sleeptandard.ClassFile.AlarmScheduler
 import com.leejang.sleeptandard.ClassFile.QnARepository
+import com.leejang.sleeptandard.ClassFile.User
 import com.leejang.sleeptandard.Prefs.AlarmPreferences
+import com.leejang.sleeptandard.Prefs.UserInfoPreferences
+import com.leejang.sleeptandard.Screen.AccountManagementScreen
 import com.leejang.sleeptandard.Screen.ExperimentScreen
 import com.leejang.sleeptandard.Screen.InquireScreen
 import com.leejang.sleeptandard.Screen.JournalScreen
@@ -58,6 +65,7 @@ import com.leejang.sleeptandard.Screen.SettedAlarmScreen
 import com.leejang.sleeptandard.Screen.SettingsScreen
 import com.leejang.sleeptandard.Screen.TutorialScreen
 import com.leejang.sleeptandard.ViewModel.AlarmViewModel
+import com.leejang.sleeptandard.ViewModel.AuthViewModel
 import com.leejang.sleeptandard.ui.theme.AppIcons
 
 sealed class Screen(val route: String, val showBottomBar: Boolean = true) {
@@ -68,6 +76,7 @@ sealed class Screen(val route: String, val showBottomBar: Boolean = true) {
     object QnADetail : Screen("qna_detail/{id}", showBottomBar = true) {
         fun createRoute(id: String) = "qna_detail/$id"
     }
+    object AccountManagement : Screen("accont_management", showBottomBar = true)
 
     // 컴포즈 스플래시 화면
     // object Splash : Screen("splash" , showBottomBar = false)
@@ -90,12 +99,14 @@ fun AppNav(
     scheduler: AlarmScheduler,
     // 실험중
     startDestination: String = Screen.Home.route,
-    initialAlarm: Alarm? = null   // ✨ 추가
+    initialAlarm: Alarm? = null,
+    userInfo: User? = null
 ){
-
     /*** 기존에 있던 코드 ***/
     val rememberNavController = rememberNavController()
     val alarmViewModel: AlarmViewModel = viewModel()
+    val authViewModel: AuthViewModel = viewModel()
+
 
     // 앱 시작 시, initialAlarm이 있으면 ViewModel에 세팅
     LaunchedEffect(initialAlarm) {
@@ -104,31 +115,36 @@ fun AppNav(
         }
     }
 
+    LaunchedEffect(userInfo) {
+        if (userInfo != null){
+            authViewModel.getUserInfo(userInfo)
+        }
+    }
+
     // AlarmPreference를 위한 컨텍스트
     val context = LocalContext.current
     val alarmPrefs = AlarmPreferences(context)
     val isAlarmSetted = alarmPrefs.isAlarmSet()
+    val userPrefs = remember(context) { UserInfoPreferences(context) }  // 알람 SharedPreference 가져오기
+
+    // 네비게이션바 블러처리 여부
+    var isBlurred by remember{ mutableStateOf(false) }
+
+
+    // ✅ 1. 영구 저장소에서 초기 값을 가져와 세션 상태로 관리합니다.
+    var showWindowTutorial by remember { mutableStateOf(alarmPrefs.getShowWindowTutorial()) }
 
 
     val navGraph = rememberNavController.createGraph(startDestination = startDestination){
 
-        /* 컴포즈 스플래시
-        composable(Screen.Splash.route){
-            LaunchedEffect(Unit) {
-                delay(900) // 0.9초 보여주기
-                rememberNavController.navigate("home") {
-                    popUpTo("splash") { inclusive = true } // 스플래시를 backstack에서 제거
-                }
-            }
-            SplashScreen()
-        }
-         */
         /** 로그인 데모 **/
         composable(Screen.LoginDemo.route){
             LoginDemoScreen(
-                onConfirm = { greeting ->
+                onConfirm = { user ->
+                    // UserInfoPrefs에 유저 정보 저장
+                    userPrefs.saveUserInfo(user)
                     rememberNavController.navigate(Screen.Home.route)
-                    Toast.makeText(context, greeting, Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, user.nickname, Toast.LENGTH_SHORT).show()
                 }
             )
         }
@@ -144,6 +160,15 @@ fun AppNav(
                 },
                 goExperimentScreen = {
                     rememberNavController.navigate(Screen.Experiment.route)
+                },
+                showWindowTutorial = showWindowTutorial,
+                onDismissTutorial = { isChecked ->
+                    // 2번 요구사항: 체크박스를 체크하고 닫았다면 영구적으로 보이지 않게 저장
+                    if (isChecked) {
+                        alarmPrefs.setShowWindowTutorial(false)
+                    }
+                    // 현재 세션에서 창 닫기
+                    showWindowTutorial = false
                 }
             )
         }
@@ -180,6 +205,9 @@ fun AppNav(
         composable(Screen.Settings.route) {
 
             SettingsScreen(
+                onClickAccount = {
+                    rememberNavController.navigate(Screen.AccountManagement.route)
+                },
                 onClickQnA = {
                     rememberNavController.navigate(Screen.QnA.route)
                 },
@@ -189,14 +217,32 @@ fun AppNav(
                     data = Uri.fromParts("package", context.packageName, null)
                 }
                     context.startActivity(intent)},
-                onClickSendingData = {rememberNavController.navigate(Screen.SendingData.route)}
+                onClickSendingData = {rememberNavController.navigate(Screen.SendingData.route)},
+            )
+        }
+
+        composable(Screen.AccountManagement.route){
+            AccountManagementScreen(
+                onBack = { rememberNavController.popBackStack() },
+                userViewModel = authViewModel,
+                // TODO: 유저 정보 업데이트 백엔드 로직
+                onEmailUpdate = { userPrefs.saveUserInfo(authViewModel.loadUserInfo()) },
+                onNicknameUpdate = {},
+                onGenderUpdate = {},
+                onBirthdateUpdate = {},
+                onPasswordUpdate = {},
+                onLogout = {
+                    userPrefs.clearUserInfo()
+                    authViewModel.clearUserInfo()
+                           },
+                // TODO: 유저 정보 삭제 백엔드 로직
+                onAccountDelete = {}
             )
         }
 
         composable(Screen.QnA.route){
             QnAScreen(
                 onBack = { rememberNavController.popBackStack() },
-                onClickAsk = { rememberNavController.navigate(Screen.Inquire.route) },
                 onClickItem = { id ->
                     rememberNavController.navigate(Screen.QnADetail.createRoute(id))
                 },
@@ -231,7 +277,10 @@ fun AppNav(
                     } catch (e: Exception) {
                         Toast.makeText(context, "이메일 앱을 찾을 수 없습니다.", Toast.LENGTH_SHORT).show()
                     }
-                }
+                },
+                showInquireModal = isBlurred,
+                onClickAsk = { isBlurred = true },
+                onDismiss = {isBlurred = false}
             )
         }
         composable(Screen.Inquire.route){
@@ -245,6 +294,21 @@ fun AppNav(
             TutorialScreen(
                 onFinish = {
                     alarmPrefs.setFirstRunCompleted()
+                    // ✅ 3번 요구사항: TutorialScreen 완료 시 튜토리얼을 볼 수 있게 설정
+                    alarmPrefs.setShowWindowTutorial(true) // 영구 저장소 업데이트
+                    showWindowTutorial = true               // 세션 상태 업데이트
+
+                    if(userPrefs.isLogined()) {
+                        rememberNavController.navigate(Screen.Home.route) {
+                            popUpTo(Screen.Tutorial.route) { inclusive = true }
+                        }
+                    }else{
+                        rememberNavController.navigate(Screen.LoginDemo.route)
+                    }
+                }
+                /*
+                onFinish = {
+                    alarmPrefs.setFirstRunCompleted()
                     rememberNavController.popBackStack()
                     when{
                         // TODO: 로그인 정보가 없는경우 -> Screen.LoginDemo.route
@@ -253,6 +317,8 @@ fun AppNav(
                     }
                     rememberNavController.navigate(Screen.Home.route)
                 }
+
+                 */
             )
         }
         composable(Screen.SendingData.route) {
@@ -288,6 +354,7 @@ fun AppNav(
 
     }
 
+
     val navBackStackEntry by rememberNavController.currentBackStackEntryAsState()   // 최신 스택을 가져옴 (현재 위치한 경로)
     val currentRoute = navBackStackEntry?.destination?.route    // 최신 스택의 route를 가져옴 (현재 위치한 경로)
 
@@ -308,6 +375,7 @@ fun AppNav(
             // 위에 조건에 부합하면 바텀네바바를 띄움
             if (showBottom) {
                 AlarmBottomNavBar(
+                    isBlurred = isBlurred,
                     selectedIndex = when (currentRoute) {
                         Screen.Home.route -> 0
                         Screen.SettedAlarm.route -> 0
@@ -348,14 +416,20 @@ fun AppNav(
 
 @Composable
 fun AlarmBottomNavBar(
+    isBlurred: Boolean,
     selectedIndex: Int,
     onSelect: (Int) -> Unit,
 ) {
+    val blurRadius = if (isBlurred) 20.dp else 0.dp
     NavigationBar(
+        modifier = Modifier
+            .neumorphicBackground(
+                highlightColor = Color(0xFF12253F).copy(alpha = 0.3f)
+            ),
         containerColor = MaterialTheme.colorScheme.background
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().blur(blurRadius),
             horizontalArrangement = Arrangement.SpaceAround
         ) {
             StandaloneBottomItem(

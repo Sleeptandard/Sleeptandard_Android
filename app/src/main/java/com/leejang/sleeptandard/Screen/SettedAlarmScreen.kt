@@ -311,7 +311,7 @@ fun SettedAlarmScreen(
 }
 
 @Composable
-private fun ActivityAnimation(
+fun ActivityAnimation(
     modifier: Modifier = Modifier
 ){
     val graphIcon: ImageVector = ImageVector.vectorResource(id = AppIcons.SettedActivityGraph)
@@ -326,7 +326,7 @@ private fun ActivityAnimation(
         animationSpec = infiniteRepeatable(
             animation = keyframes {
                 durationMillis = 6000 // 전체 사이클 (그리기 2s + 대기 1s + 지우기 2s)
-                0f at 0 with LinearEasing
+                0f at 0 using LinearEasing
                 1f at animationDuration using FastOutSlowInEasing // 2초간 그리기
                 1f at 6000 // 나머지 시간 동안 1 유지
             },

@@ -1,8 +1,18 @@
 package com.leejang.sleeptandard.Component
 
 import android.graphics.BlurMaskFilter
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.keyframes
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -34,8 +44,11 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material3.Surface
 import androidx.compose.material3.SwitchDefaults
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -58,10 +71,18 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
+import com.kyant.backdrop.highlight.Highlight
+import com.leejang.sleeptandard.ui.theme.Key
+import kotlinx.coroutines.delay
+import java.util.Calendar
+import java.util.Locale
 import kotlin.math.abs
 
 @Composable
@@ -100,69 +121,13 @@ fun OptionsSection(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ){
-
         Box(
             modifier = Modifier
-                .size(100.dp)
-                .drawBehind {
-                    // 둥글기
-                    val cornerRadius = 28.dp
-
-                    // 흰색 그림자
-                    val highlightColor1 = Color(0xFFB9C8DF).copy(alpha = 0.15f)
-                    val blurRadius1 = 20.dp.toPx()
-                    val offsetX1 = (-5).dp.toPx()
-                    val offsetY1 = (-5).dp.toPx()
-
-                    drawIntoCanvas { canvas ->
-                        val paint = Paint().asFrameworkPaint().apply {
-                            color = highlightColor1.toArgb()
-                            maskFilter = BlurMaskFilter(blurRadius1, BlurMaskFilter.Blur.NORMAL)
-                        }
-
-                        canvas.nativeCanvas.drawRoundRect(
-                            offsetX1, offsetY1,
-                            size.width + offsetX1, size.height + offsetY1,
-                            cornerRadius.toPx(), cornerRadius.toPx(),
-                            paint
-                        )
-                    }
-
-                    // 검은색 그림자
-                    val highlightColor2 = Color(0xFF020710).copy(alpha = 0.9f)
-                    val blurRadius2 = 15.dp.toPx()
-                    val offsetX2 = (8).dp.toPx()
-                    val offsetY2 = (8).dp.toPx()
-
-                    drawIntoCanvas { canvas ->
-                        val paint = Paint().asFrameworkPaint().apply {
-                            color = highlightColor2.toArgb()
-                            maskFilter = BlurMaskFilter(blurRadius2, BlurMaskFilter.Blur.NORMAL)
-                        }
-
-                        canvas.nativeCanvas.drawRoundRect(
-                            offsetX2, offsetY2,
-                            size.width + offsetX2, size.height + offsetY2,
-                            cornerRadius.toPx(), cornerRadius.toPx(),
-                            paint
-                        )
-                    }
-
-                    val gradient = Brush.linearGradient(
-                        colors = listOf(
-                            Color(0xFF07101E),
-                            Color(0xFF101A2A)
-                        ),
-                        // 시작점을 박스의 정중앙(Center)으로 설정
-                        start = Offset(size.width / 2, size.height / 2),
-                        // 끝점을 박스의 우측 하단(BottomEnd)으로 설정
-                        end = Offset(size.width, size.height * 2 / 3)
-                    )
-                    drawRoundRect(
-                        brush = gradient,
-                        cornerRadius = CornerRadius(cornerRadius.toPx(), cornerRadius.toPx()) // 30dp만큼 둥글게
-                    )
-                }
+                .zIndex(3f)
+                .neumorphicBackground(
+                    highlightColor = Color(0xFFB9C8DF).copy(alpha = 0.1f),
+                    blurRadius1 = 20.dp,
+                )
                 // Inner shadow
                 .innerShadow(
                     shape = RoundedCornerShape(28.dp),
@@ -173,46 +138,53 @@ fun OptionsSection(
                         offset = DpOffset(x = 5.dp, 6.dp)
                     )
                 )
-                .clickable {
-                    onRemCheckedChange(!isRem)
-                }
-            ,
-            contentAlignment = Alignment.Center
         ){
-            Text(
-                modifier = Modifier,
-                text = if(isRem) "REM" else "N1",
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    fontSize = 15.sp
-                ),
-            )
-            // 2. 우측 하단에 배치될 전환 정보 (아이콘 + 반대 상태 텍스트)
-            Row(
+            Box(
                 modifier = Modifier
-                    .align(Alignment.BottomEnd) // ✅ 우측 하단 정렬
-                    .padding(bottom = 12.dp, end = 12.dp), // 적절한 여백 추가
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                // 전환 아이콘 (image_16cecb.png의 화살표 아이콘)
-                Icon(
-                    painter = painterResource(AppIcons.HomeSwitch),
-                    contentDescription = "Switch",
-                    modifier = Modifier.size(11.dp),
-                    tint = Color.White.copy(alpha = 0.7f)
-                )
-                // 반대 상태 텍스트 (작게 표시)
+                    .clip(RoundedCornerShape(28.dp))
+                    .size(100.dp)
+                    .clickable {
+                        onRemCheckedChange(!isRem)
+                    }
+                ,
+                contentAlignment = Alignment.Center
+            ){
                 Text(
-                    text = if(isRem) "N1" else "REM",
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        fontSize = 12.sp,
-                        color = Color.White.copy(alpha = 0.7f),
-                        textAlign = TextAlign.Center
-                    )
+                    modifier = Modifier,
+                    text = if(isRem) "REM" else "N1",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 15.sp
+                    ),
                 )
-            }
+                // 2. 우측 하단에 배치될 전환 정보 (아이콘 + 반대 상태 텍스트)
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd) // ✅ 우측 하단 정렬
+                        .padding(bottom = 12.dp, end = 12.dp), // 적절한 여백 추가
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    // 전환 아이콘 (image_16cecb.png의 화살표 아이콘)
+                    Icon(
+                        painter = painterResource(AppIcons.HomeSwitch),
+                        contentDescription = "Switch",
+                        modifier = Modifier.size(11.dp),
+                        tint = Color.White.copy(alpha = 0.7f)
+                    )
+                    // 반대 상태 텍스트 (작게 표시)
+                    Text(
+                        text = if(isRem) "N1" else "REM",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontSize = 12.sp,
+                            color = Color.White.copy(alpha = 0.7f),
+                            textAlign = TextAlign.Center
+                        )
+                    )
+                }
 
+            }
         }
+
 
 
         Column(
@@ -225,69 +197,12 @@ fun OptionsSection(
             // 1. 소리 설정 박스
             Box(
                 modifier = Modifier
-                    .fillMaxWidth(95f/100f)
+                    .zIndex(2f)
+                    .fillMaxWidth(95f / 100f)
                     .height(56.dp)
-                    //.size(320.dp, 56.dp)
-                    .drawBehind {
-                        // 흰색 그림자
-                        val highlightColor1 = Color(0xFFB9C8DF).copy(alpha = 0.15f)
-                        val blurRadius1 = 20.dp.toPx()
-                        val offsetX1 = (-5).dp.toPx()
-                        val offsetY1 = (-5).dp.toPx()
-
-                        drawIntoCanvas { canvas ->
-                            val paint = Paint().asFrameworkPaint().apply {
-                                color = highlightColor1.toArgb()
-                                maskFilter = BlurMaskFilter(blurRadius1, BlurMaskFilter.Blur.NORMAL)
-                            }
-
-                            canvas.nativeCanvas.drawRoundRect(
-                                offsetX1, offsetY1,
-                                size.width + offsetX1, size.height + offsetY1,
-                                // 여기
-                                100.dp.toPx(), 100.dp.toPx(),
-                                paint
-                            )
-                        }
-
-                        // 검은색 그림자
-                        // 여기
-                        val highlightColor2 = Color(0xFF020710).copy(alpha = 0.7f)
-                        val blurRadius2 = 15.dp.toPx()
-                        val offsetX2 = (8).dp.toPx()
-                        val offsetY2 = (8).dp.toPx()
-
-                        drawIntoCanvas { canvas ->
-                            val paint = Paint().asFrameworkPaint().apply {
-                                color = highlightColor2.toArgb()
-                                maskFilter = BlurMaskFilter(blurRadius2, BlurMaskFilter.Blur.NORMAL)
-                            }
-
-                            canvas.nativeCanvas.drawRoundRect(
-                                offsetX2, offsetY2,
-                                size.width + offsetX2, size.height + offsetY2,
-                                // 여기
-                                100.dp.toPx(), 100.dp.toPx(),
-                                paint
-                            )
-                        }
-
-                        val gradient = Brush.linearGradient(
-                            colors = listOf(
-                                Color(0xFF07101E),
-                                Color(0xFF101A2A)
-                            ),
-                            // 시작점을 박스의 정중앙(Center)으로 설정
-                            start = Offset(size.width / 2, size.height / 2),
-                            // 끝점을 박스의 우측 상단으로부터 2/3 지점 설정
-                            end = Offset(size.width, size.height * 2 / 3)
-                        )
-                        drawRoundRect(
-                            brush = gradient,
-                            cornerRadius = CornerRadius(30.dp.toPx(), 30.dp.toPx()) // 30dp만큼 둥글게
-                        )
-                    }
-                    // Inner shadow
+                    .neumorphicBackground(
+                        highlightColor = Color(0xFFB9C8DF).copy(alpha = 0.1f),
+                    )
                     .innerShadow(
                         shape = RoundedCornerShape(30.dp),
                         shadow = Shadow(
@@ -318,11 +233,13 @@ fun OptionsSection(
                             .weight(1f)
                             .padding(end = 10.dp),
                         text = alarmName,
-                        style = MaterialTheme.typography.bodyMedium.copy(
+                        style = MaterialTheme.typography.bodySmall.copy(
                             fontSize = 15.sp
                         ),
                         textAlign = TextAlign.End,
-                        color = textColor
+                        color = textColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     Icon(
                         painter = painterResource(AppIcons.HomeArrowRight),
@@ -338,69 +255,12 @@ fun OptionsSection(
 
             Box(
                 modifier = Modifier
-                    .fillMaxWidth(95f/100f)
+                    .zIndex(1f)
+                    .fillMaxWidth(95f / 100f)
                     .height(56.dp)
-                    //.size(320.dp, 56.dp)
-                    .drawBehind {
-                        // 흰색 그림자
-                        val highlightColor1 = Color(0xFFB9C8DF).copy(alpha = 0.15f)
-                        val blurRadius1 = 20.dp.toPx()
-                        val offsetX1 = (-5).dp.toPx()
-                        val offsetY1 = (-5).dp.toPx()
-
-                        drawIntoCanvas { canvas ->
-                            val paint = Paint().asFrameworkPaint().apply {
-                                color = highlightColor1.toArgb()
-                                maskFilter = BlurMaskFilter(blurRadius1, BlurMaskFilter.Blur.NORMAL)
-                            }
-
-                            canvas.nativeCanvas.drawRoundRect(
-                                offsetX1, offsetY1,
-                                size.width + offsetX1, size.height + offsetY1,
-                                // 여기
-                                100.dp.toPx(), 100.dp.toPx(),
-                                paint
-                            )
-                        }
-
-                        // 검은색 그림자
-                        // 여기
-                        val highlightColor2 = Color(0xFF020710).copy(alpha = 0.7f)
-                        val blurRadius2 = 15.dp.toPx()
-                        val offsetX2 = (8).dp.toPx()
-                        val offsetY2 = (8).dp.toPx()
-
-                        drawIntoCanvas { canvas ->
-                            val paint = Paint().asFrameworkPaint().apply {
-                                color = highlightColor2.toArgb()
-                                maskFilter = BlurMaskFilter(blurRadius2, BlurMaskFilter.Blur.NORMAL)
-                            }
-
-                            canvas.nativeCanvas.drawRoundRect(
-                                offsetX2, offsetY2,
-                                size.width + offsetX2, size.height + offsetY2,
-                                // 여기
-                                100.dp.toPx(), 100.dp.toPx(),
-                                paint
-                            )
-                        }
-
-                        val gradient = Brush.linearGradient(
-                            colors = listOf(
-                                Color(0xFF07101E),
-                                Color(0xFF101A2A)
-                            ),
-                            // 시작점을 박스의 정중앙(Center)으로 설정
-                            start = Offset(size.width / 2, size.height / 2),
-                            // 끝점을 박스의 우측 상단으로부터 2/3 지점 설정
-                            end = Offset(size.width, size.height * 2 / 3)
-                        )
-                        drawRoundRect(
-                            brush = gradient,
-                            cornerRadius = CornerRadius(30.dp.toPx(), 30.dp.toPx()) // 30dp만큼 둥글게
-                        )
-                    }
-                    // Inner shadow
+                    .neumorphicBackground(
+                        highlightColor = Color(0xFFB9C8DF).copy(alpha = 0.1f),
+                    )
                     .innerShadow(
                         shape = RoundedCornerShape(30.dp),
                         shadow = Shadow(
@@ -468,496 +328,6 @@ fun OptionsSection(
     }
 
 
-        /*
-
-        // 3. 추가 박스 (현재 코드에 있는 중복 박스 유지)
-
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(95f/100f)
-                    .height(56.dp)
-                    //.size(320.dp, 56.dp)
-                    .drawBehind {
-                        // 흰색 그림자
-                        val highlightColor1 = Color(0xFFB9C8DF).copy(alpha = 0.15f)
-                        val blurRadius1 = 20.dp.toPx()
-                        val offsetX1 = (-5).dp.toPx()
-                        val offsetY1 = (-5).dp.toPx()
-
-                        drawIntoCanvas { canvas ->
-                            val paint = Paint().asFrameworkPaint().apply {
-                                color = highlightColor1.toArgb()
-                                maskFilter = BlurMaskFilter(blurRadius1, BlurMaskFilter.Blur.NORMAL)
-                            }
-
-                            canvas.nativeCanvas.drawRoundRect(
-                                offsetX1, offsetY1,
-                                size.width + offsetX1, size.height + offsetY1,
-                                // 여기
-                                100.dp.toPx(), 100.dp.toPx(),
-                                paint
-                            )
-                        }
-
-                        // 검은색 그림자
-                        // 여기
-                        val highlightColor2 = Color(0xFF020710).copy(alpha = 0.7f)
-                        val blurRadius2 = 15.dp.toPx()
-                        val offsetX2 = (8).dp.toPx()
-                        val offsetY2 = (8).dp.toPx()
-
-                        drawIntoCanvas { canvas ->
-                            val paint = Paint().asFrameworkPaint().apply {
-                                color = highlightColor2.toArgb()
-                                maskFilter = BlurMaskFilter(blurRadius2, BlurMaskFilter.Blur.NORMAL)
-                            }
-
-                            canvas.nativeCanvas.drawRoundRect(
-                                offsetX2, offsetY2,
-                                size.width + offsetX2, size.height + offsetY2,
-                                // 여기
-                                100.dp.toPx(), 100.dp.toPx(),
-                                paint
-                            )
-                        }
-
-                        val gradient = Brush.linearGradient(
-                            colors = listOf(
-                                Color(0xFF07101E),
-                                Color(0xFF101A2A)
-                            ),
-                            // 시작점을 박스의 정중앙(Center)으로 설정
-                            start = Offset(size.width / 2, size.height / 2),
-                            // 끝점을 박스의 우측 상단으로부터 2/3 지점 설정
-                            end = Offset(size.width, size.height * 2 / 3)
-                        )
-                        drawRoundRect(
-                            brush = gradient,
-                            cornerRadius = CornerRadius(30.dp.toPx(), 30.dp.toPx()) // 30dp만큼 둥글게
-                        )
-                    }
-                    // Inner shadow
-                    .innerShadow(
-                        shape = RoundedCornerShape(30.dp),
-                        shadow = Shadow(
-                            radius = 25.dp,
-                            spread = (-12).dp,
-                            color = Color(0xFF030E1E).copy(0.8f),
-                            offset = DpOffset(x = 5.dp, 6.dp)
-                        )
-                    )
-                    .clickable {
-                        onRemCheckedChange(!isRem)
-                    }
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = 20.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        /*
-                        Icon(
-                            painter = painterResource(AppIcons.HomeVibrate),
-                            contentDescription = "진동 설정",
-                            tint = MaterialTheme.colorScheme.tertiary
-                        )
-                         */
-                        Text(
-                            text = if(isRem) "REM" else "N1",
-                            style = MaterialTheme.typography.bodyLarge.copy(
-                                fontSize = 15.sp
-                            ),
-                        )
-                        Spacer(Modifier.weight(1f))
-                        Switch(
-                            modifier = Modifier
-                                .scale(37f / 52f),
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = Color.White,
-                                checkedTrackColor = Color(0xFFB1F7FC),
-                                uncheckedThumbColor = Color.White,
-                                uncheckedTrackColor = Color(0xFF858585),
-                            ),
-                            checked = isRem,
-                            onCheckedChange = onRemCheckedChange,
-                        )
-                    }
-                }
-
-            }
-
-         */
-
-
-        /*
-        Box(
-            modifier = Modifier
-                .fillMaxWidth(95f/100f)
-                .height(56.dp)
-                //.size(320.dp, 56.dp)
-                .drawBehind {
-                    // 흰색 그림자
-                    val highlightColor1 = Color(0xFFB9C8DF).copy(alpha = 0.15f)
-                    val blurRadius1 = 20.dp.toPx()
-                    val offsetX1 = (-5).dp.toPx()
-                    val offsetY1 = (-5).dp.toPx()
-
-                    drawIntoCanvas { canvas ->
-                        val paint = Paint().asFrameworkPaint().apply {
-                            color = highlightColor1.toArgb()
-                            maskFilter = BlurMaskFilter(blurRadius1, BlurMaskFilter.Blur.NORMAL)
-                        }
-
-                        canvas.nativeCanvas.drawRoundRect(
-                            offsetX1, offsetY1,
-                            size.width + offsetX1, size.height + offsetY1,
-                            // 여기
-                            100.dp.toPx(), 100.dp.toPx(),
-                            paint
-                        )
-                    }
-
-                    // 검은색 그림자
-                    // 여기
-                    val highlightColor2 = Color(0xFF020710).copy(alpha = 0.7f)
-                    val blurRadius2 = 15.dp.toPx()
-                    val offsetX2 = (8).dp.toPx()
-                    val offsetY2 = (8).dp.toPx()
-
-                    drawIntoCanvas { canvas ->
-                        val paint = Paint().asFrameworkPaint().apply {
-                            color = highlightColor2.toArgb()
-                            maskFilter = BlurMaskFilter(blurRadius2, BlurMaskFilter.Blur.NORMAL)
-                        }
-
-                        canvas.nativeCanvas.drawRoundRect(
-                            offsetX2, offsetY2,
-                            size.width + offsetX2, size.height + offsetY2,
-                            // 여기
-                            100.dp.toPx(), 100.dp.toPx(),
-                            paint
-                        )
-                    }
-
-                    val gradient = Brush.linearGradient(
-                        colors = listOf(
-                            Color(0xFF07101E),
-                            Color(0xFF101A2A)
-                        ),
-                        // 시작점을 박스의 정중앙(Center)으로 설정
-                        start = Offset(size.width / 2, size.height / 2),
-                        // 끝점을 박스의 우측 상단으로부터 2/3 지점 설정
-                        end = Offset(size.width, size.height * 2 / 3)
-                    )
-                    drawRoundRect(
-                        brush = gradient,
-                        cornerRadius = CornerRadius(30.dp.toPx(), 30.dp.toPx()) // 30dp만큼 둥글게
-                    )
-                }
-                // Inner shadow
-                .innerShadow(
-                    shape = RoundedCornerShape(30.dp),
-                    shadow = Shadow(
-                        radius = 25.dp,
-                        spread = (-12).dp,
-                        color = Color(0xFF030E1E).copy(0.8f),
-                        offset = DpOffset(x = 5.dp, 6.dp)
-                    )
-                )
-                .clickable {
-                    onSoundClick()
-                }
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 20.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(
-                    painter = painterResource(AppIcons.HomeVolume),
-                    contentDescription = "알람음 설정",
-                    tint = MaterialTheme.colorScheme.tertiary
-                )
-                Text(
-                    modifier = Modifier
-                        .weight(1f),
-                    text = alarmName,
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontSize = 15.sp
-                    ),
-                    textAlign = TextAlign.End,
-                    color = textColor
-                )
-                Icon(
-                    imageVector = Icons.Default.ChevronRight,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.tertiary
-                )
-            }
-        }
-
-        Spacer(Modifier.height(16.dp))
-
-        Box(
-            modifier = Modifier
-                .fillMaxWidth(95f/100f)
-                .height(56.dp)
-                //.size(320.dp, 56.dp)
-                .drawBehind {
-                    // 흰색 그림자
-                    val highlightColor1 = Color(0xFFB9C8DF).copy(alpha = 0.15f)
-                    val blurRadius1 = 20.dp.toPx()
-                    val offsetX1 = (-5).dp.toPx()
-                    val offsetY1 = (-5).dp.toPx()
-
-                    drawIntoCanvas { canvas ->
-                        val paint = Paint().asFrameworkPaint().apply {
-                            color = highlightColor1.toArgb()
-                            maskFilter = BlurMaskFilter(blurRadius1, BlurMaskFilter.Blur.NORMAL)
-                        }
-
-                        canvas.nativeCanvas.drawRoundRect(
-                            offsetX1, offsetY1,
-                            size.width + offsetX1, size.height + offsetY1,
-                            // 여기
-                            100.dp.toPx(), 100.dp.toPx(),
-                            paint
-                        )
-                    }
-
-                    // 검은색 그림자
-                    // 여기
-                    val highlightColor2 = Color(0xFF020710).copy(alpha = 0.7f)
-                    val blurRadius2 = 15.dp.toPx()
-                    val offsetX2 = (8).dp.toPx()
-                    val offsetY2 = (8).dp.toPx()
-
-                    drawIntoCanvas { canvas ->
-                        val paint = Paint().asFrameworkPaint().apply {
-                            color = highlightColor2.toArgb()
-                            maskFilter = BlurMaskFilter(blurRadius2, BlurMaskFilter.Blur.NORMAL)
-                        }
-
-                        canvas.nativeCanvas.drawRoundRect(
-                            offsetX2, offsetY2,
-                            size.width + offsetX2, size.height + offsetY2,
-                            // 여기
-                            100.dp.toPx(), 100.dp.toPx(),
-                            paint
-                        )
-                    }
-
-                    val gradient = Brush.linearGradient(
-                        colors = listOf(
-                            Color(0xFF07101E),
-                            Color(0xFF101A2A)
-                        ),
-                        // 시작점을 박스의 정중앙(Center)으로 설정
-                        start = Offset(size.width / 2, size.height / 2),
-                        // 끝점을 박스의 우측 상단으로부터 2/3 지점 설정
-                        end = Offset(size.width, size.height * 2 / 3)
-                    )
-                    drawRoundRect(
-                        brush = gradient,
-                        cornerRadius = CornerRadius(30.dp.toPx(), 30.dp.toPx()) // 30dp만큼 둥글게
-                    )
-                }
-                // Inner shadow
-                .innerShadow(
-                    shape = RoundedCornerShape(30.dp),
-                    shadow = Shadow(
-                        radius = 25.dp,
-                        spread = (-12).dp,
-                        color = Color(0xFF030E1E).copy(0.8f),
-                        offset = DpOffset(x = 5.dp, 6.dp)
-                    )
-                )
-                .clickable {
-                    onVibrationClick()
-                }
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 20.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Icon(
-                        painter = painterResource(AppIcons.HomeVibrate),
-                        contentDescription = "진동 설정",
-                        tint = MaterialTheme.colorScheme.tertiary
-                    )
-                    Spacer(Modifier.weight(1f))
-                    Switch(
-                        modifier = Modifier
-                            .scale(37f / 52f),
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = Color(0xFFB1F7FC),
-                            uncheckedThumbColor = Color.White,
-                            uncheckedTrackColor = Color(0xFF858585),
-                        ),
-                        checked = vibTogglechecked,
-                        onCheckedChange = onCheckedChange,
-                        enabled = vibToggleEnabled
-                    )
-                }
-                if (!isSystemVibrationOn) {
-                    Text(
-                        text = "※ 시스템 알림 진동세기가 0으로 설정되어 있어 진동이 울리지 않아요!",
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            fontSize = 11.sp,
-                            color = Color(0xFFEB3737)
-                        ),
-                    )
-                    Spacer(Modifier.height(4.dp))
-                }
-            }
-
-        }
-
-        Spacer(Modifier.height(16.dp))
-
-        Box(
-            modifier = Modifier
-                .fillMaxWidth(95f/100f)
-                .height(56.dp)
-                //.size(320.dp, 56.dp)
-                .drawBehind {
-                    // 흰색 그림자
-                    val highlightColor1 = Color(0xFFB9C8DF).copy(alpha = 0.15f)
-                    val blurRadius1 = 20.dp.toPx()
-                    val offsetX1 = (-5).dp.toPx()
-                    val offsetY1 = (-5).dp.toPx()
-
-                    drawIntoCanvas { canvas ->
-                        val paint = Paint().asFrameworkPaint().apply {
-                            color = highlightColor1.toArgb()
-                            maskFilter = BlurMaskFilter(blurRadius1, BlurMaskFilter.Blur.NORMAL)
-                        }
-
-                        canvas.nativeCanvas.drawRoundRect(
-                            offsetX1, offsetY1,
-                            size.width + offsetX1, size.height + offsetY1,
-                            // 여기
-                            100.dp.toPx(), 100.dp.toPx(),
-                            paint
-                        )
-                    }
-
-                    // 검은색 그림자
-                    // 여기
-                    val highlightColor2 = Color(0xFF020710).copy(alpha = 0.7f)
-                    val blurRadius2 = 15.dp.toPx()
-                    val offsetX2 = (8).dp.toPx()
-                    val offsetY2 = (8).dp.toPx()
-
-                    drawIntoCanvas { canvas ->
-                        val paint = Paint().asFrameworkPaint().apply {
-                            color = highlightColor2.toArgb()
-                            maskFilter = BlurMaskFilter(blurRadius2, BlurMaskFilter.Blur.NORMAL)
-                        }
-
-                        canvas.nativeCanvas.drawRoundRect(
-                            offsetX2, offsetY2,
-                            size.width + offsetX2, size.height + offsetY2,
-                            // 여기
-                            100.dp.toPx(), 100.dp.toPx(),
-                            paint
-                        )
-                    }
-
-                    val gradient = Brush.linearGradient(
-                        colors = listOf(
-                            Color(0xFF07101E),
-                            Color(0xFF101A2A)
-                        ),
-                        // 시작점을 박스의 정중앙(Center)으로 설정
-                        start = Offset(size.width / 2, size.height / 2),
-                        // 끝점을 박스의 우측 상단으로부터 2/3 지점 설정
-                        end = Offset(size.width, size.height * 2 / 3)
-                    )
-                    drawRoundRect(
-                        brush = gradient,
-                        cornerRadius = CornerRadius(30.dp.toPx(), 30.dp.toPx()) // 30dp만큼 둥글게
-                    )
-                }
-                // Inner shadow
-                .innerShadow(
-                    shape = RoundedCornerShape(30.dp),
-                    shadow = Shadow(
-                        radius = 25.dp,
-                        spread = (-12).dp,
-                        color = Color(0xFF030E1E).copy(0.8f),
-                        offset = DpOffset(x = 5.dp, 6.dp)
-                    )
-                )
-                .clickable {
-                    onVibrationClick()
-                }
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 20.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Icon(
-                        painter = painterResource(AppIcons.HomeVibrate),
-                        contentDescription = "진동 설정",
-                        tint = MaterialTheme.colorScheme.tertiary
-                    )
-                    Spacer(Modifier.weight(1f))
-                    Switch(
-                        modifier = Modifier
-                            .scale(37f / 52f),
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = Color(0xFFB1F7FC),
-                            uncheckedThumbColor = Color.White,
-                            uncheckedTrackColor = Color(0xFF858585),
-                        ),
-                        checked = vibTogglechecked,
-                        onCheckedChange = onCheckedChange,
-                        enabled = vibToggleEnabled
-                    )
-                }
-                if (!isSystemVibrationOn) {
-                    Text(
-                        text = "※ 시스템 알림 진동세기가 0으로 설정되어 있어 진동이 울리지 않아요!",
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            fontSize = 11.sp,
-                            color = Color(0xFFEB3737)
-                        ),
-                    )
-                    Spacer(Modifier.height(4.dp))
-                }
-            }
-
-        }
-
-         */
     }
 }
 
@@ -969,7 +339,9 @@ fun ConfirmButton(
     Button(
         modifier = modifier
             .height(56.dp)
-            .fillMaxWidth(),
+            .fillMaxWidth()
+            .neumorphicBackground()
+        ,
         shape = RoundedCornerShape(100.dp),
         onClick = onClick,
         colors = ButtonDefaults.buttonColors(
@@ -978,10 +350,9 @@ fun ConfirmButton(
     ) {
         Text(
             text = "완료",
-            style = MaterialTheme.typography.bodyMedium.copy(
-                fontSize = 18.sp,
-                color = Color(0xFF050C16),
-                fontWeight = FontWeight(600)
+            style = MaterialTheme.typography.bodyLarge.copy(
+                fontSize = 19.sp,
+                color = Key,
             )
         )
     }
@@ -993,7 +364,9 @@ fun DiamondStepSlider(
     onValueChange: (Int) -> Unit,
     modifier: Modifier = Modifier,
     valueRange: IntRange = 10..30,
-    step: Int = 1
+    step: Int = 1,
+    showIndicator: Boolean = true,
+    enabled: Boolean = true
 ) {
     val steps = remember { valueRange.step(step).toList() }
     val density = LocalDensity.current
@@ -1006,22 +379,29 @@ fun DiamondStepSlider(
             .fillMaxWidth()
             .height(48.dp) // 터치 높이도 조금 더 확보
             .pointerInput(Unit) {
-                detectTapGestures { offset ->
-                    // ✅ 터치 좌표에서 여유 공간을 뺀 값을 기준으로 비율 계산
-                    val usableWidth = size.width - (2 * sideMarginPx)
-                    val ratio = ((offset.x - sideMarginPx) / usableWidth).coerceIn(0f, 1f)
-                    val rawValue = valueRange.first + (valueRange.last - valueRange.first) * ratio
-                    val snappedValue = steps.minByOrNull { abs(it - rawValue) } ?: value
-                    onValueChange(snappedValue)
+                if (enabled) {
+                    detectTapGestures { offset ->
+                        // ✅ 터치 좌표에서 여유 공간을 뺀 값을 기준으로 비율 계산
+                        val usableWidth = size.width - (2 * sideMarginPx)
+                        val ratio = ((offset.x - sideMarginPx) / usableWidth).coerceIn(0f, 1f)
+                        val rawValue =
+                            valueRange.first + (valueRange.last - valueRange.first) * ratio
+                        val snappedValue = steps.minByOrNull { abs(it - rawValue) } ?: value
+                        onValueChange(snappedValue)
+                    }
                 }
             }
             .pointerInput(Unit) {
-                detectDragGestures { change, _ ->
-                    val usableWidth = size.width - (2 * sideMarginPx)
-                    val ratio = ((change.position.x - sideMarginPx) / usableWidth).coerceIn(0f, 1f)
-                    val rawValue = valueRange.first + (valueRange.last - valueRange.first) * ratio
-                    val snappedValue = steps.minByOrNull { abs(it - rawValue) } ?: value
-                    onValueChange(snappedValue)
+                if (enabled) {
+                    detectDragGestures { change, _ ->
+                        val usableWidth = size.width - (2 * sideMarginPx)
+                        val ratio =
+                            ((change.position.x - sideMarginPx) / usableWidth).coerceIn(0f, 1f)
+                        val rawValue =
+                            valueRange.first + (valueRange.last - valueRange.first) * ratio
+                        val snappedValue = steps.minByOrNull { abs(it - rawValue) } ?: value
+                        onValueChange(snappedValue)
+                    }
                 }
             }
     ) {
@@ -1091,27 +471,30 @@ fun DiamondStepSlider(
         )
 
         // indicator
-        Box(
-            modifier = Modifier
-            .offset { IntOffset(thumbCenterX.toInt() - 42.dp.toPx().toInt(), (-(32)).dp.toPx().toInt()) },
-            contentAlignment = Alignment.Center
+        if(showIndicator){
+            Box(
+                modifier = Modifier
+                    .offset { IntOffset(thumbCenterX.toInt() - 42.dp.toPx().toInt(), (-(32)).dp.toPx().toInt()) },
+                contentAlignment = Alignment.Center
             ){
-            Image(
-                modifier = Modifier
-                    .size(84.dp,45.dp),
-                painter = painterResource(AppIcons.HomeWindowIndicator),
-                contentDescription = "windowIndicator",
-            )
-            Text(
-                modifier = Modifier
-                    .offset(y = (-3).dp),
-                text = String.format("%d분 전", value),
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    fontSize = 14.sp
-                ),
+                Image(
+                    modifier = Modifier
+                        .size(84.dp,45.dp),
+                    painter = painterResource(AppIcons.HomeWindowIndicator),
+                    contentDescription = "windowIndicator",
+                )
+                Text(
+                    modifier = Modifier
+                        .offset(y = (-3).dp),
+                    text = String.format("%d분 전", value),
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 14.sp
+                    ),
 
-            )
+                    )
+            }
         }
+
     }
 }
 
@@ -1123,9 +506,8 @@ fun WakeUpWindow(
     selectedMinute: Int,
     selectedIsAm: Boolean,
     earlyWakeUpMinutes: Int,
+    enabled: Boolean = true
 ){
-    var isNarrow: Boolean by remember {mutableStateOf(false)}
-
     Column(
         modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally
@@ -1140,9 +522,9 @@ fun WakeUpWindow(
         ) {
             Text(
                 text = "10분",
-                style = MaterialTheme.typography.bodyMedium.copy(
+                style = MaterialTheme.typography.bodySmall.copy(
                     color = Color(0xFFAFF4F9),
-                    fontSize = 13.sp
+                    fontSize = 14.sp
                 )
             )
 
@@ -1155,73 +537,342 @@ fun WakeUpWindow(
                 DiamondStepSlider(
                     value = earlyWakeUpMinutes,
                     onValueChange = onValueChange,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = enabled
                 )
             }
 
-            Text("30분", style = MaterialTheme.typography.bodyMedium.copy(
+            Text("30분", style = MaterialTheme.typography.bodySmall.copy(
                 color = Color(0xFFAFF4F9),
-                fontSize = 13.sp
+                fontSize = 14.sp
             )
             )
         }
-
-        Text(
-            text = calculateWakeUpRangeText(
-                selectedHour,
-                selectedMinute,
-                selectedIsAm,
-                earlyWakeUpMinutes
-            ),
-            style = MaterialTheme.typography.bodyMedium.copy(
-                fontSize = 15.sp,
-            )
-        )
-
-        Spacer(Modifier.height(8.dp))
-
-        if(earlyWakeUpMinutes < 20){
+        if(enabled){
             Text(
-                text = "윈도우가 좁으면 적절한 기상 타이밍이 없을 수 있어요",
+                text = calculateWakeUpRangeText(
+                    selectedHour,
+                    selectedMinute,
+                    selectedIsAm,
+                    earlyWakeUpMinutes
+                ),
                 style = MaterialTheme.typography.bodyMedium.copy(
-                    fontSize = 13.sp,
-                    color = Color(0xFFFF9F0A)
+                    fontSize = 15.sp,
                 )
             )
+
+            Spacer(Modifier.height(8.dp))
+
+            if(earlyWakeUpMinutes < 20){
+                Text(
+                    text = "윈도우가 좁으면 적절한 기상 타이밍이 없을 수 있어요",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 13.sp,
+                        color = Color(0xFFFF9F0A)
+                    )
+                )
+            }
         }
 
+
+
     }
 }
+
+@Composable
+fun WindowTutorial(
+    modifier: Modifier = Modifier,
+    onDismiss: (Boolean) -> Unit,
+) {
+    val density = LocalDensity.current
+    var selectedHour by remember { mutableIntStateOf(8) }
+    var selectedMinute by remember { mutableIntStateOf(30) }
+    var selectedIsAm by remember { mutableStateOf(true) }
+
+    // 1. ✅ rememberInfiniteTransition 대신 Animatable을 사용하여 수동 제어 상태를 만듭니다.
+    val animatedMinutes = remember { Animatable(30f) }
+
+    // 2. ✅ LaunchedEffect를 통해 화면 진입 시 한 번만 실행되는 시퀀스를 정의합니다.
+    LaunchedEffect(Unit) {
+        delay(1500) // 사용자가 화면을 인식할 수 있도록 아주 잠깐 대기합니다.
+
+        // [왕복 1단계] 30분 -> 10분으로 이동 (2초간 부드럽게)
+        animatedMinutes.animateTo(
+            targetValue = 10f,
+            animationSpec = tween(durationMillis = 1000, easing = LinearEasing)
+        )
+
+        delay(2500) // 10분 지점에서 잠시 멈춰 강조 효과를 줍니다.
+
+        // [왕복 2단계] 10분 -> 30분으로 다시 복귀 (2초간)
+        animatedMinutes.animateTo(
+            targetValue = 30f,
+            animationSpec = tween(durationMillis = 1000, easing = LinearEasing)
+        )
+    }
+
+    // 애니메이션되는 float 값을 정수로 변환하여 기존 로직에 전달
+    val earlyWakeUpMinutes = animatedMinutes.value.toInt()
+    var isChecked by remember { mutableStateOf(true) }
+
+    var checkBackground = if (isChecked) Color(0xFF050C16) else Color.White
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+        ) {
+            Box(
+                modifier = Modifier
+                    .weight(428f)
+            ) {
+                Column(
+                    modifier = modifier
+                        .fillMaxSize(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Spacer(Modifier.height(200.dp))
+
+                    Text(
+                        text = "기상 가능 시간을 설정해보세요",
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            color = Color(0xFFBCD8FF),
+                            fontSize = 24.sp
+                        )
+                    )
+                }
+            }
+            Box(modifier
+                .padding(horizontal = 20.dp)
+                .weight(73f)
+            ){
+                BoxWithConstraints(
+                    modifier = Modifier
+                        .fillMaxWidth()
+
+                ) {
+                    val fullWidth = constraints.maxWidth.toFloat()
+
+                    // ✅ [최적화 1] 변하지 않는 값들은 람다 밖에서 한 번만 계산합니다.
+                    val rowPaddingPx = with(density) { 35.dp.toPx() }
+                    val sliderWidth = (fullWidth - (rowPaddingPx * 2)) * 0.8f
+                    val sliderStartOffset = rowPaddingPx + ((fullWidth - (rowPaddingPx * 2)) * 0.1f)
+                    val internalSideMarginPx = with(density) { 12.dp.toPx() } // 원래는 15.dp인데 뭔가 비율이 안맞아서 임의로 내린 값
+                    val usableWidth = sliderWidth - (internalSideMarginPx * 2)
+                    val thumbCenterY = with(density) { 48.dp.toPx() / 2 }
+
+                    val fraction = (earlyWakeUpMinutes - 10).toFloat() / 20f
+                    val thumbCenterX = sliderStartOffset + internalSideMarginPx + (usableWidth * fraction)
+
+
+                    WakeUpWindow(
+                        onValueChange = {  },
+                        modifier = Modifier,
+                        selectedHour = selectedHour,
+                        selectedMinute = selectedMinute,
+                        selectedIsAm = selectedIsAm,
+                        earlyWakeUpMinutes = earlyWakeUpMinutes,
+                        enabled = false
+                    )
+
+                    Icon(
+                        modifier = Modifier
+                            .graphicsLayer {
+                                // 실제 위치 이동 (레이아웃 재계산 없음)
+                                translationX = thumbCenterX - 12.dp.toPx()
+                                translationY = thumbCenterY + 5.dp.toPx()
+                            },
+                        painter = painterResource(AppIcons.HomeHand),
+                        contentDescription = "손모양"
+                    )
+                }
+            }
+
+
+            Box(
+                modifier = Modifier
+                    .weight(388f)
+            ) {
+
+                Column(
+                    modifier = Modifier
+                      .fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+
+                    Spacer(Modifier.height(47.dp))
+
+
+                    Text(
+                        text = calculateWakeUpRangeText(
+                            selectedHour,
+                            selectedMinute,
+                            selectedIsAm,
+                            earlyWakeUpMinutes
+                        ),
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            color = Color.White,
+                            fontSize = 15.sp,
+                        )
+                    )
+
+                    Spacer(Modifier.height(24.dp))
+
+                    Text(
+                        text = "이 범위 안에서",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            color = Color(0xFFBCD8FF),
+                            fontSize = 18.sp
+                        )
+                    )
+                    Text(
+                        text = "가장 편하게 깨어날 순간에 알람이 울려요",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            color = Color(0xFFBCD8FF),
+                            fontSize = 18.sp
+                        )
+                    )
+                }
+
+
+                Row(
+                    modifier = Modifier
+                        .background(color = Color.White)
+                        .padding(20.dp)
+                        .fillMaxWidth()
+                        .align(Alignment.BottomCenter),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+
+                    Box(
+                        modifier = Modifier
+                            .padding(5.dp)
+                            .size(23.dp)
+                            .background(
+                                color = checkBackground,
+                                shape = RoundedCornerShape(5.dp)
+                            )
+                            .border(
+                                width = 2.dp,
+                                color = Color(0xFF050C16),
+                                shape = RoundedCornerShape(5.dp)
+                            )
+                            .clickable { isChecked = !isChecked },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (isChecked) {
+                            Icon(
+                                painter = painterResource(AppIcons.HomeCheck),
+                                contentDescription = "췤",
+                                tint = Color.White
+                            )
+                        }
+                    }
+
+                    Text(
+                        modifier = Modifier.padding(start = 10.dp),
+                        text = "다시보지 않기",
+                        style = MaterialTheme.typography.bodyLarge.copy(
+                            color = Color.Black,
+                            fontSize = 16.sp
+                        )
+                    )
+
+                    Spacer(Modifier.weight(1f))
+
+                    Icon(
+                        modifier = Modifier
+                            .clickable {
+                                onDismiss(isChecked)
+                            },
+                        painter = painterResource(AppIcons.HomeX),
+                        contentDescription = "x",
+                        tint = Color(0xFF050C16)
+                    )
+                }
+
+            }
+
+
+        }
+
+
+    }
+}
+
+@Composable
+fun Modifier.neumorphicBackground(
+    highlightColor: Color = Color(0xFFB9C8DF).copy(alpha = 0.15f),
+    blurRadius1: Dp = 20.dp,
+    offsetX1: Dp = (-5).dp,
+    offsetY1: Dp = (-5).dp,
+    shadowColor: Color =  Color(0xFF020710).copy(alpha = 0.9f),
+    blurRadius2: Dp = 15.dp,
+    offsetX2: Dp = 8.dp,
+    offsetY2: Dp = 8.dp,
+    cornerRadius: Dp = 30.dp
+) = this.drawBehind() {
+    drawIntoCanvas { canvas ->
+        val paint = Paint().asFrameworkPaint().apply {
+            color = highlightColor.toArgb()
+            maskFilter = BlurMaskFilter(blurRadius1.toPx(), BlurMaskFilter.Blur.NORMAL)
+        }
+
+        val offX = offsetX1.toPx()
+        val offY = offsetY1.toPx()
+        canvas.nativeCanvas.drawRoundRect(
+            offX, offY,
+            size.width + offX, size.height + offY,
+            cornerRadius.toPx(), cornerRadius.toPx(),
+            paint
+        )
+    }
+    drawIntoCanvas { canvas ->
+        val paint = Paint().asFrameworkPaint().apply {
+            color = shadowColor.toArgb()
+            maskFilter = BlurMaskFilter(blurRadius2.toPx(), BlurMaskFilter.Blur.NORMAL)
+        }
+        val offX = offsetX2.toPx()
+        val offY = offsetY2.toPx()
+        canvas.nativeCanvas.drawRoundRect(
+            offX, offY,
+            size.width + offX, size.height + offY,
+            cornerRadius.toPx(), cornerRadius.toPx(),
+            paint
+        )
+    }
+    // 3. 메인 배경 그라데이션
+    val gradient = Brush.linearGradient(
+        colors = listOf(Color(0xFF07101E), Color(0xFF101A2A)),
+        start = Offset(size.width / 2, size.height / 2),
+        end = Offset(size.width, size.height * 2 / 3)
+    )
+
+    drawRoundRect(
+        brush = gradient,
+        cornerRadius = CornerRadius(cornerRadius.toPx(), cornerRadius.toPx())
+    )
+}
+
 
 fun calculateWakeUpRangeText(hour: Int, minute: Int, isAm: Boolean, earlyMinutes: Int): String {
-    val calendar = java.util.Calendar.getInstance().apply {
+    val calendar = Calendar.getInstance().apply {
         var h = hour % 12
         if (!isAm) h += 12
-        set(java.util.Calendar.HOUR_OF_DAY, h)
-        set(java.util.Calendar.MINUTE, minute)
+        set(Calendar.HOUR_OF_DAY, h)
+        set(Calendar.MINUTE, minute)
     }
 
-    val endTime = String.format("%s %d:%02d", if (isAm) "오전" else "오후", hour, minute)
+    val endTime = String.format(Locale.getDefault(),"%d:%02d", hour, minute)
 
-    calendar.add(java.util.Calendar.MINUTE, -earlyMinutes)
-    val startHour = if (calendar.get(java.util.Calendar.HOUR) == 0) 12 else calendar.get(java.util.Calendar.HOUR)
-    val startIsAm = calendar.get(java.util.Calendar.AM_PM) == java.util.Calendar.AM
-    val startTime = String.format("%s %d:%02d", if (startIsAm) "오전" else "오후", startHour, calendar.get(java.util.Calendar.MINUTE))
+    calendar.add(Calendar.MINUTE, -earlyMinutes)
+    val startHour = if (calendar.get(Calendar.HOUR) == 0) 12 else calendar.get(Calendar.HOUR)
+    val startIsAm = calendar.get(Calendar.AM_PM) == Calendar.AM
+    val startTime = String.format(Locale.getDefault(),"%s %d:%02d", if (startIsAm) "오전" else "오후", startHour, calendar.get(
+        Calendar.MINUTE))
 
     return "$startTime ~ $endTime 사이 알람"
-}
-
-@Preview(showBackground = true)
-@Composable
-fun PreviewOptionsSection(){
-    OptionsSection(
-        onSoundClick = {},
-        onVibrationClick = {},
-        checked = true,
-        onCheckedChange = {},
-        alarmName = "Indigo Puff",
-        isSystemVibrationOn = false,
-        isRem = true,
-        onRemCheckedChange = {}
-    )
 }

@@ -39,11 +39,13 @@ android {
         }
     }
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions {
-        jvmTarget = "11"
+    kotlin {
+        compilerOptions {
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        }
     }
     buildFeatures {
         compose = true
@@ -74,6 +76,7 @@ dependencies {
     implementation(libs.androidx.compose.animation.core)
     implementation(libs.androidx.compose.animation)
     implementation(libs.androidx.foundation.layout)
+    implementation(libs.androidx.animation.core)
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
@@ -111,6 +114,10 @@ dependencies {
     implementation("io.github.jan-tennert.supabase:storage-kt")
     implementation("io.ktor:ktor-client-okhttp:3.1.2")
 
+    // 물방울 효과 라이브러리
+    implementation("io.github.kyant0:backdrop:1.0.6")
+
     // 워치앱 선언 (현재 활성화 중)
     wearApp(project(":wear"))
+
 }

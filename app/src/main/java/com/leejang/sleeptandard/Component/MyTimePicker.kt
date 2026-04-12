@@ -34,6 +34,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.util.Calendar
@@ -222,8 +223,22 @@ fun CustomTimePicker(
     onTimeChange: (hour12: Int, minute: Int, isAm: Boolean) -> Unit,
     stopSignal: Int = 0, // ✅ 추가
     scrollEnable: Boolean = true,
-    itemHeight: Dp = 62.dp,
-    itemHeightAmPm: Dp = 42.dp
+    itemHeight: Dp = 65.dp,
+    itemHeightAmPm: Dp = 42.dp,
+    textStyle: TextStyle = MaterialTheme.typography.bodyMedium.copy(
+        fontSize = 44.sp
+    ),
+    fadedTextStyle: TextStyle = MaterialTheme.typography.bodyMedium.copy(
+        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f),
+        fontSize = 41.sp
+    ),
+    ampmTextStyle: TextStyle = MaterialTheme.typography.bodyMedium.copy(
+        fontSize = 22.sp
+    ),
+    ampmFadedTextStyle: TextStyle = MaterialTheme.typography.bodyMedium.copy(
+        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f),
+        fontSize = 21.sp
+    ),
 ) {
     val ampmItems = listOf("AM", "PM")
     val hourItems = (1..12).map { it.toString() }
@@ -255,18 +270,13 @@ fun CustomTimePicker(
     ) {
         Spacer(Modifier.weight(1f))
         WheelPicker(
-            modifier = Modifier.width(36.dp),
+            modifier = Modifier.width(40.dp),
             items = ampmItems,
-            itemHeight = itemHeightAmPm,
+            itemHeight = itemHeight,
             selectedIndex = ampmIndex,
             onSelectedIndexChange = { ampmIndex = it },
-            textStyle = MaterialTheme.typography.bodyLarge.copy(
-                fontSize = 20.sp
-            ),
-            fadedTextStyle = MaterialTheme.typography.bodyLarge.copy(
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f),
-                fontSize = 19.sp
-            ),
+            textStyle = ampmTextStyle,
+            fadedTextStyle = ampmFadedTextStyle,
             state = ampmState,
             scrollEnable = scrollEnable
         )
@@ -274,14 +284,16 @@ fun CustomTimePicker(
         Spacer(Modifier.width(12.dp))
 
         WheelPicker(
-            modifier = Modifier.width(60.dp),
+            modifier = Modifier.width(66.dp),
             items = hourItems,
             selectedIndex = hourIndex,
             onSelectedIndexChange = { hourIndex = it },
             isCyclic = true,
             state = hourState,
             scrollEnable = scrollEnable,
-            itemHeight = itemHeight
+            itemHeight = itemHeight,
+            textStyle = textStyle,
+            fadedTextStyle = fadedTextStyle
         )
 
         Spacer(Modifier.width(10.dp))
@@ -297,14 +309,16 @@ fun CustomTimePicker(
         Spacer(Modifier.width(10.dp))
 
         WheelPicker(
-            modifier = Modifier.width(60.dp),
+            modifier = Modifier.width(66.dp),
             items = minuteItems,
             selectedIndex = minuteIndex,
             onSelectedIndexChange = { minuteIndex = it },
             isCyclic = true,
             state = minuteState,
             scrollEnable = scrollEnable,
-            itemHeight = itemHeight
+            itemHeight = itemHeight,
+            textStyle = textStyle,
+            fadedTextStyle = fadedTextStyle
         )
         Spacer(Modifier.weight(1f))
     }

@@ -46,7 +46,7 @@ class MainActivity : ComponentActivity() {
 }
 
 // 이미지에서 추출한 색상 정의
-val DarkBackgroundColor = Color(0xFF0D1117) // 매우 어두운 남색 배경
+val DarkBackgroundColor = Color.Black // 그냥 검은색
 val BlueAccentColor = Color(0xFF336699) // 파란색 텍스트 색상
 
 @Composable
