@@ -298,8 +298,12 @@ fun AppNav(
                     alarmPrefs.setShowWindowTutorial(true) // 영구 저장소 업데이트
                     showWindowTutorial = true               // 세션 상태 업데이트
 
-                    rememberNavController.navigate(Screen.Home.route) {
-                        popUpTo(Screen.Tutorial.route) { inclusive = true }
+                    if(userPrefs.isLogined()) {
+                        rememberNavController.navigate(Screen.Home.route) {
+                            popUpTo(Screen.Tutorial.route) { inclusive = true }
+                        }
+                    }else{
+                        rememberNavController.navigate(Screen.LoginDemo.route)
                     }
                 }
                 /*
