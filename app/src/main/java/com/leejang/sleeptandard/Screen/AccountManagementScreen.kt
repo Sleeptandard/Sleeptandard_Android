@@ -90,15 +90,14 @@ fun AccountManagementScreen(
     onLogout: () -> Unit,
     onAccountDelete: () -> Unit
 ){
-    // 1. ✅ 내비게이션 스택 관리 (현재 위치들을 순서대로 저장)
+    // 내비게이션 스택 관리 (현재 위치들을 순서대로 저장)
     val navStack = remember { mutableStateListOf<AccountMenu>(AccountMenu.AMMain) }
     val currentMenu = navStack.last() // 현재 화면은 항상 스택의 마지막 아이템
 
-    // 2. ✅ 시스템 뒤로가기 버튼 처리
+    // 시스템 뒤로가기 버튼 처리
     BackHandler(enabled = navStack.size > 1) {
         navStack.removeAt(navStack.lastIndex) // 스택에서 마지막 요소를 제거하여 이전 단계로 돌아감
     }
-
 
     Column(
         modifier = Modifier
@@ -120,7 +119,7 @@ fun AccountManagementScreen(
 
         Spacer(Modifier.height(102.dp))
 
-        // 4. ✅ 화면 전환 애니메이션 (Organic한 느낌 추가)
+        // 내용
         AnimatedContent(
             targetState = currentMenu,
             transitionSpec = {
@@ -134,6 +133,8 @@ fun AccountManagementScreen(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 when (targetMenu) {
+                    /****     메인       ****/
+                    // 계정 관리 메인화면
                     AccountMenu.AMMain -> {
                         item { AMElement("개인 정보", "닉네임/성별/생년월일") { navStack.add(AccountMenu.PersonalInfo) } }
                         item { AMElement("이메일", userViewModel.email) { navStack.add(AccountMenu.Email) } }
@@ -141,30 +142,41 @@ fun AccountManagementScreen(
                         item { AMElement("로그아웃/탈퇴", "") { navStack.add(AccountMenu.AuthAction) } }
                     }
 
+                    /****     1층     ****/
+                    // 메인 -> 개인정보 화면
                     AccountMenu.PersonalInfo -> {
                         item { AMElement("닉네임", userViewModel.nickname) { navStack.add(AccountMenu.Nickname) } }
                         item { AMElement("성별", userViewModel.gender) { navStack.add(AccountMenu.Gender)} }
                         item { AMElement("생년월일", userViewModel.birthdate) { navStack.add(AccountMenu.Birthdate) } }
                     }
 
-                    AccountMenu.Nickname -> {
-                        item {NicknameEdit(viewModel = userViewModel, onNicknameUpdate = onNicknameUpdate)}
-                    }
-                    AccountMenu.Gender -> item {GenderEdit(viewModel = userViewModel, onGenderUpdate = onNicknameUpdate)}
-                    AccountMenu.Birthdate -> item {BirthdateEdit(viewModel = userViewModel, onBirthdateUpdate = onNicknameUpdate)}
-
+                    // 메인 -> 이메일 화면
                     AccountMenu.Email -> {
                         item{EmailEdit(viewModel = userViewModel, onEmailUpdate = onEmailUpdate)}
                     }
 
+                    // 메인 -> 비밀번호 화면
                     AccountMenu.Password -> item { PasswordEdit(viewModel = userViewModel, onPasswordUpdate = onPasswordUpdate)}
 
+                    // 메인 -> 로그아웃/탈퇴 화면
                     AccountMenu.AuthAction -> {
                         item { AMElement("로그아웃", "") { navStack.add(AccountMenu.Logout) } }
                         item { AMElement("계정탈퇴", "") { navStack.add(AccountMenu.DeleteAccount) } }
                     }
 
+                    /****     2층      ****/
+                    // 개인정보 -> 닉네임 화면
+                    AccountMenu.Nickname -> { item {NicknameEdit(viewModel = userViewModel, onNicknameUpdate = onNicknameUpdate)} }
+
+                    // 개인정보 -> 성별 화면
+                    AccountMenu.Gender -> item {GenderEdit(viewModel = userViewModel, onGenderUpdate = onGenderUpdate)}
+
+                    // 개인정보 -> 생년월일 화면
+                    AccountMenu.Birthdate -> item {BirthdateEdit(viewModel = userViewModel, onBirthdateUpdate = onBirthdateUpdate)}
+
+                    // 로그아웃/탈퇴 -> 로그아웃 화면
                     AccountMenu.Logout -> item{LogoutScreen(onLogout, onBack) }
+                    // 로그아웃/탈퇴 -> 탈퇴 화면
                     AccountMenu.DeleteAccount -> item{AccountDeleteScreen(onAccountDelete, onBack)}
 
 
@@ -173,86 +185,6 @@ fun AccountManagementScreen(
             }
         }
 
-    }
-
-}
-
- @Composable
- fun AccountTopBar(title: String, onBack: () -> Unit) {
-     Row(
-         modifier = Modifier
-             .fillMaxWidth()
-             .height(60.dp),
-         verticalAlignment = Alignment.CenterVertically,
-     ){
-         IconButton(
-             modifier = Modifier.size(32.dp),
-             onClick = onBack
-         ) {
-             Icon(
-                 modifier = Modifier.size(32.dp),
-                 painter = painterResource(AppIcons.QnAArrowBack),
-                 contentDescription = "뒤로가기",
-             )
-         }
-
-         Spacer(Modifier.weight(1f))
-         // 제목 (질문 타이틀)
-         Text(
-             text = title,
-             color = Color.White,
-             style = MaterialTheme.typography.titleMedium.copy(
-                 fontSize = 20.sp,
-             )
-         )
-
-         Spacer(Modifier.weight(1f))
-         Spacer(Modifier.width(32.dp))
-     }
- }
-
- @Composable
-fun AMElement(
-    title:String,
-    contents: String,
-    onClick: () -> Unit
-) {
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(42.dp)
-            .clickable {
-                onClick()
-            },
-        verticalAlignment = Alignment.CenterVertically,
-
-    ) {
-        Text(
-            modifier = Modifier.padding(start = 10.dp),
-            text = title,
-            style = MaterialTheme.typography.bodySmall.copy(
-                fontSize = 16.sp,
-            )
-        )
-        Spacer(Modifier.weight(1f))
-        Text(
-            text = contents,
-            style = MaterialTheme.typography.bodySmall.copy(
-                fontSize = 12.sp,
-                color = Color.White.copy(alpha = 0.7f)
-            )
-        )
-        Box(
-            modifier = Modifier.size(32.dp),
-            contentAlignment = Alignment.Center
-        ){
-            Icon(
-                modifier = Modifier.size(16.dp),
-                painter = painterResource(AppIcons.HomeArrowRight),
-                contentDescription = ">",
-            )
-        }
     }
 
 }
@@ -302,20 +234,11 @@ fun AMElement(
              Box(
                  modifier = Modifier
                      .clip(RoundedCornerShape(100.dp))
+                     .height(60.dp)
+                     .background(color = Neon)
                      .fillMaxWidth(),
                  contentAlignment = Alignment.Center
              ) {
-                 Box(
-                     modifier = Modifier
-                         .fillMaxWidth()
-                         .height(60.dp)
-                         .background(color = Neon)
-                         .blur(30.dp),
-                     contentAlignment = Alignment.Center
-                 ) {
-
-                 }
-
                  Text(
                      text = "확인",
                      style = MaterialTheme.typography.bodyMedium.copy(
@@ -399,20 +322,11 @@ fun AMElement(
              Box(
                  modifier = Modifier
                      .clip(RoundedCornerShape(100.dp))
-                     .fillMaxWidth(),
+                     .fillMaxWidth()
+                     .height(60.dp)
+                     .background(color = Neon),
                  contentAlignment = Alignment.Center
              ) {
-                 Box(
-                     modifier = Modifier
-                         .fillMaxWidth()
-                         .height(60.dp)
-                         .background(color = Neon)
-                         .blur(30.dp),
-                     contentAlignment = Alignment.Center
-                 ) {
-
-                 }
-
                  Text(
                      text = "확인",
                      style = MaterialTheme.typography.bodyMedium.copy(
@@ -445,7 +359,6 @@ fun AMElement(
                  color = Color.White, fontSize = 16.sp
              )
          )
-
 
          Column(
              modifier = Modifier
@@ -499,20 +412,11 @@ fun AMElement(
              Box(
                  modifier = Modifier
                      .clip(RoundedCornerShape(100.dp))
-                     .fillMaxWidth(),
+                     .fillMaxWidth()
+                     .height(60.dp)
+                     .background(color = Neon),
                  contentAlignment = Alignment.Center
              ) {
-                 Box(
-                     modifier = Modifier
-                         .fillMaxWidth()
-                         .height(60.dp)
-                         .background(color = Neon)
-                         .blur(30.dp),
-                     contentAlignment = Alignment.Center
-                 ) {
-
-                 }
-
                  Text(
                      text = "확인",
                      style = MaterialTheme.typography.bodyMedium.copy(
@@ -584,20 +488,11 @@ fun AMElement(
              Box(
                  modifier = Modifier
                      .clip(RoundedCornerShape(100.dp))
-                     .fillMaxWidth(),
+                     .fillMaxWidth()
+                     .height(60.dp)
+                     .background(color = Neon),
                  contentAlignment = Alignment.Center
              ) {
-                 Box(
-                     modifier = Modifier
-                         .fillMaxWidth()
-                         .height(60.dp)
-                         .background(color = Neon)
-                         .blur(30.dp),
-                     contentAlignment = Alignment.Center
-                 ) {
-
-                 }
-
                  Text(
                      text = "확인",
                      style = MaterialTheme.typography.bodyMedium.copy(
@@ -696,20 +591,11 @@ fun AMElement(
                  Box(
                      modifier = Modifier
                          .clip(RoundedCornerShape(100.dp))
-                         .fillMaxWidth(),
+                         .fillMaxWidth()
+                         .height(60.dp)
+                         .background(color = Neon),
                      contentAlignment = Alignment.Center
                  ) {
-                     Box(
-                         modifier = Modifier
-                             .fillMaxWidth()
-                             .height(60.dp)
-                             .background(color = Neon)
-                             .blur(30.dp),
-                         contentAlignment = Alignment.Center
-                     ) {
-
-                     }
-
                      Text(
                          text = "다음",
                          style = MaterialTheme.typography.bodyMedium.copy(
@@ -788,20 +674,11 @@ fun AMElement(
                  Box(
                      modifier = Modifier
                          .clip(RoundedCornerShape(100.dp))
-                         .fillMaxWidth(),
+                         .fillMaxWidth()
+                         .height(60.dp)
+                         .background(color = Neon),
                      contentAlignment = Alignment.Center
                  ) {
-                     Box(
-                         modifier = Modifier
-                             .fillMaxWidth()
-                             .height(60.dp)
-                             .background(color = Neon)
-                             .blur(30.dp),
-                         contentAlignment = Alignment.Center
-                     ) {
-
-                     }
-
                      Text(
                          text = "변경하기",
                          style = MaterialTheme.typography.bodyMedium.copy(
@@ -1185,4 +1062,84 @@ fun AMElement(
              }
          }
      }
+ }
+
+ @Composable
+ fun AccountTopBar(title: String, onBack: () -> Unit) {
+     Row(
+         modifier = Modifier
+             .fillMaxWidth()
+             .height(60.dp),
+         verticalAlignment = Alignment.CenterVertically,
+     ){
+         IconButton(
+             modifier = Modifier.size(32.dp),
+             onClick = onBack
+         ) {
+             Icon(
+                 modifier = Modifier.size(32.dp),
+                 painter = painterResource(AppIcons.QnAArrowBack),
+                 contentDescription = "뒤로가기",
+             )
+         }
+
+         Spacer(Modifier.weight(1f))
+         // 제목 (질문 타이틀)
+         Text(
+             text = title,
+             color = Color.White,
+             style = MaterialTheme.typography.titleMedium.copy(
+                 fontSize = 20.sp,
+             )
+         )
+
+         Spacer(Modifier.weight(1f))
+         Spacer(Modifier.width(32.dp))
+     }
+ }
+
+ @Composable
+ fun AMElement(
+     title:String,
+     contents: String,
+     onClick: () -> Unit
+ ) {
+
+     Row(
+         modifier = Modifier
+             .fillMaxWidth()
+             .height(42.dp)
+             .clickable {
+                 onClick()
+             },
+         verticalAlignment = Alignment.CenterVertically,
+
+         ) {
+         Text(
+             modifier = Modifier.padding(start = 10.dp),
+             text = title,
+             style = MaterialTheme.typography.bodySmall.copy(
+                 fontSize = 16.sp,
+             )
+         )
+         Spacer(Modifier.weight(1f))
+         Text(
+             text = contents,
+             style = MaterialTheme.typography.bodySmall.copy(
+                 fontSize = 12.sp,
+                 color = Color.White.copy(alpha = 0.7f)
+             )
+         )
+         Box(
+             modifier = Modifier.size(32.dp),
+             contentAlignment = Alignment.Center
+         ){
+             Icon(
+                 modifier = Modifier.size(16.dp),
+                 painter = painterResource(AppIcons.HomeArrowRight),
+                 contentDescription = ">",
+             )
+         }
+     }
+
  }

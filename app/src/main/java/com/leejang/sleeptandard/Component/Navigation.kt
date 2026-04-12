@@ -141,6 +141,7 @@ fun AppNav(
         composable(Screen.LoginDemo.route){
             LoginDemoScreen(
                 onConfirm = { user ->
+                    // UserInfoPrefs에 유저 정보 저장
                     userPrefs.saveUserInfo(user)
                     rememberNavController.navigate(Screen.Home.route)
                     Toast.makeText(context, user.nickname, Toast.LENGTH_SHORT).show()
@@ -224,6 +225,7 @@ fun AppNav(
             AccountManagementScreen(
                 onBack = { rememberNavController.popBackStack() },
                 userViewModel = authViewModel,
+                // TODO: 유저 정보 업데이트 백엔드 로직
                 onEmailUpdate = { userPrefs.saveUserInfo(authViewModel.loadUserInfo()) },
                 onNicknameUpdate = {},
                 onGenderUpdate = {},
@@ -233,6 +235,7 @@ fun AppNav(
                     userPrefs.clearUserInfo()
                     authViewModel.clearUserInfo()
                            },
+                // TODO: 유저 정보 삭제 백엔드 로직
                 onAccountDelete = {}
             )
         }
