@@ -50,6 +50,8 @@ import com.leejang.sleeptandard.ClassFile.Alarm
 import com.leejang.sleeptandard.ClassFile.AlarmScheduler
 import com.leejang.sleeptandard.ClassFile.QnARepository
 import com.leejang.sleeptandard.Prefs.AlarmPreferences
+import com.leejang.sleeptandard.Prefs.UserInfoPreferences
+import com.leejang.sleeptandard.Screen.AccountManagementScreen
 import com.leejang.sleeptandard.Screen.ExperimentScreen
 import com.leejang.sleeptandard.Screen.InquireScreen
 import com.leejang.sleeptandard.Screen.JournalScreen
@@ -61,7 +63,9 @@ import com.leejang.sleeptandard.Screen.SendingDataScreen
 import com.leejang.sleeptandard.Screen.SettedAlarmScreen
 import com.leejang.sleeptandard.Screen.SettingsScreen
 import com.leejang.sleeptandard.Screen.TutorialScreen
+import com.leejang.sleeptandard.Screen.User
 import com.leejang.sleeptandard.ViewModel.AlarmViewModel
+import com.leejang.sleeptandard.ViewModel.AuthViewModel
 import com.leejang.sleeptandard.ui.theme.AppIcons
 
 sealed class Screen(val route: String, val showBottomBar: Boolean = true) {
@@ -72,6 +76,7 @@ sealed class Screen(val route: String, val showBottomBar: Boolean = true) {
     object QnADetail : Screen("qna_detail/{id}", showBottomBar = true) {
         fun createRoute(id: String) = "qna_detail/$id"
     }
+    object AccountManagement : Screen("accont_management", showBottomBar = true)
 
     // 컴포즈 스플래시 화면
     // object Splash : Screen("splash" , showBottomBar = false)
@@ -94,12 +99,14 @@ fun AppNav(
     scheduler: AlarmScheduler,
     // 실험중
     startDestination: String = Screen.Home.route,
-    initialAlarm: Alarm? = null   // ✨ 추가
+    initialAlarm: Alarm? = null,
+    userInfo: User? = null
 ){
-
     /*** 기존에 있던 코드 ***/
     val rememberNavController = rememberNavController()
     val alarmViewModel: AlarmViewModel = viewModel()
+    val authViewModel: AuthViewModel = viewModel()
+
 
     // 앱 시작 시, initialAlarm이 있으면 ViewModel에 세팅
     LaunchedEffect(initialAlarm) {
@@ -108,39 +115,35 @@ fun AppNav(
         }
     }
 
+    LaunchedEffect(userInfo) {
+        if (userInfo != null){
+            authViewModel.loadUserInfo(userInfo)
+        }
+    }
+
     // AlarmPreference를 위한 컨텍스트
     val context = LocalContext.current
     val alarmPrefs = AlarmPreferences(context)
     val isAlarmSetted = alarmPrefs.isAlarmSet()
+    val userPrefs = remember(context) { UserInfoPreferences(context) }  // 알람 SharedPreference 가져오기
 
     // 네비게이션바 블러처리 여부
     var isBlurred by remember{ mutableStateOf(false) }
 
 
     // ✅ 1. 영구 저장소에서 초기 값을 가져와 세션 상태로 관리합니다.
-    // getShowWindowTutorial()은 SharedPreferences에서 값을 읽어오는 가상의 함수입니다.
     var showWindowTutorial by remember { mutableStateOf(alarmPrefs.getShowWindowTutorial()) }
 
 
     val navGraph = rememberNavController.createGraph(startDestination = startDestination){
 
-        /* 컴포즈 스플래시
-        composable(Screen.Splash.route){
-            LaunchedEffect(Unit) {
-                delay(900) // 0.9초 보여주기
-                rememberNavController.navigate("home") {
-                    popUpTo("splash") { inclusive = true } // 스플래시를 backstack에서 제거
-                }
-            }
-            SplashScreen()
-        }
-         */
         /** 로그인 데모 **/
         composable(Screen.LoginDemo.route){
             LoginDemoScreen(
-                onConfirm = { greeting ->
+                onConfirm = { user ->
+                    userPrefs.saveUserInfo(user)
                     rememberNavController.navigate(Screen.Home.route)
-                    Toast.makeText(context, greeting, Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, user.nickname, Toast.LENGTH_SHORT).show()
                 }
             )
         }
@@ -201,6 +204,9 @@ fun AppNav(
         composable(Screen.Settings.route) {
 
             SettingsScreen(
+                onClickAccount = {
+                    rememberNavController.navigate(Screen.AccountManagement.route)
+                },
                 onClickQnA = {
                     rememberNavController.navigate(Screen.QnA.route)
                 },
@@ -211,6 +217,14 @@ fun AppNav(
                 }
                     context.startActivity(intent)},
                 onClickSendingData = {rememberNavController.navigate(Screen.SendingData.route)}
+            )
+        }
+
+        composable(Screen.AccountManagement.route){
+            AccountManagementScreen(
+                onBack = {rememberNavController.popBackStack()},
+                userViewModel = authViewModel,
+                onEmailUpdate = {userPrefs.saveUserInfo(authViewModel.getUserInformation())}
             )
         }
 
@@ -392,6 +406,10 @@ fun AlarmBottomNavBar(
 ) {
     val blurRadius = if (isBlurred) 20.dp else 0.dp
     NavigationBar(
+        modifier = Modifier
+            .neumorphicBackground(
+                highlightColor = Color(0xFF12253F).copy(alpha = 0.3f)
+            ),
         containerColor = MaterialTheme.colorScheme.background
     ) {
         Row(

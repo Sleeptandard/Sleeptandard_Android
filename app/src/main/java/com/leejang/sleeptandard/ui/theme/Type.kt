@@ -5,6 +5,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.leejang.sleeptandard.R
 
@@ -20,23 +21,21 @@ val Pretandard = FontFamily(
 val Typography = Typography(
     bodyLarge = TextStyle(
         fontFamily = Pretandard,
-        fontWeight = FontWeight.SemiBold,
+        fontWeight = FontWeight.Bold,
         fontSize = 22.sp,
-        lineHeight = 28.sp,
-        letterSpacing = 0.88.sp
+        letterSpacing = (-0.025).em
     ),
     bodyMedium = TextStyle(
         fontFamily = Pretandard,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 16.sp,
+        letterSpacing = (-0.025).em
+    ),
+    bodySmall = TextStyle(
+        fontFamily = Pretandard,
         fontWeight = FontWeight.Medium,
         fontSize = 16.sp,
-        lineHeight = 28.sp,
-        letterSpacing = 0.64.sp
-    ),
-    displaySmall = TextStyle(
-        fontFamily = Pretandard,
-        fontWeight = FontWeight.Normal,
-        fontSize = 16.sp,
-        lineHeight = 20.sp,
+        letterSpacing = (-0.025).em
     )
     /* Other default text styles to override
     titleLarge = TextStyle(
