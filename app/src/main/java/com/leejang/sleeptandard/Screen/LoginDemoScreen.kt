@@ -3,51 +3,36 @@ package com.leejang.sleeptandard.Screen
 import android.widget.Toast
 import android.util.Log
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.minimumInteractiveComponentSize
-import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -58,9 +43,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Brush.Companion.linearGradient
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.Fill
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
@@ -74,18 +56,15 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.leejang.sleeptandard.ClassFile.User
+import com.leejang.sleeptandard.Component.AuthStepIndicator
 import com.leejang.sleeptandard.Component.BirthDatePicker
-import com.leejang.sleeptandard.Component.LiquidGlassBox
+import com.leejang.sleeptandard.Component.GenderRadioButton
 import com.leejang.sleeptandard.ViewModel.AuthViewModel
 import com.leejang.sleeptandard.ui.theme.AppIcons
-import kotlinx.coroutines.launch
-import java.util.Locale
 
 
 // 유저의 로그인/회원가입 진행 단계 정의 및 email + 비번 저장 클래스
@@ -1386,7 +1365,7 @@ fun CompletedStep(
             modifier = Modifier
                 .clip(RoundedCornerShape(100.dp))
                 .fillMaxWidth()
-                .clickable { onConfirm(viewModel.getUserInformation()) },
+                .clickable { onConfirm(viewModel.loadUserInfo()) },
             contentAlignment = Alignment.Center
         ){
             Box(
@@ -1421,362 +1400,5 @@ fun CompletedStep(
         }
 
     }
-
-
-
-}
-
-@Composable
-fun IndicatorGlassBox(
-    modifier: Modifier = Modifier,
-    content: @Composable () -> Unit
-) {
-    val backgroundColor = Color(0xFFF1F4F9).copy(alpha = 0.3f)
-    val borderColor = Color.White.copy(alpha = 0.2f)
-
-    Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(50.dp)), // 카드 모양
-        contentAlignment = Alignment.Center
-    ) {
-        // [Layer 1] 배경 블러 & 그라데이션
-        Box(
-            modifier = Modifier
-                .matchParentSize()
-                .blur(10.dp) // 유리 뒤를 흐리게
-                .background(
-                    color = backgroundColor
-                    /*
-                    brush = Brush.verticalGradient(
-                        colors = listOf(
-                            Color.White.copy(alpha = 0.15f), // 위쪽 하이라이트
-                            Color.White.copy(alpha = 0.05f)  // 아래쪽 그림자
-                        )
-                    )
-                     */
-                )
-                .border(
-                    width = 3.dp,
-                    brush = Brush.verticalGradient(
-                        colors = listOf(
-                            Color.White.copy(alpha = 0.4f), // 테두리 위쪽 (빛남)
-                            Color.Transparent,             // 테두리 중간 (투명)
-                            Color.White.copy(alpha = 0.1f)  // 테두리 아래쪽 (은은함)
-                        )
-                    ),
-                    shape = RoundedCornerShape(50.dp)
-                )
-        )
-
-        // [Layer 2] 실제 내용물 (선명함 유지)
-        Box(modifier = Modifier) {
-            content()
-        }
-    }
-}
-
-@Composable
-fun AuthStepIndicator(
-    backdrop : Backdrop,
-    currentStep: AuthStep,
-    modifier: Modifier = Modifier
-) {
-    // 1. 표시할 텍스트 리스트 (로그인/회원가입 공통 단계로 구성)
-    val stepLabels = listOf("메일 입력", "회원가입", "로그인")
-
-    // 2. ✅ 핵심 수정: 현재 상태(AuthStep)를 인덱스 번호로 매핑합니다.
-    // SignupPassword와 LoginPassword를 모두 '비밀번호 입력' 단계(인덱스 1)로 묶어줍니다.
-    val currentIndex = when (currentStep) {
-        is AuthStep.EmailInput -> 0         // 메일입력
-        is AuthStep.SignupPassword -> 1     // 회원가입
-        is AuthStep.SignupNickname -> 1
-        is AuthStep.SignupGenderBirth -> 1
-        is AuthStep.LoginPassword -> 2      // 로그인
-        is AuthStep.FindPassword -> 2
-        is AuthStep.PasswordReset -> 3      // 없음
-        is AuthStep.Completed -> 3
-    }
-
-    val numberOfSteps = stepLabels.size
-
-    if(currentIndex < 3){
-        BoxWithConstraints(
-            modifier = modifier
-                .fillMaxWidth()
-                .height(52.dp)
-        ) {
-            val glassWidth = 105.dp
-            val stepWidth = (maxWidth) / numberOfSteps
-            val diff = (stepWidth - glassWidth)/2
-            val targetOffset = stepWidth * currentIndex + diff * currentIndex
-
-            // 위치 이동 애니메이션
-            val animatedOffset by animateDpAsState(
-                targetValue = targetOffset,
-                animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
-                label = "step_highlight_move"
-            )
-
-
-
-
-            Box(
-                modifier = Modifier
-                    .padding(horizontal = 10.dp)
-                    .fillMaxSize()
-            ){
-                Row(
-                    modifier = Modifier.fillMaxSize(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ){
-                    stepLabels.forEachIndexed { index, step ->
-
-                        val isSelected = index == currentIndex
-
-                        // 1. 투명도 애니메이션 (선택되면 0, 아니면 1)
-                        val textAlpha by animateFloatAsState(
-                            targetValue = if (isSelected) 0f else 1f,
-                            animationSpec = tween(durationMillis = 300),
-                            label = "text_alpha"
-                        )
-
-                        // 2. 수직 이동 애니메이션 (선택되면 아래로 20dp 이동)
-                        val textOffset by animateDpAsState(
-                            targetValue = if (isSelected) 20.dp else 0.dp,
-                            animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
-                            label = "text_offset"
-                        )
-
-                        Box(
-                            modifier = Modifier.weight(1f), // 화면을 정확히 1:1:1로 나눕니다.
-                            contentAlignment = when (index) {
-                                0 -> Alignment.CenterStart // 첫 번째: 왼쪽 정렬
-                                1 -> Alignment.Center      // 두 번째: 무조건 중앙 정렬
-                                else -> Alignment.CenterEnd // 세 번째: 오른쪽 정렬ㅅ
-                            }
-                        ) {
-                            Text(
-                                text = step,
-                                modifier = Modifier
-                                    .graphicsLayer {
-                                        alpha = textAlpha            // 투명도 적용
-                                        translationY = textOffset.toPx() // 아래로 사라지는 이동 적용
-                                    },
-                                style = MaterialTheme.typography.bodyMedium.copy(
-                                    color = Color.White,
-                                    fontSize = 14.sp
-                                )
-                            )
-                        }
-                    }
-                }
-            }
-
-            LiquidGlassBox(
-                modifier = Modifier
-                    .width(glassWidth)
-                    .padding(top = 9.dp)
-                    .fillMaxHeight()
-                    .offset(x = animatedOffset),
-                backdrop = backdrop,
-            ) {
-                Text(
-                    text = stepLabels[currentIndex],
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        color = Color(0xFFAFF4F9),
-                        fontSize = 16.sp
-                    )
-                )
-            }
-        }
-    }
-
-
-}
-
-@Composable
-fun GenderRadioButton(
-    selected: Boolean,
-    onClick: (() -> Unit)?,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-    interactionSource: MutableInteractionSource? = null,
-){
-    val dotRadius =
-        animateDpAsState(
-            targetValue = if (selected) 12.dp / 2 else 0.dp,
-            // TODO Load the motionScheme tokens from the component tokens file
-            // animationSpec = MotionSchemeKeyTokens.FastSpatial.value(),
-        )
-    val radioColor = Color.White
-    val selectableModifier =
-        if (onClick != null) {
-            Modifier.selectable(
-                selected = selected,
-                onClick = onClick,
-                enabled = enabled,
-                role = Role.RadioButton,
-                interactionSource = interactionSource,
-                indication = ripple(bounded = false, radius = 40.dp / 2),
-            )
-        } else {
-            Modifier
-        }
-    Canvas(
-        modifier
-            .then(
-                if (onClick != null) {
-                    Modifier.minimumInteractiveComponentSize()
-                } else {
-                    Modifier
-                }
-            )
-            .then(selectableModifier)
-            .wrapContentSize(Alignment.Center)
-            .padding(2.dp)
-            .requiredSize(20.dp)
-    ) {
-        // Draw the radio button
-        val strokeWidth = if(selected) 8.dp.toPx() else (1.5).dp.toPx()
-        drawCircle(
-            color = radioColor,
-            radius = (20.dp / 2).toPx() - strokeWidth / 2,
-            style = Stroke(strokeWidth),
-        )
-        if (dotRadius.value > 0.dp) {
-            drawCircle(Color.Black, dotRadius.value.toPx(), style = Fill)
-        }
-    }
-}
-
-@Composable
-fun BirthDatePicker(
-    viewModel: AuthViewModel
-) {
-
-    Column(
-        modifier = Modifier
-            .size(281.dp, 334.dp)
-            .clip(RoundedCornerShape(28.dp))
-            .background(color = Color.White),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ){
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(48.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = "생년월일",
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    fontSize = 16.sp,
-                    color = Color.Black
-                )
-            )
-        }
-
-
-        HorizontalDivider(
-            modifier = Modifier.fillMaxWidth(),
-            thickness = 1.dp,
-            color = Color(0xFF050C16).copy(alpha = 0.5f)
-        )
-
-        BirthDatePicker(
-            modifier = Modifier
-                .weight(1f),
-            onDateChange = {y, m, d ->
-                // ✅ 휠을 돌릴 때마다 VM의 임시 값 업데이트
-                viewModel.updatePickerValues(y, m, d)
-            },
-            defaultYear = viewModel.pickerYear,
-            defaultMonth = viewModel.pickerMonth,
-            defaultDay = viewModel.pickerDay,
-        )
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(56.dp)
-        ){
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight()
-                    .background(
-                        color = Color(0xFFE0E0E0)
-                    )
-                    .clickable {
-                        viewModel.closeDatePicker()
-                    },
-                contentAlignment = Alignment.Center
-            ){
-                Text(
-                    text = "취소",
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontSize = 16.sp,
-                        color = Color.Black
-                    )
-                )
-            }
-
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight()
-                    .background(
-                        color = Color(0xFFAFF4F9)
-                    )
-                    .clickable {
-                        viewModel.confirmDatePickerSelection() // ✅ 최종 값 확정 및 모달 닫기
-                    },
-                contentAlignment = Alignment.Center
-            ){
-                Text(
-                    text = "확인",
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontSize = 16.sp,
-                        color = Color.Black
-                    )
-                )
-            }
-        }
-    }
-}
-
-/******* 백엔드가 처다볼 필요도 없는 테스트용 더미 서버, 리포지토리 ******/
-
-// 사용자 정보를 담는 데이터 클래스
-data class User(
-    val email: String = "",
-    val pw: String = "",
-    val nickname: String = "",
-    val gender: String = "", // "Male" or "Female"
-    val birthdate: String = "" // "YYYY.MM.DD"
-)
-
-// 서버 DB 역할을 하는 싱글톤 객체
-object AuthRepository {
-    // 더미 사용자 리스트
-    private val dummyUsers = mutableListOf(
-        User("test@test.com", "12345678", "테스터", "male", "2000.01.01"),
-        User("admin@sleeptandard.com", "admin123", "관리자","male", "2000.01.01")
-    )
-
-    // 1. 이메일 존재 여부 확인 (api.checkEmail 역할)
-    fun isEmailExists(email: String): Boolean {
-        return dummyUsers.any { it.email == email }
-    }
-
-    // 2. 로그인 확인 (onLogin 역할)
-    fun verifyLogin(email: String, pw: String): User? {
-        return dummyUsers.find { it.email == email && it.pw == pw }
-    }
-
-    // 3. 회원가입 완료 및 정보 추가 (onComplete 역할)
-    fun addUser(user: User) {
-        dummyUsers.add(user)
-        println("📦 새로운 사용자 추가됨: $user") // 로그 확인용
-    }
+    
 }

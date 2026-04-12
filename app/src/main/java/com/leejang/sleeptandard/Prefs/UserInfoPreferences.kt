@@ -1,8 +1,8 @@
 package com.leejang.sleeptandard.Prefs
 
 import android.content.Context
-import com.leejang.sleeptandard.Screen.User
 import androidx.core.content.edit
+import com.leejang.sleeptandard.ClassFile.User
 
 class UserInfoPreferences(private val context: Context) {
 
