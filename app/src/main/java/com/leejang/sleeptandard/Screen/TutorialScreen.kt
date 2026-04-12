@@ -144,48 +144,6 @@ fun TutorialScreen(
                 }
             }
 
-            /*
-            if (currentPage in 1..3) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(0.9f)
-                        .height(55.dp)
-                        .background(color = Color(0x1AFFFFFF), shape = RoundedCornerShape(50.dp))
-                        .padding(4.dp)
-                ) {
-                    Row(modifier = Modifier.fillMaxSize()) {
-                        listOf("알람설정", "취침", "피드백").forEachIndexed { index, title ->
-                            val pageNum = index + 1
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .fillMaxHeight()
-                                    .clip(RoundedCornerShape(50.dp))
-                                    // 현재 페이지일 때만 배경 브러시 적용
-                                    .background(
-                                        if (currentPage == pageNum) circleGradation else Brush.linearGradient(
-                                            listOf(Color.Transparent, Color.Transparent)
-                                        )
-                                    )
-                                    .clickable { currentPage = pageNum },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = title,
-                                    style = MaterialTheme.typography.bodyMedium.copy(
-                                        fontSize = 15.sp,
-                                        color = if (currentPage == pageNum) Color.White else Color.White.copy(
-                                            alpha = 0.5f
-                                        )
-                                    )
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-             */
             Spacer(Modifier.height(40.dp))
 
             // 2. 페이지 내용 (애니메이션 적용 영역)
