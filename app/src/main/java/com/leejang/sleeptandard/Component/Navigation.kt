@@ -49,6 +49,7 @@ import com.leejang.sleeptandard.AlarmRingScreen
 import com.leejang.sleeptandard.ClassFile.Alarm
 import com.leejang.sleeptandard.ClassFile.AlarmScheduler
 import com.leejang.sleeptandard.ClassFile.QnARepository
+import com.leejang.sleeptandard.ClassFile.User
 import com.leejang.sleeptandard.Prefs.AlarmPreferences
 import com.leejang.sleeptandard.Prefs.UserInfoPreferences
 import com.leejang.sleeptandard.Screen.AccountManagementScreen
@@ -63,7 +64,6 @@ import com.leejang.sleeptandard.Screen.SendingDataScreen
 import com.leejang.sleeptandard.Screen.SettedAlarmScreen
 import com.leejang.sleeptandard.Screen.SettingsScreen
 import com.leejang.sleeptandard.Screen.TutorialScreen
-import com.leejang.sleeptandard.Screen.User
 import com.leejang.sleeptandard.ViewModel.AlarmViewModel
 import com.leejang.sleeptandard.ViewModel.AuthViewModel
 import com.leejang.sleeptandard.ui.theme.AppIcons
@@ -117,7 +117,7 @@ fun AppNav(
 
     LaunchedEffect(userInfo) {
         if (userInfo != null){
-            authViewModel.loadUserInfo(userInfo)
+            authViewModel.getUserInfo(userInfo)
         }
     }
 
@@ -216,15 +216,24 @@ fun AppNav(
                     data = Uri.fromParts("package", context.packageName, null)
                 }
                     context.startActivity(intent)},
-                onClickSendingData = {rememberNavController.navigate(Screen.SendingData.route)}
+                onClickSendingData = {rememberNavController.navigate(Screen.SendingData.route)},
             )
         }
 
         composable(Screen.AccountManagement.route){
             AccountManagementScreen(
-                onBack = {rememberNavController.popBackStack()},
+                onBack = { rememberNavController.popBackStack() },
                 userViewModel = authViewModel,
-                onEmailUpdate = {userPrefs.saveUserInfo(authViewModel.getUserInformation())}
+                onEmailUpdate = { userPrefs.saveUserInfo(authViewModel.loadUserInfo()) },
+                onNicknameUpdate = {},
+                onGenderUpdate = {},
+                onBirthdateUpdate = {},
+                onPasswordUpdate = {},
+                onLogout = {
+                    userPrefs.clearUserInfo()
+                    authViewModel.clearUserInfo()
+                           },
+                onAccountDelete = {}
             )
         }
 

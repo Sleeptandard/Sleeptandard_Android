@@ -6,9 +6,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.leejang.sleeptandard.Screen.AuthRepository
+import com.leejang.sleeptandard.ClassFile.AuthRepository
+import com.leejang.sleeptandard.ClassFile.User
 import com.leejang.sleeptandard.Screen.AuthStep
-import com.leejang.sleeptandard.Screen.User
 import kotlinx.coroutines.launch
 import java.util.Locale
 
@@ -103,11 +103,8 @@ class AuthViewModel : ViewModel() {
             else AuthStep.SignupPassword(email)
         }
 
-        //TODO: 백엔드 통신받은 사인으로 분기
-        /*
-        cureentStep = if (exist) AuthStep.LoginPassword(email)
-            else AuthStep.SignupPassword(email)
-         */
+        //TODO: 서버의 유저정보에서 확인
+
     }
 
     fun findingPassword(){
@@ -120,12 +117,15 @@ class AuthViewModel : ViewModel() {
 
     // 2단계(경로A): 로그인 실행
     fun performLogin(onSuccess: (User) -> Unit, onError: () -> Unit) {
+        // 더미 서버에서 확인
         val user = AuthRepository.verifyLogin(email, password)
         if (user != null) {
             onSuccess(user)
         } else {
             onError()
         }
+
+        //TODO: 서버의 유저정보에서 확인
     }
 
     // 2단계(경로B): 회원가입 비번 설정 후 이동
@@ -140,6 +140,7 @@ class AuthViewModel : ViewModel() {
     // 3단계: 회원가입 완료 및 가입 처리
     fun completeSignup(onComplete: (String) -> Unit) {
         val newUser = User(email, password, nickname, gender, birthdate)
+        // TODO: 서버에 유저정보 등록
         AuthRepository.addUser(newUser)
         onComplete(nickname)
         currentStep = AuthStep.Completed(nickname)
@@ -181,16 +182,19 @@ class AuthViewModel : ViewModel() {
         closeDatePicker() // 저장 후 모달 닫기
     }
 
-    /***********  뗴잉  **********/
+    /***********  작동 확인용 서버통신로직 임시 대체 함수  **********/
+    // 더미 서버에 해당 이메일이 존재하는지 확인
     fun isEmailExist(): Boolean{
             // 더미 서버에서 확인
             return AuthRepository.isEmailExists(email)
     }
+    // 입력받은 pw 정보가 현재 더미서버의 User의 email - password 와 일치하는지 반환하는 함수
     fun isPasswordCorret(pw: String): Boolean{
         return AuthRepository.verifyLogin(email, pw) != null
     }
 
-    fun loadUserInfo(user: User){
+    // UserInfoPrefs로 부터 해당 뷰모델에 정보를 가져오는 함수
+    fun getUserInfo(user: User){
         email = user.email
         password = user.pw
         nickname = user.nickname
@@ -198,7 +202,16 @@ class AuthViewModel : ViewModel() {
         birthdate = user.birthdate
     }
 
-    fun getUserInformation(): User{
+    // 해당 뷰모델의 User 정보를 반환하는 함수
+    fun loadUserInfo(): User{
         return User(email, password, nickname, gender, birthdate)
+    }
+
+    fun clearUserInfo(){
+        email = ""
+        password = ""
+        nickname = ""
+        gender = ""
+        birthdate = ""
     }
 }

@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -28,6 +29,7 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -51,6 +53,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.leejang.sleeptandard.Component.BirthDatePicker
+import com.leejang.sleeptandard.Component.GenderRadioButton
 import com.leejang.sleeptandard.ViewModel.AuthViewModel
 import com.leejang.sleeptandard.ui.theme.AppIcons
 import com.leejang.sleeptandard.ui.theme.Key
@@ -133,14 +137,14 @@ fun AccountManagementScreen(
                     AccountMenu.AMMain -> {
                         item { AMElement("개인 정보", "닉네임/성별/생년월일") { navStack.add(AccountMenu.PersonalInfo) } }
                         item { AMElement("이메일", userViewModel.email) { navStack.add(AccountMenu.Email) } }
-                        item { AMElement("비밀번호", "비밀번호 변경") { /* 비밀번호 변경 */ } }
+                        item { AMElement("비밀번호", "비밀번호 변경") { navStack.add(AccountMenu.Password) } }
                         item { AMElement("로그아웃/탈퇴", "") { navStack.add(AccountMenu.AuthAction) } }
                     }
 
                     AccountMenu.PersonalInfo -> {
-                        item { AMElement("닉네임", userViewModel.nickname) { /* 닉네임 수정 층으로 이동 가능 */ } }
-                        item { AMElement("성별", userViewModel.gender) { } }
-                        item { AMElement("생년월일", userViewModel.birthdate) { } }
+                        item { AMElement("닉네임", userViewModel.nickname) { navStack.add(AccountMenu.Nickname) } }
+                        item { AMElement("성별", userViewModel.gender) { navStack.add(AccountMenu.Gender)} }
+                        item { AMElement("생년월일", userViewModel.birthdate) { navStack.add(AccountMenu.Birthdate) } }
                     }
 
                     AccountMenu.Nickname -> {
@@ -156,12 +160,12 @@ fun AccountManagementScreen(
                     AccountMenu.Password -> item { PasswordEdit(viewModel = userViewModel, onPasswordUpdate = onPasswordUpdate)}
 
                     AccountMenu.AuthAction -> {
-                        item { AMElement("로그아웃", "") { /* 로그아웃 로직 */ } }
-                        item { AMElement("계정탈퇴", "") { /* 탈퇴 로직 */ } }
+                        item { AMElement("로그아웃", "") { navStack.add(AccountMenu.Logout) } }
+                        item { AMElement("계정탈퇴", "") { navStack.add(AccountMenu.DeleteAccount) } }
                     }
 
-                    AccountMenu.Logout -> TODO()
-                    AccountMenu.DeleteAccount -> TODO()
+                    AccountMenu.Logout -> item{LogoutScreen(onLogout, onBack) }
+                    AccountMenu.DeleteAccount -> item{AccountDeleteScreen(onAccountDelete, onBack)}
 
 
 
@@ -368,7 +372,7 @@ fun AMElement(
                          .padding(end = 12.dp),
                      verticalAlignment = Alignment.CenterVertically
                  ) {
-                     GenderRadioButton(
+                      GenderRadioButton(
                          selected = (text == selectedOption),
                          onClick = null
                      )
@@ -820,7 +824,8 @@ fun AMElement(
 
  @Composable
  fun LogoutScreen(
-     onLogout: () -> Unit
+     onLogout: () -> Unit,
+     onBack: () -> Unit
  ){
     Column(
         modifier = Modifier
@@ -848,15 +853,336 @@ fun AMElement(
                 fontSize = 18.sp
             )
         )
+
         Spacer(Modifier.weight(1f))
+
         Text(
             text = "알람의 정석을 다시 이용하려면",
             style = MaterialTheme.typography.bodyMedium.copy(
                 fontSize = 18.sp
             )
         )
-        Row {
 
+        Spacer(Modifier.weight(1f))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Button(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(100.dp))
+                    .height(60.dp)
+                    .weight(1f),
+                onClick = { onBack() },
+                contentPadding = PaddingValues(0.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(100.dp))
+                        .fillMaxSize()
+                        .background(color = Color.White),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "취소",
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontSize = 18.sp,
+                            color = Key
+                        )
+                    )
+                }
+            }
+
+            Spacer(Modifier.width(20.dp))
+
+            Button(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(100.dp))
+                    .height(60.dp)
+                    .weight(1f),
+                onClick = { onLogout() },
+                contentPadding = PaddingValues(0.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(100.dp))
+                        .fillMaxSize()
+                        .background(color = Neon),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "로그아웃",
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontSize = 18.sp,
+                            color = Key
+                        )
+                    )
+                }
+            }
         }
+        Spacer(Modifier.height(20.dp))
     }
+ }
+
+ @Composable
+ fun AccountDeleteScreen(onAccountDelete: () -> Unit, onBack: () -> Unit) {
+
+     var isChecked by remember { mutableStateOf(false) }
+     var showDialog by remember { mutableStateOf(false) }
+     val checkBackground = if (isChecked) Color.White else Color.Transparent
+
+     Column(
+         modifier = Modifier
+             .fillMaxSize(),
+         horizontalAlignment = Alignment.CenterHorizontally
+     ) {
+         Text(
+             text = "계정을 탈퇴하면 저장된 수면 기록과 설정",
+             style = MaterialTheme.typography.bodyMedium.copy(
+                 fontSize = 18.sp
+             )
+         )
+         Row(){
+             Text(
+                 text = "정보가 ",
+                 style = MaterialTheme.typography.bodyMedium.copy(
+                     fontSize = 18.sp
+                 )
+             )
+             Text(
+                 text = "모두 삭제",
+                 style = MaterialTheme.typography.bodyMedium.copy(
+                     fontSize = 18.sp,
+                     color = Color(0xFFE85D75)
+                 )
+             )
+             Text(
+                 text = "되며 복구할 수 없습니다",
+                 style = MaterialTheme.typography.bodyMedium.copy(
+                     fontSize = 18.sp
+                 )
+             )
+         }
+
+
+
+         Spacer(Modifier.weight(1f))
+
+         Text(
+             text = "•저장된 수면 기록이 모두 삭제됩니다",
+             style = MaterialTheme.typography.bodyMedium.copy(
+                 fontSize = 16.sp
+             )
+         )
+         Text(
+             text = "•알람 및 설정 정보가 초기화됩니다",
+             style = MaterialTheme.typography.bodyMedium.copy(
+                 fontSize = 16.sp
+             )
+         )
+         Text(
+             text = "•탈퇴 후 동일한 계정으로 복구할 수 없습니다",
+             style = MaterialTheme.typography.bodyMedium.copy(
+                 fontSize = 16.sp
+             )
+         )
+
+         Spacer(Modifier.weight(1f))
+
+         Row(
+             modifier = Modifier
+                 .padding(20.dp)
+                 .fillMaxWidth(),
+             verticalAlignment = Alignment.CenterVertically
+         ) {
+
+             Box(
+                 modifier = Modifier
+                     .padding(5.dp)
+                     .size(23.dp)
+                     .background(
+                         color = checkBackground,
+                         shape = RoundedCornerShape(5.dp)
+                     )
+                     .border(
+                         width = 2.dp,
+                         color = Color.White,
+                         shape = RoundedCornerShape(5.dp)
+                     )
+                     .clickable { isChecked = !isChecked },
+                 contentAlignment = Alignment.Center
+             ) {
+                 if (isChecked) {
+                     Icon(
+                         painter = painterResource(AppIcons.HomeCheck),
+                         contentDescription = "췤",
+                         tint = Key
+                     )
+                 }
+             }
+
+             Text(
+                 modifier = Modifier.padding(start = 10.dp),
+                 text = "위 내용을 확인했으며 계정 탈퇴에 동의합니다",
+                 style = MaterialTheme.typography.bodyLarge.copy(
+                     color = Color.White,
+                     fontSize = 14.sp
+                 )
+             )
+         }
+
+         Row(
+             modifier = Modifier.fillMaxWidth(),
+         ) {
+             Button(
+                 modifier = Modifier
+                     .clip(RoundedCornerShape(100.dp))
+                     .weight(1f)
+                     .height(60.dp),
+                 onClick = { onBack() },
+                 contentPadding = PaddingValues(0.dp)
+             ) {
+                 Box(
+                     modifier = Modifier
+                         .clip(RoundedCornerShape(100.dp))
+                         .fillMaxSize()
+                         .background(color = Color.White),
+                     contentAlignment = Alignment.Center
+                 ) {
+                     Text(
+                         text = "취소",
+                         style = MaterialTheme.typography.bodyMedium.copy(
+                             fontSize = 18.sp,
+                             color = Key
+                         )
+                     )
+                 }
+             }
+
+             Spacer(Modifier.width(20.dp))
+
+             Button(
+                 modifier = Modifier
+                     .clip(RoundedCornerShape(100.dp))
+                     .height(60.dp)
+                     .weight(1f),
+                 enabled = isChecked,
+                 onClick = { showDialog = true },
+                 contentPadding = PaddingValues(0.dp)
+             ) {
+                 Box(
+                     modifier = Modifier
+                         .clip(RoundedCornerShape(100.dp))
+                         .fillMaxSize()
+                         .background(color = if(isChecked) Color(0xFFE85D75) else Color(0xFFE85D75).copy(alpha = 0.5f)),
+                     contentAlignment = Alignment.Center
+                 ) {
+                     Text(
+                         text = "계정탈퇴",
+                         style = MaterialTheme.typography.bodyMedium.copy(
+                             fontSize = 18.sp,
+                             color = if(isChecked)Key else Color.Black.copy(alpha = 0.5f)
+                         )
+                     )
+                 }
+             }
+         }
+         Spacer(Modifier.height(20.dp))
+     }
+
+     if (showDialog) {
+         Dialog(
+             onDismissRequest = { showDialog = false } // 다이얼로그 바깥 터치 시 닫기
+         ) {
+             AccountDeleteDialog(onAccountDelete, onCanel = {showDialog = false})
+         }
+     }
+
+ }
+
+ @Composable
+ fun AccountDeleteDialog(
+     onAccountDelete: () -> Unit,
+     onCanel: ()-> Unit
+ ) {
+
+     Column(
+         modifier = Modifier
+             .fillMaxWidth()
+             .height(200.dp)
+             .padding(horizontal = 20.dp)
+             .clip(RoundedCornerShape(28.dp))
+             .background(color = Color.White),
+         horizontalAlignment = Alignment.CenterHorizontally
+     ){
+         Column(
+             modifier = Modifier.weight(1f),
+             horizontalAlignment = Alignment.CenterHorizontally,
+             verticalArrangement = Arrangement.Center
+         ){
+             Text(
+                 text = "정말 탈퇴하시겠습니까?",
+                 style = MaterialTheme.typography.bodyMedium.copy(
+                     fontSize = 18.sp,
+                     color = Key
+                 )
+             )
+             Text(
+                 text = "이 작업은 되돌릴 수 없습니다.",
+                 style = MaterialTheme.typography.bodyMedium.copy(
+                     fontSize = 18.sp,
+                     color = Key
+                 )
+             )
+         }
+
+
+         Row(
+             modifier = Modifier
+                 .fillMaxWidth()
+                 .height(56.dp)
+         ){
+             Box(
+                 modifier = Modifier
+                     .weight(1f)
+                     .fillMaxHeight()
+                     .background(
+                         color = Color(0xFFE0E0E0)
+                     )
+                     .clickable {
+                         onCanel()
+                     },
+                 contentAlignment = Alignment.Center
+             ){
+                 Text(
+                     text = "취소",
+                     style = MaterialTheme.typography.bodyMedium.copy(
+                         fontSize = 16.sp,
+                         color = Key
+                     )
+                 )
+             }
+
+             Box(
+                 modifier = Modifier
+                     .weight(1f)
+                     .fillMaxHeight()
+                     .background(
+                         color = Color(0xFFE85D75)
+                     )
+                     .clickable {
+                         onAccountDelete()
+                     },
+                 contentAlignment = Alignment.Center
+             ){
+                 Text(
+                     text = "확인",
+                     style = MaterialTheme.typography.bodyMedium.copy(
+                         fontSize = 16.sp,
+                         color = Key
+                     )
+                 )
+             }
+         }
+     }
  }
