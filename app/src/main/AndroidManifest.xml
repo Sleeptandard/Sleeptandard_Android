@@ -87,6 +87,12 @@
             android:foregroundServiceType="dataSync"
             tools:node="merge" />
 
+        <!-- 삼성 PowerManager WakeLock 강제 비활성화 방지를 위한 ForegroundService -->
+        <service
+            android:name=".service.FileReceiveForegroundService"
+            android:foregroundServiceType="dataSync"
+            android:exported="false" />
+
     </application>
 
 

@@ -166,7 +166,7 @@ class PhoneListenerService : WearableListenerService() {
     
     /**
      * Watch로부터 Channel을 통한 파일 전송 수신
-     * ChannelClient를 사용한 대용량 파일 전송
+     * → FileReceiveForegroundService에 위임하여 삼성 WakeLock 강제 비활성화 문제 해결
      */
     override fun onChannelOpened(channel: ChannelClient.Channel) {
         super.onChannelOpened(channel)
@@ -176,84 +176,16 @@ class PhoneListenerService : WearableListenerService() {
         
         // /sleep_log_transfer/로 시작하는 채널만 처리
         if (channelPath.startsWith(PATH_LOG_TRANSFER_PREFIX)) {
-            serviceScope.launch {
-                receiveLogFile(channel)
+            Log.i(TAG, "🚀 Delegating to FileReceiveForegroundService")
+            val intent = FileReceiveForegroundService.buildIntent(this, channel)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent)
+            } else {
+                startService(intent)
             }
         }
     }
 
-    /**
-     * Channel을 통해 로그 파일 수신 및 저장
-     * (전송 중 폰이 잠들지 않도록 WakeLock 사용)
-     */
-    private suspend fun receiveLogFile(channel: ChannelClient.Channel) {
-        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-        val wakeLock = powerManager.newWakeLock(
-            PowerManager.PARTIAL_WAKE_LOCK,
-            "SleepStandard:PhoneLogTransferWakeLock"
-        )
-        
-        // 최대 15분 동안만 WakeLock 유지 (안전장치)
-        wakeLock.acquire(15 * 60 * 1000L)
-        
-        try {
-            // 경로에서 파일명 추출 (예: /sleep_log_transfer/sensor_log_xxx.csv)
-            val fileName = channel.path.substringAfterLast("/")
-            Log.i(TAG, "Receiving file: $fileName")
-            
-            // 파일 저장 경로
-            val outputFile = File(filesDir, "received_$fileName")
-            
-            // ChannelClient로 입력 스트림 받기
-            val channelClient = Wearable.getChannelClient(this)
-            val inputStream = channelClient.getInputStream(channel).await()
-            
-            // 파일 저장
-            var totalBytes = 0L
-            inputStream.use { input ->
-                outputFile.outputStream().use { output ->
-                    val buffer = ByteArray(8192)
-                    var bytesRead: Int
-                    
-                    while (input.read(buffer).also { bytesRead = it } != -1) {
-                        output.write(buffer, 0, bytesRead)
-                        totalBytes += bytesRead
-                    }
-                }
-            }
-            
-            Log.i(TAG, "✅ File saved: ${outputFile.name} (${totalBytes / 1024}KB)")
-            
-            // [디버깅] 파일 내용 검증
-            validateReceivedFile(outputFile)
-
-            // [Supabase Storage] WorkManager에 업로드 작업 등록
-            // - 네트워크 연결 시에만 실행, 실패 시 자동 재시도
-            CsvUploadManager.enqueueUpload(applicationContext, outputFile)
-            
-            // 알림 표시
-            showFileReceivedNotification(fileName, totalBytes)
-            
-            // 채널 닫기
-            channelClient.close(channel).await()
-            
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to receive file", e)
-            
-            // 에러 발생 시 채널 닫기 시도
-            try {
-                Wearable.getChannelClient(this).close(channel).await()
-            } catch (closeError: Exception) {
-                Log.e(TAG, "Failed to close channel", closeError)
-            }
-        } finally {
-            if (wakeLock.isHeld) {
-                wakeLock.release()
-                Log.d(TAG, "WakeLock released")
-            }
-        }
-    }
-    
     /**
      * 수신된 파일 검증 및 디버깅 정보 출력
      * (OOM 방지를 위해 readLines 대신 라인별로 직접 카운트)
