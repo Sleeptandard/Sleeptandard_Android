@@ -32,6 +32,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -82,10 +83,17 @@ sealed class AuthStep {
 
 @Composable
 fun LoginDemoScreen(
-    authViewModel: AuthViewModel = viewModel(),
-    onConfirm: (User) -> Unit
-){
+    onConfirm: (User) -> Unit,
+    isPasswordReset: Boolean = false
+) {
     val context = LocalContext.current
+    val authViewModel: AuthViewModel = viewModel()
+
+    LaunchedEffect(isPasswordReset) {
+        if (isPasswordReset) {
+            authViewModel.goToPasswordReset()
+        }
+    }
 
     val linearGradation = Brush.verticalGradient(
         colorStops = arrayOf(
@@ -176,15 +184,24 @@ fun LoginDemoScreen(
                             authViewModel.backToEmail()
                         },
                         onResend = {
-                            // TODO: 비밀번호 재설정 메일 송신 로직
+                            // 재발송: Supabase에 비밀번호 재설정 메일 재발송
+                            authViewModel.findingPassword()
                         }
                     )
 
                     is AuthStep.PasswordReset -> PasswordResetStep(
                         viewModel = authViewModel,
                         onReset = {
-                            // TODO: 비밀번호 재설정 로직 백엔드 연결 필요
-                            authViewModel.backToEmail()
+                            // Supabase auth.updateUser로 새 비밀번호 적용
+                            authViewModel.resetPassword(
+                                newPassword = authViewModel.password,
+                                onSuccess = {
+                                    Toast.makeText(context, "비밀번호가 변경되었습니다.", Toast.LENGTH_SHORT).show()
+                                },
+                                onError = { error ->
+                                    Toast.makeText(context, "오류: $error", Toast.LENGTH_SHORT).show()
+                                }
+                            )
                         }
                     )
 

@@ -100,7 +100,8 @@ fun AppNav(
     // 실험중
     startDestination: String = Screen.Home.route,
     initialAlarm: Alarm? = null,
-    userInfo: User? = null
+    userInfo: User? = null,
+    isPasswordReset: Boolean = false
 ){
     /*** 기존에 있던 코드 ***/
     val rememberNavController = rememberNavController()
@@ -145,7 +146,8 @@ fun AppNav(
                     userPrefs.saveUserInfo(user)
                     rememberNavController.navigate(Screen.Home.route)
                     Toast.makeText(context, user.nickname, Toast.LENGTH_SHORT).show()
-                }
+                },
+                isPasswordReset = isPasswordReset
             )
         }
 

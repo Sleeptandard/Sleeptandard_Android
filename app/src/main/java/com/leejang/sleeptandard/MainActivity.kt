@@ -18,6 +18,7 @@ import com.leejang.sleeptandard.Permission.checkSetExactAlarms
 import com.leejang.sleeptandard.Prefs.AlarmPreferences
 import com.leejang.sleeptandard.backend.SupabaseClientProvider
 import io.github.jan.supabase.auth.auth
+import io.github.jan.supabase.auth.handleDeeplinks
 import kotlinx.coroutines.runBlocking
 import android.widget.Toast
 import androidx.lifecycle.lifecycleScope
@@ -63,7 +64,19 @@ class MainActivity : ComponentActivity() {
                 .start()
         }
 
-        val startDestination = getStartDestination(alarmPrefs)
+        val isResetPassword = intent.data?.path?.startsWith("/reset-password") == true
+
+        if (isResetPassword) {
+            try {
+                // SupabaseClient의 확장 함수를 호출합니다.
+                SupabaseClientProvider.client.handleDeeplinks(intent)
+            } catch (e: Exception) {
+                // handleDeeplinks 호출 실패 시 무시 오류 방지
+                android.util.Log.e("MainActivity", "handleDeeplinks error", e)
+            }
+        }
+
+        val startDestination = getStartDestination(alarmPrefs, isResetPassword)
 
         // 자동 로그인으로 홈 화면에 진입한 경우 환영 메시지 띄우기
         if (startDestination == Screen.Home.route) {
@@ -93,7 +106,8 @@ class MainActivity : ComponentActivity() {
                 AppNav(
                     scheduler = AlarmScheduler(this),
                     startDestination = startDestination,
-                    initialAlarm = alarmPrefs.loadAlarm()
+                    initialAlarm = alarmPrefs.loadAlarm(),
+                    isPasswordReset = isResetPassword
                 )
             }
         }
@@ -134,7 +148,8 @@ class MainActivity : ComponentActivity() {
 
     // 시작 화면 정하는 함수
     private fun getStartDestination(
-        alarmPrefs: AlarmPreferences
+        alarmPrefs: AlarmPreferences,
+        isResetPassword: Boolean = false
     ): String {
         val startDestinationFromIntent = intent.getStringExtra("startDestination")
 
@@ -150,10 +165,11 @@ class MainActivity : ComponentActivity() {
 
         return when {
             alarmPrefs.isFirstRun() -> Screen.Tutorial.route // 1순위: 앱을 처음 실행한 경우
-            !isLoggedIn -> Screen.LoginDemo.route            // 2순위: Supabase 로그인이 안 된 경우 로그인 데모 화면으로
-            alarmPrefs.isAlarmSet() -> Screen.SettedAlarm.route       // 3순위: 알람이 설정되어 있는 경우
-            startDestinationFromIntent != null -> startDestinationFromIntent // 4순위: 알람을 끄고 온 경우 (피드백 화면)
-            else -> Screen.Home.route                                 // 5순위: 일반적인 경우
+            isResetPassword -> Screen.LoginDemo.route        // 2순위: 비밀번호 재설정 딥링크
+            !isLoggedIn -> Screen.LoginDemo.route            // 3순위: Supabase 로그인이 안 된 경우 로그인 데모 화면으로
+            alarmPrefs.isAlarmSet() -> Screen.SettedAlarm.route       // 4순위: 알람이 설정되어 있는 경우
+            startDestinationFromIntent != null -> startDestinationFromIntent // 5순위: 알람을 끄고 온 경우 (피드백 화면)
+            else -> Screen.Home.route                                 // 6순위: 일반적인 경우
         }
     }
 

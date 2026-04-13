@@ -143,11 +143,38 @@ class AuthViewModel : ViewModel() {
     }
 
     fun findingPassword() {
-        currentStep = AuthStep.FindPassword(email)
+        viewModelScope.launch {
+            try {
+                supabase.auth.resetPasswordForEmail(email)
+                Log.d("AuthVM", "비밀번호 재설정 메일 발송 완료: $email")
+            } catch (e: Exception) {
+                Log.e("AuthVM", "비밀번호 재설정 메일 발송 실패: ${e.message}", e)
+            } finally {
+                // 메일 발송 성공/실패 여부와 관계없이 안내 화면으로 이동
+                currentStep = AuthStep.FindPassword(email)
+            }
+        }
     }
 
-    fun resetPassword() {
+    // 외부(예: 딥링크)에서 비밀번호 재설정 화면으로 바로 진입할 때 호출
+    fun goToPasswordReset() {
+        // 이메일을 알고 있으면 좋겠지만, 딥링크 진입 시에는 빈 값일 수 있습니다.
         currentStep = AuthStep.PasswordReset(email)
+    }
+
+    // 비밀번호 재설정 완료 처리 (딥링크로 앱이 열린 후 새 비밀번호 적용)
+    fun resetPassword(newPassword: String, onSuccess: () -> Unit, onError: (String) -> Unit) {
+        viewModelScope.launch {
+            try {
+                supabase.auth.updateUser { password = newPassword }
+                Log.d("AuthVM", "비밀번호 변경 완료")
+                onSuccess()
+                currentStep = AuthStep.EmailInput
+            } catch (e: Exception) {
+                Log.e("AuthVM", "비밀번호 변경 실패: ${e.message}", e)
+                onError(e.message ?: "비밀번호 변경 중 오류가 발생했습니다.")
+            }
+        }
     }
 
     // 2단계(경로A): 로그인 실행
