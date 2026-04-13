@@ -1,9 +1,9 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
-    kotlin("plugin.serialization") version "2.3.20"
+    kotlin("plugin.serialization") version "2.1.10"
     // 아래 줄을 추가하세요 (Kotlin 버전과 동일하게 설정)
-    id("org.jetbrains.kotlin.plugin.compose") version "2.3.20"
+    id("org.jetbrains.kotlin.plugin.compose") version "2.1.10"
 }
 
 android {

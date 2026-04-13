@@ -78,7 +78,6 @@ import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
-import com.kyant.backdrop.highlight.Highlight
 import com.leejang.sleeptandard.ui.theme.Key
 import kotlinx.coroutines.delay
 import java.util.Calendar

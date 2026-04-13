@@ -57,8 +57,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.kyant.backdrop.backdrops.layerBackdrop
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+
 import com.leejang.sleeptandard.ClassFile.User
 import com.leejang.sleeptandard.Component.AuthStepIndicator
 import com.leejang.sleeptandard.Component.BirthDatePicker
@@ -102,17 +101,10 @@ fun LoginDemoScreen(
 
     val backgroundColor = Color.White
 
-    // 리퀴드 글래스 드가자
-    val backdrop = rememberLayerBackdrop {
-        drawRect(backgroundColor)
-        drawContent()
-    }
-
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .layerBackdrop(backdrop)
     ){
         Column(
             modifier = Modifier
@@ -250,7 +242,6 @@ fun LoginDemoScreen(
         AuthStepIndicator(
             modifier = Modifier,
             currentStep = authViewModel.currentStep,
-            backdrop = backdrop,
         )
     }
 
