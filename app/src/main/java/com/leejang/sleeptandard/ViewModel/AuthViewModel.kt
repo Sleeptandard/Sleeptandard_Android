@@ -88,7 +88,6 @@ class AuthViewModel : ViewModel() {
     }
     fun updateNickname(input: String) { nickname = input }
     fun updateGender(input: String) { gender = input }
-    fun updateBirthdate(input: String) { birthdate = input }
 
 
 
@@ -150,7 +149,26 @@ class AuthViewModel : ViewModel() {
         currentStep = AuthStep.SignupNickname(email, pw)
     }
 
-    fun backToEmail() { currentStep = AuthStep.EmailInput }
+    fun backToEmail() {
+        currentStep = AuthStep.EmailInput
+        password = ""
+        passwordConfirm = ""
+    }
+
+    fun backToSignupPassword(){
+        currentStep = AuthStep.SignupPassword(email)
+        nickname = ""
+    }
+
+    fun backToLoginPassword(){
+        currentStep = AuthStep.LoginPassword(email)
+    }
+
+    fun backToNickname(){
+        currentStep = AuthStep.SignupNickname(email, password)
+    }
+
+
 
     // ✅ 3. 모달을 여는 함수 (TextField 클릭 시 호출)
     fun openDatePicker() {
