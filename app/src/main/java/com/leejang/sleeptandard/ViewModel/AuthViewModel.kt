@@ -63,8 +63,8 @@ class AuthViewModel : ViewModel() {
     val isPasswordValid: Boolean
         get() = isPasswordLengthValid && isPasswordCharsValid
 
-    // 1. 특수문자 제외 (유니코드 문자+숫자 허용)
-    private val nicknamePattern = Regex("^[\\p{L}\\p{N}]{1,15}$")
+    // 1. 특수문자 제외 (유니코드 문자 + 숫자 + 공백 허용)
+    private val nicknamePattern = Regex("^[\\p{L}\\p{N} ]{1,15}$")
 
     // 2. 실시간 닉네임 유효성 상태
     val isNicknameValid: Boolean
