@@ -140,6 +140,7 @@ fun AppNav(
         /** 로그인 데모 **/
         composable(Screen.LoginDemo.route){
             LoginDemoScreen(
+                authViewModel = authViewModel,
                 onConfirm = { user ->
                     // UserInfoPrefs에 유저 정보 저장
                     userPrefs.saveUserInfo(user)

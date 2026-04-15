@@ -84,7 +84,7 @@ sealed class AuthStep {
 
 @Composable
 fun LoginDemoScreen(
-    authViewModel: AuthViewModel = viewModel(),
+    authViewModel: AuthViewModel,
     onConfirm: (User) -> Unit
 ){
     val context = LocalContext.current
