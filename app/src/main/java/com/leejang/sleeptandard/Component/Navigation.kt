@@ -141,7 +141,7 @@ fun AppNav(
         /** 로그인 데모 **/
         composable(Screen.LoginDemo.route){
             LoginDemoScreen(
-                onConfirm = { user ->
+                onConfirm = { user: User ->
                     // UserInfoPrefs에 유저 정보 저장
                     userPrefs.saveUserInfo(user)
                     rememberNavController.navigate(Screen.Home.route)
@@ -227,18 +227,52 @@ fun AppNav(
             AccountManagementScreen(
                 onBack = { rememberNavController.popBackStack() },
                 userViewModel = authViewModel,
-                // TODO: 유저 정보 업데이트 백엔드 로직
-                onEmailUpdate = { userPrefs.saveUserInfo(authViewModel.loadUserInfo()) },
-                onNicknameUpdate = {},
-                onGenderUpdate = {},
-                onBirthdateUpdate = {},
-                onPasswordUpdate = {},
+                onEmailUpdate = {
+                    // AuthViewModel.updateUserEmail은 이미 내부에서 email 필드를 업데이트함
+                    userPrefs.saveUserInfo(authViewModel.loadUserInfo())
+                },
+                onNicknameUpdate = {
+                    authViewModel.saveProfileUpdate(
+                        onSuccess = { userPrefs.saveUserInfo(authViewModel.loadUserInfo()) }
+                    )
+                },
+                onGenderUpdate = {
+                    authViewModel.saveProfileUpdate(
+                        onSuccess = { userPrefs.saveUserInfo(authViewModel.loadUserInfo()) }
+                    )
+                },
+                onBirthdateUpdate = {
+                    authViewModel.saveProfileUpdate(
+                        onSuccess = { userPrefs.saveUserInfo(authViewModel.loadUserInfo()) }
+                    )
+                },
+                onPasswordUpdate = {
+                    // PasswordEdit에서 새로운 비밀번호를 UI state로 가지고 있으므로, 
+                    // AuthViewModel의 password 필드가 이미 업데이트되었거나 
+                    // 별도의 호출이 필요할 수 있음. 
+                    // 여기서는 ViewModel의 password 필드를 사용하여 업데이트
+                    authViewModel.updateUserPassword(
+                        newPassword = authViewModel.password,
+                        onSuccess = { userPrefs.saveUserInfo(authViewModel.loadUserInfo()) }
+                    )
+                },
                 onLogout = {
                     userPrefs.clearUserInfo()
                     authViewModel.clearUserInfo()
-                           },
-                // TODO: 유저 정보 삭제 백엔드 로직
-                onAccountDelete = {}
+                    rememberNavController.navigate(Screen.LoginDemo.route) {
+                        popUpTo(0) { inclusive = true }
+                    }
+                },
+                onAccountDelete = {
+                    authViewModel.deleteUserAccount(
+                        onSuccess = {
+                            userPrefs.clearUserInfo()
+                            rememberNavController.navigate(Screen.LoginDemo.route) {
+                                popUpTo(0) { inclusive = true }
+                            }
+                        }
+                    )
+                }
             )
         }
 

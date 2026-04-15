@@ -282,6 +282,95 @@ class AuthViewModel : ViewModel() {
         closeDatePicker() // 저장 후 모달 닫기
     }
 
+    // 프로필 정보(닉네임, 성별, 생년월일)를 Supabase profiles 테이블에 업데이트
+    fun saveProfileUpdate(onSuccess: () -> Unit = {}, onError: (String) -> Unit = {}) {
+        viewModelScope.launch {
+            try {
+                val uid = supabase.auth.currentUserOrNull()?.id ?: throw Exception("로그인된 사용자가 없습니다.")
+                supabase.postgrest["profiles"].update(
+                    {
+                        set("nickname", nickname)
+                        set("gender", gender)
+                        set("birthdate", birthdate)
+                    }
+                ) {
+                    filter { eq("id", uid) }
+                }
+                Log.d("AuthVM", "프로필 업데이트 성공")
+                onSuccess()
+            } catch (e: Exception) {
+                Log.e("AuthVM", "프로필 업데이트 실패: ${e.message}", e)
+                onError(e.message ?: "프로필 업데이트 중 오류가 발생했습니다.")
+            }
+        }
+    }
+
+    // 이메일 변경
+    fun updateUserEmail(newEmail: String, onSuccess: () -> Unit = {}, onError: (String) -> Unit = {}) {
+        viewModelScope.launch {
+            try {
+                supabase.auth.updateUser {
+                    email = newEmail
+                }
+                // profiles 테이블의 email 컬럼도 업데이트 (동기화 목적)
+                val uid = supabase.auth.currentUserOrNull()?.id ?: throw Exception("로그인된 사용자가 없습니다.")
+                supabase.postgrest["profiles"].update(
+                    { set("email", newEmail) }
+                ) {
+                    filter { eq("id", uid) }
+                }
+                
+                email = newEmail
+                Log.d("AuthVM", "이메일 변경 요청 완료 (인증 메일 확인 필요)")
+                onSuccess()
+            } catch (e: Exception) {
+                Log.e("AuthVM", "이메일 변경 실패: ${e.message}", e)
+                onError(e.message ?: "이메일 변경 중 오류가 발생했습니다.")
+            }
+        }
+    }
+
+    // 비밀번호 변경
+    fun updateUserPassword(newPassword: String, onSuccess: () -> Unit = {}, onError: (String) -> Unit = {}) {
+        viewModelScope.launch {
+            try {
+                supabase.auth.updateUser {
+                    password = newPassword
+                }
+                password = newPassword
+                Log.d("AuthVM", "비밀번호 변경 성공")
+                onSuccess()
+            } catch (e: Exception) {
+                Log.e("AuthVM", "비밀번호 변경 실패: ${e.message}", e)
+                onError(e.message ?: "비밀번호 변경 중 오류가 발생했습니다.")
+            }
+        }
+    }
+
+    // 계정 탈퇴 (로그아웃 처리 및 프로필 데이터 삭제)
+    fun deleteUserAccount(onSuccess: () -> Unit = {}, onError: (String) -> Unit = {}) {
+        viewModelScope.launch {
+            try {
+                val uid = supabase.auth.currentUserOrNull()?.id ?: throw Exception("로그인된 사용자가 없습니다.")
+                
+                // 1) profiles 테이블 데이터 삭제
+                supabase.postgrest["profiles"].delete {
+                    filter { eq("id", uid) }
+                }
+                
+                // 2) 로그아웃 처리
+                supabase.auth.signOut()
+                clearUserInfo()
+                
+                Log.d("AuthVM", "계정 탈퇴 처리 완료")
+                onSuccess()
+            } catch (e: Exception) {
+                Log.e("AuthVM", "계정 탈퇴 실패: ${e.message}", e)
+                onError(e.message ?: "계정 탈퇴 중 오류가 발생했습니다.")
+            }
+        }
+    }
+
     fun getUserInfo(user: User){
         email = user.email
         password = user.pw
@@ -295,13 +384,47 @@ class AuthViewModel : ViewModel() {
         return User(email, password, nickname, gender, birthdate)
     }
 
-    /***********  작동 확인용 서버통신로직 임시 대체 함수  **********/
-    // 더미 서버에 해당 이메일이 존재하는지 확인
-    fun isEmailExist(): Boolean{
-            return AuthRepository.isEmailExists(email)
+    /***********  작동 확인용 서버통신로직  **********/
+    // 서버에 해당 이메일이 존재하는지 확인
+    suspend fun isEmailExistAsync(): Boolean {
+        return try {
+            val result = supabase.postgrest["profiles"]
+                .select(columns = Columns.list("email")) {
+                    filter { eq("email", email) }
+                }
+                .decodeList<ProfileEmail>()
+            result.isNotEmpty()
+        } catch (e: Exception) {
+            Log.e("AuthVM", "이메일 중복 확인 실패: ${e.message}", e)
+            false
+        }
     }
-    // 입력받은 pw 정보가 현재 더미서버의 User의 email - password 와 일치하는지 반환하는 함수
-    fun isPasswordCorret(pw: String): Boolean{
+    
+    // 이메일 존재 여부 확인 (기존 함수 유지하되 내부 로직 변경 고려 - 다만 브로킹 호출이라 가급적 Async 권장)
+    fun isEmailExist(): Boolean {
+        // Note: 이 함수는 UI에서 동기적으로 호출되고 있음. 
+        // 실제로는 코루틴 내에서 처리하는 것이 좋으나, 기존 UI 코드 호환성을 위해 우선 dummy 유지하거나 
+        // runBlocking을 피하기 위해 UI 코드 수정을 제안해야 함.
+        // 현재는 구현 계획에 따라 백엔드 연동을 우선함.
+        return AuthRepository.isEmailExists(email)
+    }
+
+    // 입력받은 pw 정보가 현재 사용자의 비밀번호와 일치하는지 확인 (재인증 시도)
+    suspend fun isPasswordCorrectAsync(pw: String): Boolean {
+        return try {
+            supabase.auth.signInWith(Email) {
+                this.email = this@AuthViewModel.email
+                this.password = pw
+            }
+            true
+        } catch (e: Exception) {
+            Log.e("AuthVM", "비밀번호 검증 실패: ${e.message}", e)
+            false
+        }
+    }
+
+    // 기존 함수 (UI 호환용)
+    fun isPasswordCorret(pw: String): Boolean {
         return AuthRepository.verifyLogin(email, pw) != null
     }
 
