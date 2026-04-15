@@ -257,11 +257,14 @@ fun AppNav(
                     )
                 },
                 onLogout = {
-                    userPrefs.clearUserInfo()
-                    authViewModel.clearUserInfo()
-                    rememberNavController.navigate(Screen.LoginDemo.route) {
-                        popUpTo(0) { inclusive = true }
-                    }
+                    authViewModel.logoutUser(
+                        onSuccess = {
+                            userPrefs.clearUserInfo()
+                            rememberNavController.navigate(Screen.LoginDemo.route) {
+                                popUpTo(0) { inclusive = true }
+                            }
+                        }
+                    )
                 },
                 onAccountDelete = {
                     authViewModel.deleteUserAccount(

@@ -324,8 +324,8 @@ class AuthViewModel : ViewModel() {
                 Log.d("AuthVM", "이메일 변경 요청 완료 (인증 메일 확인 필요)")
                 onSuccess()
             } catch (e: Exception) {
-                Log.e("AuthVM", "이메일 변경 실패: ${e.message}", e)
-                onError(e.message ?: "이메일 변경 중 오류가 발생했습니다.")
+                Log.e("AuthVM", "계정 탈퇴 실패: ${e.message}", e)
+                onError(e.message ?: "계정 탈퇴 중 오류가 발생했습니다.")
             }
         }
     }
@@ -367,6 +367,23 @@ class AuthViewModel : ViewModel() {
             } catch (e: Exception) {
                 Log.e("AuthVM", "계정 탈퇴 실패: ${e.message}", e)
                 onError(e.message ?: "계정 탈퇴 중 오류가 발생했습니다.")
+            }
+        }
+    }
+
+    // 완전한 로그아웃 (Supabase 세션 종료 포함)
+    fun logoutUser(onSuccess: () -> Unit = {}) {
+        viewModelScope.launch {
+            try {
+                supabase.auth.signOut()
+                clearUserInfo()
+                Log.d("AuthVM", "로그아웃 처리 완료")
+                onSuccess()
+            } catch (e: Exception) {
+                Log.e("AuthVM", "로그아웃 실패: ${e.message}", e)
+                // 만약 에러가 나더라도 클라이언트측 로그아웃은 진행
+                clearUserInfo()
+                onSuccess()
             }
         }
     }
