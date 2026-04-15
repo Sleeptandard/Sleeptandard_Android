@@ -150,14 +150,15 @@ class AuthViewModel : ViewModel() {
     }
 
     fun backToEmail() {
-        currentStep = AuthStep.EmailInput
         password = ""
         passwordConfirm = ""
+        currentStep = AuthStep.EmailInput
     }
 
     fun backToSignupPassword(){
-        currentStep = AuthStep.SignupPassword(email)
         nickname = ""
+        passwordConfirm = ""
+        currentStep = AuthStep.SignupPassword(email)
     }
 
     fun backToLoginPassword(){

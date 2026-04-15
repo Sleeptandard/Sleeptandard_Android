@@ -1000,10 +1000,12 @@ fun SignupPasswordStep(
             Spacer(Modifier.height(52.dp)) // 12.dp
         }
 
+        val isOk = viewModel.isPasswordValid && (viewModel.password == viewModel.passwordConfirm)
+
         Button(
             modifier = Modifier
                 .clip(RoundedCornerShape(100.dp)),
-            enabled = !isWrong,
+            enabled = isOk,
             onClick = onSubmit,
             contentPadding = PaddingValues(0.dp)
         ){
@@ -1041,7 +1043,7 @@ fun SignupPasswordStep(
                         fontSize = 18.sp,
 
                         color =
-                            if(!isWrong) {
+                            if(isOk) {
                                 Color.White
                             }
                             else
