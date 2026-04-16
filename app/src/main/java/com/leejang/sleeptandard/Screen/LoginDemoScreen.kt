@@ -29,6 +29,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -58,7 +59,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.viewmodel.compose.viewModel
-
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.leejang.sleeptandard.ClassFile.User
 import com.leejang.sleeptandard.Component.AuthStepIndicator
 import com.leejang.sleeptandard.Component.BirthDatePicker
@@ -83,11 +85,11 @@ sealed class AuthStep {
 
 @Composable
 fun LoginDemoScreen(
+    authViewModel: AuthViewModel,
     onConfirm: (User) -> Unit,
     isPasswordReset: Boolean = false
-) {
+){
     val context = LocalContext.current
-    val authViewModel: AuthViewModel = viewModel()
 
     LaunchedEffect(isPasswordReset) {
         if (isPasswordReset) {
@@ -109,10 +111,31 @@ fun LoginDemoScreen(
 
     val backgroundColor = Color.White
 
+    // 리퀴드 글래스 드가자
+    val backdrop = rememberLayerBackdrop {
+        drawRect(backgroundColor)
+        drawContent()
+    }
+
+    val barVisibility = when(authViewModel.currentStep){
+
+        is AuthStep.EmailInput -> true
+        is AuthStep.FindPassword -> true
+        is AuthStep.LoginPassword -> true
+        is AuthStep.SignupGenderBirth -> true
+        is AuthStep.SignupNickname -> true
+        is AuthStep.SignupPassword -> true
+
+        /****** 인디케이터 레일 안보임 ******/
+        is AuthStep.Completed -> false
+        is AuthStep.PasswordReset -> false
+    }
+
 
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .layerBackdrop(backdrop)
     ){
         Column(
             modifier = Modifier
@@ -124,19 +147,23 @@ fun LoginDemoScreen(
         ){
             Spacer(Modifier.height(50.dp))
 
-            // Rail
-            Box(
-                modifier = Modifier
-                    .height(52.dp)
-                    .padding(top = 9.dp),
-                contentAlignment = Alignment.Center
-            ){
+            if(barVisibility){
+                // Rail
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .height(8.dp)
-                        .background(brush = barGradient, shape = RoundedCornerShape(10.dp))
-                )
+                        .height(52.dp)
+                        .padding(top = 9.dp),
+                    contentAlignment = Alignment.Center
+                ){
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(8.dp)
+                            .background(brush = barGradient, shape = RoundedCornerShape(10.dp))
+                    )
+                }
+            }else{
+                Spacer(Modifier.height(52.dp))
             }
 
             Spacer(Modifier.height(6.dp))
@@ -172,7 +199,8 @@ fun LoginDemoScreen(
                         onPwChange = {
                             // TODO: 비밀번호 재설정 메일 송신 로직
                             authViewModel.findingPassword()
-                        }
+                        },
+                        onBack = {authViewModel.backToEmail()}
                     )
 
                     is AuthStep.FindPassword -> PasswordChangeStep(
@@ -186,6 +214,9 @@ fun LoginDemoScreen(
                         onResend = {
                             // 재발송: Supabase에 비밀번호 재설정 메일 재발송
                             authViewModel.findingPassword()
+                        },
+                        onBack = {
+                            authViewModel.backToLoginPassword()
                         }
                     )
 
@@ -210,6 +241,9 @@ fun LoginDemoScreen(
                         onSubmit = {
                             // 다음 단계(닉네임 설정단계)로 진행
                             authViewModel.setSignupPassword()
+                        },
+                        onBack = {
+                            authViewModel.backToEmail()
                         }
                         )
 
@@ -218,6 +252,9 @@ fun LoginDemoScreen(
                         onSubmit = {
                             // 다음 단계(성별,생년월일 설정단계)로 진행
                             authViewModel.setSignupGenderBirth()
+                        },
+                        onBack = {
+                            authViewModel.backToSignupPassword()
                         }
                     )
 
@@ -231,6 +268,9 @@ fun LoginDemoScreen(
                                 onError = { error -> Log.e("Signup", "가입 에러: $error") }
                             )
                         },
+                        onBack = {
+                            authViewModel.backToNickname()
+                        }
                     )
 
                     is AuthStep.Completed -> CompletedStep(
@@ -259,6 +299,7 @@ fun LoginDemoScreen(
         AuthStepIndicator(
             modifier = Modifier,
             currentStep = authViewModel.currentStep,
+            backdrop = backdrop,
         )
     }
 
@@ -392,6 +433,8 @@ fun EmailInputStep(
     Column(modifier = Modifier
         .fillMaxSize()
     ){
+        Spacer(Modifier.height(92.dp))
+
         Text(
             modifier = Modifier.padding(start = 10.dp),
             text = "이메일을 입력해주세요", //
@@ -491,6 +534,7 @@ fun LoginPasswordStep(
     //onLoginSuccess: (User) -> Unit,
     //onLoginError: () -> Unit,
     onPwChange: () -> Unit,
+    onBack: () -> Unit,
 ) {
     val buttonGradient = linearGradient(
         listOf(Color(0xFF437AC7),
@@ -501,7 +545,26 @@ fun LoginPasswordStep(
     Column(modifier = Modifier
         .fillMaxSize()
         ) {
-        Spacer(Modifier.height(92.dp))
+
+        Column(
+            modifier = Modifier
+                .height(92.dp)
+                .fillMaxWidth()
+
+        ){
+            IconButton(
+                modifier = Modifier
+                    .size(32.dp),
+                onClick = onBack
+            ) {
+                Icon(
+                    modifier = Modifier.size(32.dp),
+                    painter = painterResource(AppIcons.QnAArrowBack),
+                    contentDescription = "뒤로 가기"
+                )
+            }
+        }
+
         Text(
             modifier = Modifier.padding(start = 10.dp),
             text = "비밀번호를 입력해주세요 ", //
@@ -606,6 +669,7 @@ fun PasswordChangeStep(
     viewModel: AuthViewModel,
     onBackToEmail: () -> Unit,
     onResend: () -> Unit,
+    onBack: () -> Unit
 ) {
 
     val buttonGradient = linearGradient(
@@ -618,6 +682,22 @@ fun PasswordChangeStep(
             .fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        Column(
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            IconButton(
+                modifier = Modifier
+                    .size(32.dp),
+                onClick = onBack
+            ) {
+                Icon(
+                    modifier = Modifier.size(32.dp),
+                    painter = painterResource(AppIcons.QnAArrowBack),
+                    contentDescription = "뒤로 가기"
+                )
+            }
+        }
+
 
         Spacer(Modifier.height(42.dp))
 
@@ -757,7 +837,9 @@ fun PasswordResetStep(
             isPasswordInput = true
         )
 
-        if((viewModel.password.isNotEmpty() && !viewModel.isPasswordValid) || ((viewModel.password != viewModel.passwordConfirm) && viewModel.passwordConfirm.isNotEmpty())) {
+        val isWrong = (viewModel.password.isNotEmpty() && !viewModel.isPasswordValid) || ((viewModel.password != viewModel.passwordConfirm) && viewModel.passwordConfirm.isNotEmpty())
+
+        if(isWrong) {
 
             Spacer(Modifier.height(12.dp))
             Row(
@@ -786,10 +868,12 @@ fun PasswordResetStep(
             Spacer(Modifier.height(52.dp)) // 12.dp
         }
 
+        val isOk = viewModel.isPasswordValid && (viewModel.password == viewModel.passwordConfirm)
+
         Button(
             modifier = Modifier
                 .clip(RoundedCornerShape(100.dp)),
-            enabled = (viewModel.password.length >= 8) && (viewModel.password == viewModel.passwordConfirm),
+            enabled = isOk,
             onClick = onReset,
             contentPadding = PaddingValues(0.dp)
         ){
@@ -827,7 +911,7 @@ fun PasswordResetStep(
                         fontSize = 18.sp,
 
                         color =
-                            if((viewModel.isPasswordValid) && (viewModel.password == viewModel.passwordConfirm)) {
+                            if(isOk) {
                                 Color.White
                             }
                             else
@@ -843,7 +927,8 @@ fun PasswordResetStep(
 @Composable
 fun SignupPasswordStep(
     viewModel: AuthViewModel,
-    onSubmit: () -> Unit
+    onSubmit: () -> Unit,
+    onBack: () -> Unit
 ) {
 
     val buttonGradient = linearGradient(
@@ -860,6 +945,26 @@ fun SignupPasswordStep(
     Column(modifier = Modifier
         .fillMaxSize()
         ) {
+
+        Column(
+            modifier = Modifier
+                .height(92.dp)
+                .fillMaxWidth()
+
+        ){
+            IconButton(
+                modifier = Modifier
+                    .size(32.dp),
+                onClick = onBack
+            ) {
+                Icon(
+                    modifier = Modifier.size(32.dp),
+                    painter = painterResource(AppIcons.QnAArrowBack),
+                    contentDescription = "뒤로 가기"
+                )
+            }
+        }
+
         Text(
             text = "비밀번호를 설정해주세요", //
             style = MaterialTheme.typography.bodyLarge.copy(
@@ -886,10 +991,8 @@ fun SignupPasswordStep(
             //visualTransformation = PasswordVisualTransformation(),
             isPasswordInput = true
         )
-        val isError = (viewModel.password.isNotEmpty() && !viewModel.isPasswordValid) || ((viewModel.password != viewModel.passwordConfirm) && viewModel.passwordConfirm.isNotEmpty())
-        val isReadyToSubmit = viewModel.password.isNotEmpty() && viewModel.isPasswordValid && viewModel.password == viewModel.passwordConfirm
-
-        if(isError) {
+        val isWrong = (viewModel.password.isNotEmpty() && !viewModel.isPasswordValid) || ((viewModel.password != viewModel.passwordConfirm) && viewModel.passwordConfirm.isNotEmpty())
+        if(isWrong) {
 
             Spacer(Modifier.height(12.dp))
             Row(
@@ -918,10 +1021,12 @@ fun SignupPasswordStep(
             Spacer(Modifier.height(52.dp)) // 12.dp
         }
 
+        val isOk = viewModel.isPasswordValid && (viewModel.password == viewModel.passwordConfirm)
+
         Button(
             modifier = Modifier
                 .clip(RoundedCornerShape(100.dp)),
-            enabled = isReadyToSubmit,
+            enabled = isOk,
             onClick = onSubmit,
             contentPadding = PaddingValues(0.dp)
         ){
@@ -959,7 +1064,7 @@ fun SignupPasswordStep(
                         fontSize = 18.sp,
 
                         color =
-                            if(isReadyToSubmit) {
+                            if(isOk) {
                                 Color.White
                             }
                             else
@@ -976,7 +1081,8 @@ fun SignupPasswordStep(
 @Composable
 fun NicknameStep(
     viewModel: AuthViewModel,
-    onSubmit: () -> Unit
+    onSubmit: () -> Unit,
+    onBack: () -> Unit
 ) {
 
     val buttonGradient = linearGradient(
@@ -991,6 +1097,24 @@ fun NicknameStep(
     Column(modifier = Modifier
         .fillMaxSize()
         ) {
+        Column(
+            modifier = Modifier
+                .height(92.dp)
+                .fillMaxWidth()
+
+        ){
+            IconButton(
+                modifier = Modifier
+                    .size(32.dp),
+                onClick = onBack
+            ) {
+                Icon(
+                    modifier = Modifier.size(32.dp),
+                    painter = painterResource(AppIcons.QnAArrowBack),
+                    contentDescription = "뒤로 가기"
+                )
+            }
+        }
         Text(
             text = "닉네임을 설정해주세요", //
             style = MaterialTheme.typography.bodyLarge.copy(
@@ -1098,7 +1222,8 @@ fun NicknameStep(
 @Composable
 fun GenderBirthStep(
     viewModel: AuthViewModel,
-    onSubmit: () -> Unit
+    onSubmit: () -> Unit,
+    onBack: () -> Unit
     ) {
     val buttonGradient = linearGradient(
         listOf(Color(0xFF437AC7), Color(0xFFAFF4F9))
@@ -1107,6 +1232,25 @@ fun GenderBirthStep(
     Column(
         modifier = Modifier.fillMaxSize()
     ) {
+
+        Column(
+            modifier = Modifier
+                .height(92.dp)
+                .fillMaxWidth()
+
+        ){
+            IconButton(
+                modifier = Modifier
+                    .size(32.dp),
+                onClick = onBack
+            ) {
+                Icon(
+                    modifier = Modifier.size(32.dp),
+                    painter = painterResource(AppIcons.QnAArrowBack),
+                    contentDescription = "뒤로 가기"
+                )
+            }
+        }
 
         Spacer(Modifier.height(24.dp))
 

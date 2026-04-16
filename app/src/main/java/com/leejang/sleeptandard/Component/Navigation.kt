@@ -141,6 +141,7 @@ fun AppNav(
         /** 로그인 데모 **/
         composable(Screen.LoginDemo.route){
             LoginDemoScreen(
+                authViewModel = authViewModel,
                 onConfirm = { user: User ->
                     // UserInfoPrefs에 유저 정보 저장
                     userPrefs.saveUserInfo(user)
@@ -247,9 +248,9 @@ fun AppNav(
                     )
                 },
                 onPasswordUpdate = {
-                    // PasswordEdit에서 새로운 비밀번호를 UI state로 가지고 있으므로, 
-                    // AuthViewModel의 password 필드가 이미 업데이트되었거나 
-                    // 별도의 호출이 필요할 수 있음. 
+                    // PasswordEdit에서 새로운 비밀번호를 UI state로 가지고 있으므로,
+                    // AuthViewModel의 password 필드가 이미 업데이트되었거나
+                    // 별도의 호출이 필요할 수 있음.
                     // 여기서는 ViewModel의 password 필드를 사용하여 업데이트
                     authViewModel.updateUserPassword(
                         newPassword = authViewModel.password,
@@ -408,6 +409,7 @@ fun AppNav(
                 Screen.QnA.route,
                 Screen.QnADetail.route,
                 Screen.SendingData.route -> true
+                Screen.AccountManagement.route -> true
                 else -> false
             }
 

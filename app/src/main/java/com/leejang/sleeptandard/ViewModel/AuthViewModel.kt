@@ -30,7 +30,7 @@ data class ProfileInsert(
 )
 
 // 이메일 존재 여부 조회용
-@Serializable 
+@Serializable
 data class ProfileEmail(val email: String)
 
 // 로그인/회원가입 진행을 맡는 역할
@@ -53,10 +53,10 @@ class AuthViewModel : ViewModel() {
     var password by mutableStateOf("")
     var passwordConfirm by mutableStateOf("") // 회원가입용
     var nickname by mutableStateOf("")
-    var gender by mutableStateOf("") // 추가: "남자" or "여자"
+    var gender by mutableStateOf("")    // 추가: "남자" or "여자"
     var birthdate by mutableStateOf("") // 추가: "YYYY.MM.DD"
 
-    /** 유효성 검사 */
+    /** 유효성 검사 **/
     // 1. 이메일 유효성 검사용 정규표현식
     private val emailPattern =
             Regex(
@@ -84,8 +84,8 @@ class AuthViewModel : ViewModel() {
     val isPasswordValid: Boolean
         get() = isPasswordLengthValid && isPasswordCharsValid
 
-    // 1. 특수문자 제외 (유니코드 문자+숫자 허용)
-    private val nicknamePattern = Regex("^[\\p{L}\\p{N}]{1,15}$")
+    // 1. 특수문자 제외 (유니코드 문자 + 숫자 + 공백 허용)
+    private val nicknamePattern = Regex("^[\\p{L}\\p{N} ]{1,15}$")
 
     // 2. 실시간 닉네임 유효성 상태
     val isNicknameValid: Boolean
@@ -197,10 +197,10 @@ class AuthViewModel : ViewModel() {
                     gender = profile.gender ?: "",
                     birthdate = profile.birthdate ?: ""
                 )
-                
+
                 // 앱 전역적으로 사용할 수 있도록 뷰모델 상태 업데이트
                 getUserInfo(returnedUser)
-                
+
                 onSuccess(returnedUser)
             } catch (e: Exception) {
                 onError()
@@ -253,8 +253,26 @@ class AuthViewModel : ViewModel() {
     }
 
     fun backToEmail() {
+        password = ""
+        passwordConfirm = ""
         currentStep = AuthStep.EmailInput
     }
+
+    fun backToSignupPassword(){
+        nickname = ""
+        passwordConfirm = ""
+        currentStep = AuthStep.SignupPassword(email)
+    }
+
+    fun backToLoginPassword(){
+        currentStep = AuthStep.LoginPassword(email)
+    }
+
+    fun backToNickname(){
+        currentStep = AuthStep.SignupNickname(email, password)
+    }
+
+
 
     // ✅ 3. 모달을 여는 함수 (TextField 클릭 시 호출)
     fun openDatePicker() {
@@ -323,7 +341,7 @@ class AuthViewModel : ViewModel() {
                 ) {
                     filter { eq("id", uid) }
                 }
-                
+
                 email = newEmail
                 Log.d("AuthVM", "이메일 변경 요청 완료 (인증 메일 확인 필요)")
                 onSuccess()
@@ -356,16 +374,16 @@ class AuthViewModel : ViewModel() {
         viewModelScope.launch {
             try {
                 val uid = supabase.auth.currentUserOrNull()?.id ?: throw Exception("로그인된 사용자가 없습니다.")
-                
+
                 // 1) profiles 테이블 데이터 삭제
                 supabase.postgrest["profiles"].delete {
                     filter { eq("id", uid) }
                 }
-                
+
                 // 2) 로그아웃 처리
                 supabase.auth.signOut()
                 clearUserInfo()
-                
+
                 Log.d("AuthVM", "계정 탈퇴 처리 완료")
                 onSuccess()
             } catch (e: Exception) {
@@ -420,11 +438,11 @@ class AuthViewModel : ViewModel() {
             false
         }
     }
-    
+
     // 이메일 존재 여부 확인 (기존 함수 유지하되 내부 로직 변경 고려 - 다만 브로킹 호출이라 가급적 Async 권장)
     fun isEmailExist(): Boolean {
-        // Note: 이 함수는 UI에서 동기적으로 호출되고 있음. 
-        // 실제로는 코루틴 내에서 처리하는 것이 좋으나, 기존 UI 코드 호환성을 위해 우선 dummy 유지하거나 
+        // Note: 이 함수는 UI에서 동기적으로 호출되고 있음.
+        // 실제로는 코루틴 내에서 처리하는 것이 좋으나, 기존 UI 코드 호환성을 위해 우선 dummy 유지하거나
         // runBlocking을 피하기 위해 UI 코드 수정을 제안해야 함.
         // 현재는 구현 계획에 따라 백엔드 연동을 우선함.
         return AuthRepository.isEmailExists(email)
