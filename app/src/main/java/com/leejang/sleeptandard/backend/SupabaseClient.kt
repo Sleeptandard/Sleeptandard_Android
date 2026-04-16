@@ -11,7 +11,10 @@ object SupabaseClientProvider {
         supabaseUrl = BuildConfig.SUPABASE_URL,
         supabaseKey = BuildConfig.SUPABASE_ANON_KEY
     ) {
-        install(Auth)
+        install(Auth) {
+            scheme = "sleeptandard"
+            host = "reset-password"
+        }
         install(Postgrest)
         install(Storage)
     }
