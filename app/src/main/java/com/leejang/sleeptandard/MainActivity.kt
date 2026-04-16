@@ -100,6 +100,9 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        val userPrefs = UserInfoPreferences(this)
+        val loadedUser = userPrefs.loadUserInfo()
+
         setContent {
             Sleeptandard_MVP_DemoTheme {
 
@@ -107,6 +110,7 @@ class MainActivity : ComponentActivity() {
                     scheduler = AlarmScheduler(this),
                     startDestination = startDestination,
                     initialAlarm = alarmPrefs.loadAlarm(),
+                    userInfo = loadedUser,
                     isPasswordReset = isResetPassword
                 )
             }

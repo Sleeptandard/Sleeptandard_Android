@@ -197,6 +197,10 @@ class AuthViewModel : ViewModel() {
                     gender = profile.gender ?: "",
                     birthdate = profile.birthdate ?: ""
                 )
+                
+                // 앱 전역적으로 사용할 수 있도록 뷰모델 상태 업데이트
+                getUserInfo(returnedUser)
+                
                 onSuccess(returnedUser)
             } catch (e: Exception) {
                 onError()
