@@ -48,6 +48,16 @@
                     android:host="sleeptandard.com"
                     android:pathPrefix="/reset-password" />
             </intent-filter>
+
+            <!-- 커스텀 URL 스킴 설정 (도메인 검증 우회용) -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="sleeptandard"
+                    android:host="reset-password" />
+            </intent-filter>
         </activity>
 
         <receiver

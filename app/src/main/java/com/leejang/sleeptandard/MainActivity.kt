@@ -64,7 +64,8 @@ class MainActivity : ComponentActivity() {
                 .start()
         }
 
-        val isResetPassword = intent.data?.path?.startsWith("/reset-password") == true
+        val isResetPassword = intent.data?.path?.startsWith("/reset-password") == true ||
+                              intent.data?.host == "reset-password"
 
         if (isResetPassword) {
             try {
