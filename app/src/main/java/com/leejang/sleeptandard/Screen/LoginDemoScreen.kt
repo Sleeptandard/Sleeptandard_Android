@@ -886,8 +886,10 @@ fun SignupPasswordStep(
             //visualTransformation = PasswordVisualTransformation(),
             isPasswordInput = true
         )
-        val isAllOk = (viewModel.password.isNotEmpty() && !viewModel.isPasswordValid) || ((viewModel.password != viewModel.passwordConfirm) && viewModel.passwordConfirm.isNotEmpty())
-        if(!isAllOk) {
+        val isError = (viewModel.password.isNotEmpty() && !viewModel.isPasswordValid) || ((viewModel.password != viewModel.passwordConfirm) && viewModel.passwordConfirm.isNotEmpty())
+        val isReadyToSubmit = viewModel.password.isNotEmpty() && viewModel.isPasswordValid && viewModel.password == viewModel.passwordConfirm
+
+        if(isError) {
 
             Spacer(Modifier.height(12.dp))
             Row(
@@ -919,7 +921,7 @@ fun SignupPasswordStep(
         Button(
             modifier = Modifier
                 .clip(RoundedCornerShape(100.dp)),
-            enabled = isAllOk,
+            enabled = isReadyToSubmit,
             onClick = onSubmit,
             contentPadding = PaddingValues(0.dp)
         ){
@@ -957,7 +959,7 @@ fun SignupPasswordStep(
                         fontSize = 18.sp,
 
                         color =
-                            if(isAllOk) {
+                            if(isReadyToSubmit) {
                                 Color.White
                             }
                             else
