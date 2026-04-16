@@ -820,7 +820,9 @@ fun PasswordResetStep(
             isPasswordInput = true
         )
 
-        if((viewModel.password.isNotEmpty() && !viewModel.isPasswordValid) || ((viewModel.password != viewModel.passwordConfirm) && viewModel.passwordConfirm.isNotEmpty())) {
+        val isWrong = (viewModel.password.isNotEmpty() && !viewModel.isPasswordValid) || ((viewModel.password != viewModel.passwordConfirm) && viewModel.passwordConfirm.isNotEmpty())
+
+        if(isWrong) {
 
             Spacer(Modifier.height(12.dp))
             Row(
@@ -849,10 +851,12 @@ fun PasswordResetStep(
             Spacer(Modifier.height(52.dp)) // 12.dp
         }
 
+        val isOk = viewModel.isPasswordValid && (viewModel.password == viewModel.passwordConfirm)
+
         Button(
             modifier = Modifier
                 .clip(RoundedCornerShape(100.dp)),
-            enabled = (viewModel.password.length >= 8) && (viewModel.password == viewModel.passwordConfirm),
+            enabled = isOk,
             onClick = onReset,
             contentPadding = PaddingValues(0.dp)
         ){
@@ -890,7 +894,7 @@ fun PasswordResetStep(
                         fontSize = 18.sp,
 
                         color =
-                            if((viewModel.isPasswordValid) && (viewModel.password == viewModel.passwordConfirm)) {
+                            if(isOk) {
                                 Color.White
                             }
                             else

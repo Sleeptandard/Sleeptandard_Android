@@ -370,6 +370,7 @@ fun AppNav(
                 Screen.QnA.route,
                 Screen.QnADetail.route,
                 Screen.SendingData.route -> true
+                Screen.AccountManagement.route -> true
                 else -> false
             }
 

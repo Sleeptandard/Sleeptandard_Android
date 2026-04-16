@@ -40,6 +40,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
@@ -89,7 +90,7 @@ fun AccountManagementScreen(
     onPasswordUpdate: () -> Unit,
     onLogout: () -> Unit,
     onAccountDelete: () -> Unit
-){
+) {
     // 내비게이션 스택 관리 (현재 위치들을 순서대로 저장)
     val navStack = remember { mutableStateListOf<AccountMenu>(AccountMenu.AMMain) }
     val currentMenu = navStack.last() // 현재 화면은 항상 스택의 마지막 아이템
@@ -128,66 +129,104 @@ fun AccountManagementScreen(
             },
             label = "menu_transition"
         ) { targetMenu ->
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                horizontalAlignment = Alignment.CenterHorizontally
+            Column(
+                modifier = Modifier.fillMaxSize()
             ) {
                 when (targetMenu) {
                     /****     메인       ****/
                     // 계정 관리 메인화면
-                    AccountMenu.AMMain -> {
-                        item { AMElement("개인 정보", "닉네임/성별/생년월일") { navStack.add(AccountMenu.PersonalInfo) } }
-                        item { AMElement("이메일", userViewModel.email) { navStack.add(AccountMenu.Email) } }
-                        item { AMElement("비밀번호", "비밀번호 변경") { navStack.add(AccountMenu.Password) } }
-                        item { AMElement("로그아웃/탈퇴", "") { navStack.add(AccountMenu.AuthAction) } }
-                    }
+                    is AccountMenu.AMMain -> MainScreen(userViewModel, navStack)
 
                     /****     1층     ****/
                     // 메인 -> 개인정보 화면
-                    AccountMenu.PersonalInfo -> {
-                        item { AMElement("닉네임", userViewModel.nickname) { navStack.add(AccountMenu.Nickname) } }
-                        item { AMElement("성별", userViewModel.gender) { navStack.add(AccountMenu.Gender)} }
-                        item { AMElement("생년월일", userViewModel.birthdate) { navStack.add(AccountMenu.Birthdate) } }
-                    }
+                    is AccountMenu.PersonalInfo -> PersonalInfoScreen(userViewModel, navStack)
 
                     // 메인 -> 이메일 화면
-                    AccountMenu.Email -> {
-                        item{EmailEdit(viewModel = userViewModel, onEmailUpdate = onEmailUpdate)}
-                    }
+                    is AccountMenu.Email -> EmailEdit(viewModel = userViewModel, onEmailUpdate = onEmailUpdate)
 
                     // 메인 -> 비밀번호 화면
-                    AccountMenu.Password -> item { PasswordEdit(viewModel = userViewModel, onPasswordUpdate = onPasswordUpdate)}
+                    is AccountMenu.Password -> PasswordEdit(viewModel = userViewModel, onPasswordUpdate = onPasswordUpdate)
 
                     // 메인 -> 로그아웃/탈퇴 화면
-                    AccountMenu.AuthAction -> {
-                        item { AMElement("로그아웃", "") { navStack.add(AccountMenu.Logout) } }
-                        item { AMElement("계정탈퇴", "") { navStack.add(AccountMenu.DeleteAccount) } }
-                    }
+                    is AccountMenu.AuthAction -> AuthActionScreen(userViewModel, navStack)
 
                     /****     2층      ****/
                     // 개인정보 -> 닉네임 화면
-                    AccountMenu.Nickname -> { item {NicknameEdit(viewModel = userViewModel, onNicknameUpdate = onNicknameUpdate)} }
+                    is AccountMenu.Nickname -> NicknameEdit(viewModel = userViewModel, onNicknameUpdate = onNicknameUpdate)
+
 
                     // 개인정보 -> 성별 화면
-                    AccountMenu.Gender -> item {GenderEdit(viewModel = userViewModel, onGenderUpdate = onGenderUpdate)}
+                    is AccountMenu.Gender -> GenderEdit(viewModel = userViewModel, onGenderUpdate = onGenderUpdate)
+
 
                     // 개인정보 -> 생년월일 화면
-                    AccountMenu.Birthdate -> item {BirthdateEdit(viewModel = userViewModel, onBirthdateUpdate = onBirthdateUpdate)}
+                    is AccountMenu.Birthdate -> BirthdateEdit(viewModel = userViewModel, onBirthdateUpdate = onBirthdateUpdate)
+
 
                     // 로그아웃/탈퇴 -> 로그아웃 화면
-                    AccountMenu.Logout -> item{LogoutScreen(onLogout, onBack) }
+                    is AccountMenu.Logout -> LogoutScreen(userViewModel, onLogout, onBack)
                     // 로그아웃/탈퇴 -> 탈퇴 화면
-                    AccountMenu.DeleteAccount -> item{AccountDeleteScreen(onAccountDelete, onBack)}
-
-
-
+                    is AccountMenu.DeleteAccount -> AccountDeleteScreen(onAccountDelete, onBack)
                 }
             }
         }
-
     }
-
 }
+
+ @Composable
+ fun MainScreen(userViewModel: AuthViewModel, navStack: SnapshotStateList<AccountMenu>
+ ){
+     LazyColumn(
+         modifier = Modifier.fillMaxSize(),
+         horizontalAlignment = Alignment.CenterHorizontally
+     ) {
+            item { AMElement("개인 정보", "닉네임/성별/생년월일") { navStack.add(AccountMenu.PersonalInfo) } }
+            item { AMElement("이메일", userViewModel.email){ navStack.add(AccountMenu.Email) } }
+            item { AMElement("비밀번호", "비밀번호 변경"){ navStack.add(AccountMenu.Password) }}
+            item { AMElement("로그아웃/탈퇴", ""){ navStack.add(AccountMenu.AuthAction) } }
+
+     }
+ }
+
+ @Composable
+ fun PersonalInfoScreen(userViewModel: AuthViewModel, navStack: SnapshotStateList<AccountMenu>) {
+     LazyColumn(
+         modifier = Modifier.fillMaxSize(),
+         horizontalAlignment = Alignment.CenterHorizontally
+     ) {
+         item {
+             AMElement(
+                 "닉네임",
+                 userViewModel.nickname
+             ) { navStack.add(AccountMenu.Nickname) }
+         }
+         item {
+             AMElement(
+                 "성별",
+                 userViewModel.gender
+             ) { navStack.add(AccountMenu.Gender) }
+         }
+         item {
+             AMElement(
+                 "생년월일",
+                 userViewModel.birthdate
+             ) { navStack.add(AccountMenu.Birthdate) }
+         }
+     }
+ }
+
+ @Composable
+ fun AuthActionScreen(userViewModel: AuthViewModel, navStack: SnapshotStateList<AccountMenu>) {
+     LazyColumn(
+         modifier = Modifier.fillMaxSize(),
+         horizontalAlignment = Alignment.CenterHorizontally
+     ) {
+
+         item { AMElement("로그아웃", "") { navStack.add(AccountMenu.Logout) } }
+         item { AMElement("계정탈퇴", "") { navStack.add(AccountMenu.DeleteAccount) } }
+
+     }
+ }
 
  @Composable
  fun NicknameEdit(
@@ -196,8 +235,12 @@ fun AccountManagementScreen(
  ) {
      var tmpNickname by remember { mutableStateOf(viewModel.nickname) }
 
+     val nicknameInvalidMessage = if(tmpNickname.length > 15)
+         "15자 이하로 작성해주세요"
+     else "특수문자는 들어갈 수 없어요"
+
      // 1. 특수문자 제외 (유니코드 문자+숫자 허용)
-     val nicknamePattern = Regex("^[\\p{L}\\p{N}]{1,15}$")
+     val nicknamePattern = Regex("^[\\p{L}\\p{N} ]{1,15}$")
 
      // 2. 실시간 닉네임 유효성 상태
      val isNicknameValid = tmpNickname.matches(nicknamePattern)
@@ -206,7 +249,6 @@ fun AccountManagementScreen(
          modifier = Modifier
              .fillMaxSize()
              .imePadding()
-
      ) {
          WhiteTextField(
              value = tmpNickname,
@@ -215,7 +257,33 @@ fun AccountManagementScreen(
          )
          Spacer(Modifier.weight(1f))
 
+         if(!isNicknameValid && tmpNickname.isNotBlank()){
 
+             Spacer(Modifier.height(12.dp))
+             Row(
+                 modifier = Modifier
+                     .fillMaxWidth(),
+                 horizontalArrangement = Arrangement.Center,
+                 verticalAlignment = Alignment.CenterVertically
+             ) {
+                 Image(
+                     painter = painterResource(AppIcons.RegisterWarning),
+                     contentDescription = "닉네임 경고"
+                 )
+                 Text(
+                     modifier = Modifier.padding(start = 6.dp),
+                     text = nicknameInvalidMessage,
+                     style = MaterialTheme.typography.bodyMedium.copy(
+                         fontSize = 14.sp,
+                         color = Color(0xFFEF4444)
+                     ),
+                     textAlign = TextAlign.Center,
+                     lineHeight = 16.sp
+                 )
+             }
+             Spacer(Modifier.height(12.dp))
+
+         }
 
          Spacer(Modifier.weight(1f))
 
@@ -264,21 +332,23 @@ fun AccountManagementScreen(
  ) {
      Column(
          modifier = Modifier
-             .fillMaxWidth()
-             .padding(start = 10.dp),
+             .fillMaxSize(),
      ) {
          // 성별 선택 섹션
          Text(
+             modifier = Modifier.padding(start = 10.dp),
              text = "성별",
              style = MaterialTheme.typography.bodyMedium.copy(
                  color = Color.White, fontSize = 16.sp
              )
          )
 
+         Spacer(Modifier.height(12.dp))
+
          val radioOptions = listOf("남", "여", "선택안함")
          val (selectedOption, onOptionSelected) = remember { mutableStateOf("") }
          Row(
-             modifier = Modifier.selectableGroup()
+             modifier = Modifier.selectableGroup(),
          ) {
              radioOptions.forEach { text ->
                  Row(
@@ -309,6 +379,8 @@ fun AccountManagementScreen(
 
              }
          }
+         
+         Spacer(Modifier.weight(1f))
 
          Button(
              modifier = Modifier
@@ -351,7 +423,7 @@ fun AccountManagementScreen(
      onBirthdateUpdate: ()-> Unit
  ) {
      Column(
-         modifier= Modifier.fillMaxWidth()
+         modifier= Modifier.fillMaxSize()
      ) {
          Text(
              text = "생년월일",
@@ -359,6 +431,8 @@ fun AccountManagementScreen(
                  color = Color.White, fontSize = 16.sp
              )
          )
+
+         Spacer(Modifier.height(12.dp))
 
          Column(
              modifier = Modifier
@@ -399,6 +473,8 @@ fun AccountManagementScreen(
                  BirthDatePicker(viewModel = viewModel)
              }
          }
+         
+         Spacer(Modifier.weight(1f))
 
          Button(
              modifier = Modifier
@@ -632,8 +708,10 @@ fun AccountManagementScreen(
              )
 
              Spacer(Modifier.weight(1f))
-             val isAllOk = (tmpNewPw.isNotEmpty() && !isNewPasswordValid) || ((tmpNewPw != tmpNewPwConfirm) && tmpNewPwConfirm.isNotEmpty())
-             if(!isAllOk) {
+
+             val isWrong = (tmpNewPw.isNotEmpty() && !isNewPasswordValid) || ((tmpNewPw != tmpNewPwConfirm) && tmpNewPwConfirm.isNotEmpty())
+
+             if(isWrong) {
 
                  Spacer(Modifier.height(12.dp))
                  Row(
@@ -662,10 +740,12 @@ fun AccountManagementScreen(
 
              Spacer(Modifier.weight(1f))
 
+             val isOk = isNewPasswordValid && (tmpNewPw == tmpNewPwConfirm)
+
              Button(
                  modifier = Modifier
                      .clip(RoundedCornerShape(100.dp)),
-                 enabled = isAllOk,
+                 enabled = isOk,
                  onClick = {
                      onPasswordUpdate()
                  },
@@ -685,7 +765,7 @@ fun AccountManagementScreen(
                              fontSize = 18.sp,
 
                              color =
-                                 if (isAllOk) {
+                                 if (isOk) {
                                      Key
                                  } else
                                      Color.Black.copy(alpha = 0.5f)
@@ -701,6 +781,7 @@ fun AccountManagementScreen(
 
  @Composable
  fun LogoutScreen(
+     viewModel: AuthViewModel,
      onLogout: () -> Unit,
      onBack: () -> Unit
  ){
@@ -739,6 +820,24 @@ fun AccountManagementScreen(
                 fontSize = 18.sp
             )
         )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center
+        ){
+            Text(
+                text = viewModel.email,
+                style = MaterialTheme.typography.bodyLarge.copy(
+                    fontSize = 18.sp
+                )
+            )
+            Text(
+                text = "(으)로 로그인하세요.",
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontSize = 18.sp
+                )
+            )
+        }
 
         Spacer(Modifier.weight(1f))
 
@@ -797,7 +896,7 @@ fun AccountManagementScreen(
                 }
             }
         }
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(65.dp))
     }
  }
 
@@ -908,6 +1007,8 @@ fun AccountManagementScreen(
              )
          }
 
+         Spacer(Modifier.height(80.dp))
+
          Row(
              modifier = Modifier.fillMaxWidth(),
          ) {
@@ -951,7 +1052,11 @@ fun AccountManagementScreen(
                      modifier = Modifier
                          .clip(RoundedCornerShape(100.dp))
                          .fillMaxSize()
-                         .background(color = if(isChecked) Color(0xFFE85D75) else Color(0xFFE85D75).copy(alpha = 0.5f)),
+                         .background(
+                             color = if (isChecked) Color(0xFFE85D75) else Color(0xFFE85D75).copy(
+                                 alpha = 0.5f
+                             )
+                         ),
                      contentAlignment = Alignment.Center
                  ) {
                      Text(
@@ -964,7 +1069,7 @@ fun AccountManagementScreen(
                  }
              }
          }
-         Spacer(Modifier.height(20.dp))
+         Spacer(Modifier.height(65.dp))
      }
 
      if (showDialog) {
