@@ -107,6 +107,9 @@ dependencies {
 
     implementation(libs.coil.compose)
 
+    // 물방울 효과 라이브러리
+    implementation("io.github.kyant0:backdrop:1.0.6")
+
     // Supabase
     implementation(platform("io.github.jan-tennert.supabase:bom:3.1.2"))
     implementation("io.github.jan-tennert.supabase:auth-kt")

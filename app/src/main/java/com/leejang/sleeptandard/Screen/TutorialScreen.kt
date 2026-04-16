@@ -68,6 +68,9 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.kyant.backdrop.Backdrop
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 
 import com.leejang.sleeptandard.Component.CustomTimePicker
 import com.leejang.sleeptandard.Component.DiamondStepSlider
@@ -97,6 +100,12 @@ fun TutorialScreen(
             Color(0xFFAFF4F9))
     )
 
+    // 리퀴드 글래스 드가자
+    val backdrop = rememberLayerBackdrop {
+        drawRect(Color.White)
+        drawContent()
+    }
+
     val backgroundColor = Color.White
 
     var currentPage by remember { mutableIntStateOf(0) }
@@ -112,6 +121,7 @@ fun TutorialScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .layerBackdrop(backdrop)
     ) {
         Column(
             modifier = Modifier
@@ -227,13 +237,14 @@ fun TutorialScreen(
 
         TutorialIndicator(
             modifier = Modifier,
-            currentPage = currentPage
+            currentPage = currentPage,
+            backdrop = backdrop,
         )
     }
 }
 @Composable
 fun TutorialIndicator(
-
+    backdrop : Backdrop,
     currentPage: Int,
     modifier: Modifier = Modifier
 ) {
@@ -318,6 +329,7 @@ fun TutorialIndicator(
                     .padding(top = 9.dp)
                     .fillMaxHeight()
                     .offset(x = animatedOffset),
+                backdrop = backdrop,
             ) {
                 Text(
                     text = stepLabels[currentPage-1],

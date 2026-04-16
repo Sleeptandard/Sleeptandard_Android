@@ -25,10 +25,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.kyant.backdrop.Backdrop
 import com.leejang.sleeptandard.Screen.AuthStep
 
 @Composable
 fun AuthStepIndicator(
+    backdrop : Backdrop,
     currentStep: AuthStep,
     modifier: Modifier = Modifier
 ) {
@@ -129,6 +131,7 @@ fun AuthStepIndicator(
                     .padding(top = 9.dp)
                     .fillMaxHeight()
                     .offset(x = animatedOffset),
+                backdrop = backdrop,
             ) {
                 Text(
                     text = stepLabels[currentIndex],
