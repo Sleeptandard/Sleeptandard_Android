@@ -621,7 +621,7 @@ fun WindowTutorial(
                     Text(
                         text = "기상 가능 시간을 설정해보세요",
                         style =
-                            MaterialTheme.typography.bodyMedium.copy(
+                            MaterialTheme.typography.titleMedium.copy(
                                 color = Color(0xFFBCD8FF),
                                 fontSize = 24.sp
                             )
@@ -694,7 +694,7 @@ fun WindowTutorial(
                     Text(
                         text = "이 범위 안에서",
                         style =
-                            MaterialTheme.typography.bodySmall.copy(
+                            MaterialTheme.typography.titleSmall.copy(
                                 color = Color(0xFFBCD8FF),
                                 fontSize = 18.sp
                             )
@@ -702,7 +702,7 @@ fun WindowTutorial(
                     Text(
                         text = "가장 편하게 깨어날 순간에 알람이 울려요",
                         style =
-                            MaterialTheme.typography.bodySmall.copy(
+                            MaterialTheme.typography.titleSmall.copy(
                                 color = Color(0xFFBCD8FF),
                                 fontSize = 18.sp
                             )
