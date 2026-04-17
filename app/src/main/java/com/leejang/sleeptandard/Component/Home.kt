@@ -16,18 +16,27 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsBottomHeight
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBarDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -544,15 +553,19 @@ fun WakeUpWindow(
 
             Spacer(Modifier.height(8.dp))
 
-            if (earlyWakeUpMinutes < 20) {
-                Text(
+            Column(
+                modifier = Modifier.height(16.dp)
+            ) {
+                if (earlyWakeUpMinutes < 20) {
+                    Text(
                         text = "윈도우가 좁으면 적절한 기상 타이밍이 없을 수 있어요",
                         style =
-                                MaterialTheme.typography.bodyMedium.copy(
-                                        fontSize = 13.sp,
-                                        color = Color(0xFFFF9F0A)
-                                )
-                )
+                            MaterialTheme.typography.bodyMedium.copy(
+                                fontSize = 13.sp,
+                                color = Color(0xFFFF9F0A)
+                            )
+                    )
+                }
             }
         }
     }
@@ -577,16 +590,16 @@ fun WindowTutorial(
 
         // [왕복 1단계] 30분 -> 10분으로 이동 (2초간 부드럽게)
         animatedMinutes.animateTo(
-                targetValue = 10f,
-                animationSpec = tween(durationMillis = 1000, easing = LinearEasing)
+            targetValue = 10f,
+            animationSpec = tween(durationMillis = 1000, easing = LinearEasing)
         )
 
         delay(2500) // 10분 지점에서 잠시 멈춰 강조 효과를 줍니다.
 
         // [왕복 2단계] 10분 -> 30분으로 다시 복귀 (2초간)
         animatedMinutes.animateTo(
-                targetValue = 30f,
-                animationSpec = tween(durationMillis = 1000, easing = LinearEasing)
+            targetValue = 30f,
+            animationSpec = tween(durationMillis = 1000, easing = LinearEasing)
         )
     }
 
@@ -598,157 +611,157 @@ fun WindowTutorial(
 
     Box(modifier = modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
-            Box(modifier = Modifier.weight(428f)) {
+            Box(modifier = Modifier.weight(1f)) {
                 Column(
-                        modifier = modifier.fillMaxSize(),
-                        horizontalAlignment = Alignment.CenterHorizontally
+                    modifier = modifier.fillMaxSize(),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Spacer(Modifier.height(200.dp))
 
                     Text(
-                            text = "기상 가능 시간을 설정해보세요",
-                            style =
-                                    MaterialTheme.typography.bodyMedium.copy(
-                                            color = Color(0xFFBCD8FF),
-                                            fontSize = 24.sp
-                                    )
+                        text = "기상 가능 시간을 설정해보세요",
+                        style =
+                            MaterialTheme.typography.bodyMedium.copy(
+                                color = Color(0xFFBCD8FF),
+                                fontSize = 24.sp
+                            )
                     )
                 }
             }
-            Box(modifier.padding(horizontal = 20.dp).weight(73f)) {
-                BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-                    val fullWidth = constraints.maxWidth.toFloat()
+            BoxWithConstraints(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
+                val fullWidth = constraints.maxWidth.toFloat()
 
-                    // ✅ [최적화 1] 변하지 않는 값들은 람다 밖에서 한 번만 계산합니다.
-                    val rowPaddingPx = with(density) { 35.dp.toPx() }
-                    val sliderWidth = (fullWidth - (rowPaddingPx * 2)) * 0.8f
-                    val sliderStartOffset = rowPaddingPx + ((fullWidth - (rowPaddingPx * 2)) * 0.1f)
-                    val internalSideMarginPx =
-                            with(density) { 12.dp.toPx() } // 원래는 15.dp인데 뭔가 비율이 안맞아서 임의로 내린 값
-                    val usableWidth = sliderWidth - (internalSideMarginPx * 2)
-                    val thumbCenterY = with(density) { 48.dp.toPx() / 2 }
+                // ✅ [최적화 1] 변하지 않는 값들은 람다 밖에서 한 번만 계산합니다.
+                val rowPaddingPx = with(density) { 35.dp.toPx() }
+                val sliderWidth = (fullWidth - (rowPaddingPx * 2)) * 0.8f
+                val sliderStartOffset = rowPaddingPx + ((fullWidth - (rowPaddingPx * 2)) * 0.1f)
+                val internalSideMarginPx =
+                    with(density) { 12.dp.toPx() } // 원래는 15.dp인데 뭔가 비율이 안맞아서 임의로 내린 값
+                val usableWidth = sliderWidth - (internalSideMarginPx * 2)
+                val thumbCenterY = with(density) { 48.dp.toPx() / 2 }
 
-                    val fraction = (earlyWakeUpMinutes - 10).toFloat() / 20f
-                    val thumbCenterX =
-                            sliderStartOffset + internalSideMarginPx + (usableWidth * fraction)
+                val fraction = (earlyWakeUpMinutes - 10).toFloat() / 20f
+                val thumbCenterX =
+                    sliderStartOffset + internalSideMarginPx + (usableWidth * fraction)
 
-                    WakeUpWindow(
-                            onValueChange = {},
-                            modifier = Modifier,
-                            selectedHour = selectedHour,
-                            selectedMinute = selectedMinute,
-                            selectedIsAm = selectedIsAm,
-                            earlyWakeUpMinutes = earlyWakeUpMinutes,
-                            enabled = false
-                    )
+                WakeUpWindow(
+                    onValueChange = {},
+                    modifier = Modifier,
+                    selectedHour = selectedHour,
+                    selectedMinute = selectedMinute,
+                    selectedIsAm = selectedIsAm,
+                    earlyWakeUpMinutes = earlyWakeUpMinutes,
+                    enabled = false
+                )
 
-                    Icon(
-                            modifier =
-                                    Modifier.graphicsLayer {
-                                        // 실제 위치 이동 (레이아웃 재계산 없음)
-                                        translationX = thumbCenterX - 12.dp.toPx()
-                                        translationY = thumbCenterY + 5.dp.toPx()
-                                    },
-                            painter = painterResource(AppIcons.HomeHand),
-                            contentDescription = "손모양"
-                    )
-                }
+                Icon(
+                    modifier =
+                        Modifier.graphicsLayer {
+                            // 실제 위치 이동 (레이아웃 재계산 없음)
+                            translationX = thumbCenterX - 12.dp.toPx()
+                            translationY = thumbCenterY + 5.dp.toPx()
+                        },
+                    painter = painterResource(AppIcons.HomeHand),
+                    contentDescription = "손모양"
+                )
             }
 
-            Box(modifier = Modifier.weight(388f)) {
+
+            Box(modifier = Modifier.height(316.dp)) {
                 Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalAlignment = Alignment.CenterHorizontally
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Spacer(Modifier.height(47.dp))
 
                     Text(
-                            text =
-                                    calculateWakeUpRangeText(
-                                            selectedHour,
-                                            selectedMinute,
-                                            selectedIsAm,
-                                            earlyWakeUpMinutes
-                                    ),
-                            style =
-                                    MaterialTheme.typography.bodySmall.copy(
-                                            color = Color.White,
-                                            fontSize = 15.sp,
-                                    )
+                        text =
+                            calculateWakeUpRangeText(
+                                selectedHour,
+                                selectedMinute,
+                                selectedIsAm,
+                                earlyWakeUpMinutes
+                            ),
+                        style =
+                            MaterialTheme.typography.bodySmall.copy(
+                                color = Color.White,
+                                fontSize = 15.sp,
+                            )
                     )
 
                     Spacer(Modifier.height(24.dp))
 
                     Text(
-                            text = "이 범위 안에서",
-                            style =
-                                    MaterialTheme.typography.bodySmall.copy(
-                                            color = Color(0xFFBCD8FF),
-                                            fontSize = 18.sp
-                                    )
-                    )
-                    Text(
-                            text = "가장 편하게 깨어날 순간에 알람이 울려요",
-                            style =
-                                    MaterialTheme.typography.bodySmall.copy(
-                                            color = Color(0xFFBCD8FF),
-                                            fontSize = 18.sp
-                                    )
-                    )
-                }
-
-                Row(
-                        modifier =
-                                Modifier.background(color = Color.White)
-                                        .padding(20.dp)
-                                        .fillMaxWidth()
-                                        .align(Alignment.BottomCenter),
-                        verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                            modifier =
-                                    Modifier.padding(5.dp)
-                                            .size(23.dp)
-                                            .background(
-                                                    color = checkBackground,
-                                                    shape = RoundedCornerShape(5.dp)
-                                            )
-                                            .border(
-                                                    width = 2.dp,
-                                                    color = Color(0xFF050C16),
-                                                    shape = RoundedCornerShape(5.dp)
-                                            )
-                                            .clickable { isChecked = !isChecked },
-                            contentAlignment = Alignment.Center
-                    ) {
-                        if (isChecked) {
-                            Icon(
-                                    painter = painterResource(AppIcons.HomeCheck),
-                                    contentDescription = "췤",
-                                    tint = Color.White
+                        text = "이 범위 안에서",
+                        style =
+                            MaterialTheme.typography.bodySmall.copy(
+                                color = Color(0xFFBCD8FF),
+                                fontSize = 18.sp
                             )
-                        }
-                    }
-
-                    Text(
-                            modifier = Modifier.padding(start = 10.dp),
-                            text = "다시보지 않기",
-                            style =
-                                    MaterialTheme.typography.bodyLarge.copy(
-                                            color = Color.Black,
-                                            fontSize = 16.sp
-                                    )
                     )
-
-                    Spacer(Modifier.weight(1f))
-
-                    Icon(
-                            modifier = Modifier.clickable { onDismiss(isChecked) },
-                            painter = painterResource(AppIcons.HomeX),
-                            contentDescription = "x",
-                            tint = Color(0xFF050C16)
+                    Text(
+                        text = "가장 편하게 깨어날 순간에 알람이 울려요",
+                        style =
+                            MaterialTheme.typography.bodySmall.copy(
+                                color = Color(0xFFBCD8FF),
+                                fontSize = 18.sp
+                            )
                     )
                 }
+            }
+            Row(
+                modifier =
+                    Modifier.background(color = Color.White)
+                        .height(80.dp)  // 네비바의 최소 높이
+                        .navigationBarsPadding()
+                        .padding(horizontal = 20.dp)
+                        .fillMaxWidth(),
+                // .align(Alignment.BottomCenter),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier =
+                        Modifier.padding(5.dp)
+                            .size(23.dp)
+                            .background(
+                                color = checkBackground,
+                                shape = RoundedCornerShape(5.dp)
+                            )
+                            .border(
+                                width = 2.dp,
+                                color = Color(0xFF050C16),
+                                shape = RoundedCornerShape(5.dp)
+                            )
+                            .clickable { isChecked = !isChecked },
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (isChecked) {
+                        Icon(
+                            painter = painterResource(AppIcons.HomeCheck),
+                            contentDescription = "췤",
+                            tint = Color.White
+                        )
+                    }
+                }
+
+                Text(
+                    modifier = Modifier.padding(start = 10.dp),
+                    text = "다시보지 않기",
+                    style =
+                        MaterialTheme.typography.bodyLarge.copy(
+                            color = Color.Black,
+                            fontSize = 16.sp
+                        )
+                )
+
+                Spacer(Modifier.weight(1f))
+
+                Icon(
+                    modifier = Modifier.clickable { onDismiss(isChecked) },
+                    painter = painterResource(AppIcons.HomeX),
+                    contentDescription = "x",
+                    tint = Color(0xFF050C16)
+                )
             }
         }
     }
