@@ -17,6 +17,12 @@ val Pretandard = FontFamily(
     Font(R.font.pretendard_semibold, FontWeight.SemiBold)
 )
 
+val Paperlogy = FontFamily(
+    Font(R.font.paperlogy_bold, FontWeight.Bold),
+    Font(R.font.paperlogy_medium, FontWeight.Medium),
+    Font(R.font.paperlogy_semibold, FontWeight.SemiBold)
+)
+
 // Set of Material typography styles to start with
 val Typography = Typography(
     bodyLarge = TextStyle(
@@ -36,15 +42,26 @@ val Typography = Typography(
         fontWeight = FontWeight.Medium,
         fontSize = 16.sp,
         letterSpacing = (-0.025).em
-    )
-    /* Other default text styles to override
-    titleLarge = TextStyle(
-        fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.Normal,
-        fontSize = 22.sp,
-        lineHeight = 28.sp,
-        letterSpacing = 0.sp
     ),
+    titleLarge = TextStyle(
+        fontFamily = Paperlogy,
+        fontWeight = FontWeight.Bold,
+        fontSize = 22.sp,
+        letterSpacing = 0.em
+    ),
+    titleMedium = TextStyle(
+        fontFamily = Paperlogy,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 16.sp,
+        letterSpacing = 0.em
+    ),
+    titleSmall = TextStyle(
+        fontFamily = Paperlogy,
+        fontWeight = FontWeight.Medium,
+        fontSize = 22.sp,
+        letterSpacing = 0.em
+    ),
+    /*
     labelSmall = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Medium,
@@ -52,5 +69,7 @@ val Typography = Typography(
         lineHeight = 16.sp,
         letterSpacing = 0.5.sp
     )
-    */
+
+     */
+
 )

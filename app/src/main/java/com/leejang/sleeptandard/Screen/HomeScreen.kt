@@ -213,7 +213,10 @@ fun HomeScreen(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Spacer(
-            modifier = Modifier.weight(74f)
+            modifier = Modifier.height(10.dp)
+        )
+        Spacer(
+            modifier = Modifier.weight(5f)
         )
         Box(
             modifier = Modifier
@@ -243,9 +246,9 @@ fun HomeScreen(
                     selectedIsAm = isAm
                 },
             )
-        } 
+        }
 
-        Spacer(Modifier.weight(15f))
+        Spacer(Modifier.weight(2f))
 
         /********    타임피커 밑    ********/
 
@@ -320,7 +323,7 @@ fun HomeScreen(
                     onRemCheckedChange = { isRem = it }
                 )
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(31.dp))
 
                 ConfirmButton(
                     modifier = Modifier
@@ -895,7 +898,7 @@ fun HomeScreen(
             }
         }
         // TODO: dp로 바꿔라
-        Spacer(Modifier.weight(32f))
+        Spacer(Modifier.height(25.dp))
     }
     if (showWindowTutorial) {
         Dialog(
