@@ -144,6 +144,9 @@ fun AppNav(
                 onConfirm = { user: User ->
                     // UserInfoPrefs에 유저 정보 저장
                     userPrefs.saveUserInfo(user)
+                    // 전역 뷰모델 최신화
+                    authViewModel.getUserInfo(user)
+                    
                     rememberNavController.navigate(Screen.Home.route)
                     Toast.makeText(context, user.nickname, Toast.LENGTH_SHORT).show()
                 },

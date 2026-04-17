@@ -186,12 +186,19 @@ class AuthViewModel : ViewModel() {
                     this.password = this@AuthViewModel.password
                 }
                 val uid = supabase.auth.currentUserOrNull()?.id ?: ""
+                val authEmail = supabase.auth.currentUserOrNull()?.email ?: ""
                 val profile =
                         supabase.postgrest["profiles"]
                                 .select { filter { eq("id", uid) } }
                                 .decodeSingle<ProfileInsert>()
+                                
+                // DB와 Auth의 이메일이 다를 경우(사용자가 이메일 변경 요청 후 인증 링크를 누르지 않아 싱크가 어긋난 경우) 자체 교정
+                if(authEmail.isNotEmpty() && profile.email != authEmail) {
+                    supabase.postgrest["profiles"].update({ set("email", authEmail) }) { filter { eq("id", uid) } }
+                }
+                                
                 val returnedUser = User(
-                    email = profile.email,
+                    email = if (authEmail.isNotEmpty()) authEmail else profile.email,
                     pw = password,
                     nickname = profile.nickname,
                     gender = profile.gender ?: "",
@@ -329,7 +336,11 @@ class AuthViewModel : ViewModel() {
                 onSuccess()
             } catch (e: Exception) {
                 Log.e("AuthVM", "이메일 변경 실패: ${e.message}", e)
-                onError(e.message ?: "이메일 변경 중 오류가 발생했습니다.")
+                if (e.message?.contains("email_address_invalid") == true || e.message?.contains("identical") == true) {
+                    onError("이메일 변경 안내메일의 인증 링크를 먼저 눌러야 인증서버의 이메일이 완전히 변경됩니다. 아직 기존 이메일이 서버에 남아있습니다.")
+                } else {
+                    onError(e.message ?: "이메일 변경 중 오류가 발생했습니다.")
+                }
             }
         }
     }
