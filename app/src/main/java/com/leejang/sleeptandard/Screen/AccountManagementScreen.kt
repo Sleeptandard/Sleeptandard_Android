@@ -469,10 +469,39 @@ fun AccountManagementScreen(
      ) {
          WhiteTextField(
              value = tmpEmail,
-             onValueChange = { tmpEmail = it },
+             onValueChange = { 
+                 tmpEmail = it 
+                 isEmailExist = false
+             },
              placeholder = "이메일",
              isEmailInput = true
          )
+         
+         if (isEmailExist) {
+             Spacer(Modifier.height(12.dp))
+             Row(
+                 modifier = Modifier
+                     .fillMaxWidth(),
+                 horizontalArrangement = Arrangement.Center,
+                 verticalAlignment = Alignment.CenterVertically
+             ) {
+                 Image(
+                     painter = painterResource(AppIcons.RegisterWarning),
+                     contentDescription = "경고"
+                 )
+                 Text(
+                     modifier = Modifier.padding(start = 6.dp),
+                     text = "이미 가입된 이메일입니다",
+                     style = MaterialTheme.typography.bodyMedium.copy(
+                         fontSize = 14.sp,
+                         color = Color(0xFFEF4444)
+                     ),
+                     textAlign = TextAlign.Center,
+                     lineHeight = 16.sp
+                 )
+             }
+         }
+
          Spacer(Modifier.weight(1f))
 
 
@@ -485,7 +514,12 @@ fun AccountManagementScreen(
              enabled = isEmailValid,
              onClick = {
                  scope.launch {
-                     isEmailExist = viewModel.isEmailExistAsync()
+                     // 현재와 동일한 이메일로 변경시 중복검사 통과
+                     if (tmpEmail == viewModel.email) {
+                         onEmailUpdate()
+                         return@launch
+                     }
+                     isEmailExist = viewModel.isEmailExistAsync(tmpEmail)
                      if (!isEmailExist) {
                          viewModel.updateEmail(tmpEmail)
                          onEmailUpdate()

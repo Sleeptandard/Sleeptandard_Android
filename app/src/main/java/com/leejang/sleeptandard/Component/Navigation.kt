@@ -228,8 +228,16 @@ fun AppNav(
                 onBack = { rememberNavController.popBackStack() },
                 userViewModel = authViewModel,
                 onEmailUpdate = {
-                    // AuthViewModel.updateUserEmail은 이미 내부에서 email 필드를 업데이트함
-                    userPrefs.saveUserInfo(authViewModel.loadUserInfo())
+                    authViewModel.updateUserEmail(
+                        newEmail = authViewModel.email,
+                        onSuccess = { 
+                            userPrefs.saveUserInfo(authViewModel.loadUserInfo()) 
+                            Toast.makeText(context, "이메일이 변경되었습니다.", Toast.LENGTH_SHORT).show()
+                        },
+                        onError = { errorMsg ->
+                            Toast.makeText(context, "이메일 변경 실패: $errorMsg", Toast.LENGTH_SHORT).show()
+                        }
+                    )
                 },
                 onNicknameUpdate = {
                     authViewModel.saveProfileUpdate(

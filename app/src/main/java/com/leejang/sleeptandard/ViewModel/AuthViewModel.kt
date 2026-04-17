@@ -328,8 +328,8 @@ class AuthViewModel : ViewModel() {
                 Log.d("AuthVM", "이메일 변경 요청 완료 (인증 메일 확인 필요)")
                 onSuccess()
             } catch (e: Exception) {
-                Log.e("AuthVM", "계정 탈퇴 실패: ${e.message}", e)
-                onError(e.message ?: "계정 탈퇴 중 오류가 발생했습니다.")
+                Log.e("AuthVM", "이메일 변경 실패: ${e.message}", e)
+                onError(e.message ?: "이메일 변경 중 오류가 발생했습니다.")
             }
         }
     }
@@ -407,11 +407,11 @@ class AuthViewModel : ViewModel() {
 
     /***********  작동 확인용 서버통신로직  **********/
     // 서버에 해당 이메일이 존재하는지 확인
-    suspend fun isEmailExistAsync(): Boolean {
+    suspend fun isEmailExistAsync(checkEmail: String = email): Boolean {
         return try {
             val result = supabase.postgrest["profiles"]
                 .select(columns = Columns.list("email")) {
-                    filter { eq("email", email) }
+                    filter { eq("email", checkEmail) }
                 }
                 .decodeList<ProfileEmail>()
             result.isNotEmpty()
