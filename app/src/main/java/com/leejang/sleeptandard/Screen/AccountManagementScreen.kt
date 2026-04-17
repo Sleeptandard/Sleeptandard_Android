@@ -49,6 +49,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -625,6 +626,8 @@ fun AccountManagementScreen(
                  value = tmpPw,
                  onValueChange = { tmpPw = it },
                  placeholder = "현재 비밀번호",
+                 visualTransformation = PasswordVisualTransformation(),
+                 isPasswordInput = true
              )
              Spacer(Modifier.weight(1f))
 
@@ -697,6 +700,8 @@ fun AccountManagementScreen(
                  value = tmpNewPw,
                  onValueChange = { tmpNewPw = it },
                  placeholder = "새 비밀번호 (8자리 이상)",
+                 visualTransformation = PasswordVisualTransformation(),
+                 isPasswordInput = true
              )
 
              Spacer(Modifier.height(20.dp))
@@ -705,6 +710,8 @@ fun AccountManagementScreen(
                  value = tmpNewPwConfirm,
                  onValueChange = { tmpNewPwConfirm = it },
                  placeholder = "새 비밀번호 확인",
+                 visualTransformation = PasswordVisualTransformation(),
+                 isPasswordInput = true
              )
 
              Spacer(Modifier.weight(1f))
