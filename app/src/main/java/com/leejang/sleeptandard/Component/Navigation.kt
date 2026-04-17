@@ -255,13 +255,15 @@ fun AppNav(
                     )
                 },
                 onPasswordUpdate = {
-                    // PasswordEdit에서 새로운 비밀번호를 UI state로 가지고 있으므로, 
-                    // AuthViewModel의 password 필드가 이미 업데이트되었거나 
-                    // 별도의 호출이 필요할 수 있음. 
-                    // 여기서는 ViewModel의 password 필드를 사용하여 업데이트
                     authViewModel.updateUserPassword(
                         newPassword = authViewModel.password,
-                        onSuccess = { userPrefs.saveUserInfo(authViewModel.loadUserInfo()) }
+                        onSuccess = { 
+                            userPrefs.saveUserInfo(authViewModel.loadUserInfo()) 
+                            Toast.makeText(context, "비밀번호가 변경되었습니다.", Toast.LENGTH_SHORT).show()
+                        },
+                        onError = { errorMsg ->
+                            Toast.makeText(context, "비밀번호 변경 실패: $errorMsg", Toast.LENGTH_SHORT).show()
+                        }
                     )
                 },
                 onLogout = {

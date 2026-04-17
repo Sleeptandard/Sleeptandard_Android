@@ -678,8 +678,13 @@ fun AccountManagementScreen(
              )
 
              Spacer(Modifier.weight(1f))
-             val isAllOk = (tmpNewPw.isNotEmpty() && !isNewPasswordValid) || ((tmpNewPw != tmpNewPwConfirm) && tmpNewPwConfirm.isNotEmpty())
-             if(!isAllOk) {
+             
+             // 에러를 표시해야 하는 조건: 새 비밀번호가 입력되었는데 유효하지 않거나, 확인 비밀번호가 입력되었는데 일치하지 않는 경우
+             val showError = (tmpNewPw.isNotEmpty() && !isNewPasswordValid) || (tmpNewPwConfirm.isNotEmpty() && tmpNewPw != tmpNewPwConfirm)
+             // 변경 가능한 조건: 새 비밀번호 입력됨, 유효함, 확인 비밀번호와 일치함
+             val isPasswordReady = tmpNewPw.isNotEmpty() && tmpNewPwConfirm.isNotEmpty() && isNewPasswordValid && (tmpNewPw == tmpNewPwConfirm)
+
+             if(showError) {
 
                  Spacer(Modifier.height(12.dp))
                  Row(
@@ -711,8 +716,9 @@ fun AccountManagementScreen(
              Button(
                  modifier = Modifier
                      .clip(RoundedCornerShape(100.dp)),
-                 enabled = isAllOk,
+                 enabled = isPasswordReady,
                  onClick = {
+                     viewModel.updatePassword(tmpNewPw)
                      onPasswordUpdate()
                  },
                  contentPadding = PaddingValues(0.dp)
@@ -731,7 +737,7 @@ fun AccountManagementScreen(
                              fontSize = 18.sp,
 
                              color =
-                                 if (isAllOk) {
+                                 if (isPasswordReady) {
                                      Key
                                  } else
                                      Color.Black.copy(alpha = 0.5f)
