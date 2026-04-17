@@ -7,6 +7,15 @@
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- WorkManager Expedited 작업 실행에 필수 (Android 12+) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
+    <!-- Samsung Freecess 등 제조사 배터리 최적화 우회를 위한 필수 권한 -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
 
     <application
         android:allowBackup="true"
@@ -38,6 +47,16 @@
                     android:scheme="https"
                     android:host="sleeptandard.com"
                     android:pathPrefix="/reset-password" />
+            </intent-filter>
+
+            <!-- 커스텀 URL 스킴 설정 (도메인 검증 우회용) -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="sleeptandard"
+                    android:host="reset-password" />
             </intent-filter>
         </activity>
 
@@ -71,6 +90,18 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- WorkManager SystemForegroundService 오버라이드 -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            tools:node="merge" />
+
+        <!-- 삼성 PowerManager WakeLock 강제 비활성화 방지를 위한 ForegroundService -->
+        <service
+            android:name=".service.FileReceiveForegroundService"
+            android:foregroundServiceType="dataSync"
+            android:exported="false" />
 
     </application>
 

@@ -7,13 +7,16 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.util.Log
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import com.leejang.sleeptandard.ClassFile.AlarmReceiver
 import com.leejang.sleeptandard.Prefs.AlarmPreferences
+import com.leejang.sleeptandard.backend.CsvUploadManager
 import com.google.android.gms.wearable.ChannelClient
 import com.google.android.gms.wearable.MessageEvent
 import com.google.android.gms.wearable.Wearable
@@ -163,7 +166,7 @@ class PhoneListenerService : WearableListenerService() {
     
     /**
      * Watch로부터 Channel을 통한 파일 전송 수신
-     * ChannelClient를 사용한 대용량 파일 전송
+     * → FileReceiveForegroundService에 위임하여 삼성 WakeLock 강제 비활성화 문제 해결
      */
     override fun onChannelOpened(channel: ChannelClient.Channel) {
         super.onChannelOpened(channel)
@@ -173,78 +176,45 @@ class PhoneListenerService : WearableListenerService() {
         
         // /sleep_log_transfer/로 시작하는 채널만 처리
         if (channelPath.startsWith(PATH_LOG_TRANSFER_PREFIX)) {
-            serviceScope.launch {
-                receiveLogFile(channel)
+            Log.i(TAG, "🚀 Delegating to FileReceiveForegroundService")
+            val intent = FileReceiveForegroundService.buildIntent(this, channel)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent)
+            } else {
+                startService(intent)
             }
         }
     }
 
     /**
-     * Channel을 통해 로그 파일 수신 및 저장
-     */
-    private suspend fun receiveLogFile(channel: ChannelClient.Channel) {
-        try {
-            // 경로에서 파일명 추출 (예: /sleep_log_transfer/sensor_log_xxx.csv)
-            val fileName = channel.path.substringAfterLast("/")
-            Log.i(TAG, "Receiving file: $fileName")
-            
-            // 파일 저장 경로
-            val outputFile = File(filesDir, "received_$fileName")
-            
-            // ChannelClient로 입력 스트림 받기
-            val channelClient = Wearable.getChannelClient(this)
-            val inputStream = channelClient.getInputStream(channel).await()
-            
-            // 파일 저장
-            var totalBytes = 0L
-            inputStream.use { input ->
-                outputFile.outputStream().use { output ->
-                    val buffer = ByteArray(8192)
-                    var bytesRead: Int
-                    
-                    while (input.read(buffer).also { bytesRead = it } != -1) {
-                        output.write(buffer, 0, bytesRead)
-                        totalBytes += bytesRead
-                    }
-                }
-            }
-            
-            Log.i(TAG, "✅ File saved: ${outputFile.name} (${totalBytes / 1024}KB)")
-            
-            // [디버깅] 파일 내용 검증
-            validateReceivedFile(outputFile)
-            
-            // 알림 표시
-            showFileReceivedNotification(fileName, totalBytes)
-            
-            // 채널 닫기
-            channelClient.close(channel).await()
-            
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to receive file", e)
-            
-            // 에러 발생 시 채널 닫기 시도
-            try {
-                Wearable.getChannelClient(this).close(channel).await()
-            } catch (closeError: Exception) {
-                Log.e(TAG, "Failed to close channel", closeError)
-            }
-        }
-    }
-    
-    /**
      * 수신된 파일 검증 및 디버깅 정보 출력
+     * (OOM 방지를 위해 readLines 대신 라인별로 직접 카운트)
      */
     private fun validateReceivedFile(file: File) {
         try {
             val fileSize = file.length()
-            val allLines = file.readLines()
-            val lineCount = allLines.size
+            
+            // OOM 방지를 위해 readLines() 대신 스트리밍 방식으로 라인 수 계산
+            var lineCount = 0
+            var previewLine: String? = null
+            
+            file.useLines { lines ->
+                val iterator = lines.iterator()
+                if (iterator.hasNext()) {
+                    previewLine = iterator.next()
+                    lineCount++
+                }
+                while (iterator.hasNext()) {
+                    iterator.next()
+                    lineCount++
+                }
+            }
             
             Log.i(TAG, "📊 File Validation:")
             Log.i(TAG, "  - Name: ${file.name}")
-            Log.i(TAG, "  - Size: $fileSize bytes (${fileSize / 1024.0} KB)")
-            Log.i(TAG, "  - Lines: $lineCount")
+            Log.i(TAG, "  - Size: ${fileSize / 1024} KB")
+            Log.i(TAG, "  - Total Lines: $lineCount")
+            Log.i(TAG, "  - First Line Preview: ${previewLine?.take(50)}")
             
             // 파일이 너무 작으면 경고
             if (fileSize < 100) {
@@ -258,22 +228,6 @@ class PhoneListenerService : WearableListenerService() {
                 Log.e(TAG, "❌ This will cause 'Unsupported' error when sharing")
             } else if (lineCount < 5) {
                 Log.w(TAG, "⚠️ WARNING: File has very little data ($lineCount lines)")
-            }
-            
-            // 처음 5줄 내용 출력 (디버깅용)
-            val previewLines = allLines.take(5)
-            Log.i(TAG, "  - First ${previewLines.size} lines:")
-            previewLines.forEachIndexed { index, line ->
-                Log.i(TAG, "    [${index + 1}] $line")
-            }
-            
-            // 마지막 2줄도 출력 (데이터가 끝까지 쓰여졌는지 확인)
-            if (allLines.size > 5) {
-                val lastLines = allLines.takeLast(2)
-                Log.i(TAG, "  - Last ${lastLines.size} lines:")
-                lastLines.forEachIndexed { index, line ->
-                    Log.i(TAG, "    [${allLines.size - lastLines.size + index + 1}] $line")
-                }
             }
             
         } catch (e: Exception) {

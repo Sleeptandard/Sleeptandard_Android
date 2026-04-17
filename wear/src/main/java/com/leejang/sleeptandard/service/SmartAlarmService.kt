@@ -432,12 +432,12 @@ class SmartAlarmService : Service(), SensorEventListener {
                 Log.w(TAG, "No connected nodes to send result")
             }
             
-            // [자동 로그 전송] 알람 종료 시 로그 파일 자동 전송
+            // [자동 로그 전송] LogTransferService를 별도로 시작하여 전송
+            // [핵심 수정] 이전에는 serviceScope에서 직접 호출 → stopSelf() 후 serviceScope.cancel()로 전송 중단됨
+            // 이제 독립된 수명주기와 WakeLock을 가진 LogTransferService에 위임하여 완전한 전송 보장
             try {
-                // [중요] 로그 쓰기 완료 대기 (파일 누락 방지)
+                // [중요] 로그 쓰기 완료 대기 후 LogTransferService 시작
                 Log.i(TAG, "⏳ Waiting for log writing to complete...")
-                
-                // DataRepository 중단 및 완료 대기
                 if (::dataRepository.isInitialized) {
                     withContext(Dispatchers.IO) {
                         dataRepository.stopLogging()
@@ -447,17 +447,15 @@ class SmartAlarmService : Service(), SensorEventListener {
                         }
                     }
                 }
-                
-                Log.i(TAG, "🚀 Auto-transferring log files to phone...")
-                val transferManager = com.leejang.sleeptandard.backend.manager.LogFileTransferManager(this@SmartAlarmService)
-                val transferResult = transferManager.sendLatestLogsToPhone()
-                
-                transferResult.onSuccess { count ->
-                    Log.i(TAG, "✅ Auto-transfer completed: $count files")
-                }.onFailure { error ->
-                    Log.w(TAG, "⚠️ Auto-transfer failed: ${error.message}")
-                    // 자동 전송 실패는 치명적이지 않으므로 서비스 종료는 계속 진행
-                }
+
+                Log.i(TAG, "🚀 Starting LogTransferService for auto file transfer...")
+                val transferIntent = Intent(
+                    this@SmartAlarmService,
+                    com.leejang.sleeptandard.backend.service.LogTransferService::class.java
+                )
+                startService(transferIntent)
+                Log.i(TAG, "✅ LogTransferService started")
+
             } catch (e: Exception) {
                 Log.e(TAG, "Auto-transfer error (non-critical)", e)
             }

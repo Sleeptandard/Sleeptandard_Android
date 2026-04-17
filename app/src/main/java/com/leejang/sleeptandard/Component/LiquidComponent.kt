@@ -27,7 +27,7 @@ fun LiquidGlassBox(
         modifier = modifier,
         contentAlignment = Alignment.Center,
 
-    ){
+        ){
         Box(
             modifier = Modifier
                 .drawBackdrop(
@@ -61,7 +61,7 @@ fun LiquidGlassBox(
 
 
 
-                )
+                    )
                 .matchParentSize()
         )
 

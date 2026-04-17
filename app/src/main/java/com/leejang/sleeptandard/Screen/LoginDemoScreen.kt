@@ -33,6 +33,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -85,9 +86,16 @@ sealed class AuthStep {
 @Composable
 fun LoginDemoScreen(
     authViewModel: AuthViewModel,
-    onConfirm: (User) -> Unit
+    onConfirm: (User) -> Unit,
+    isPasswordReset: Boolean = false
 ){
     val context = LocalContext.current
+
+    LaunchedEffect(isPasswordReset) {
+        if (isPasswordReset) {
+            authViewModel.goToPasswordReset()
+        }
+    }
 
     val linearGradation = Brush.verticalGradient(
         colorStops = arrayOf(
@@ -158,7 +166,6 @@ fun LoginDemoScreen(
                 Spacer(Modifier.height(52.dp))
             }
 
-
             Spacer(Modifier.height(6.dp))
 
             // 현재 스텝에 따른 UI 출력 with animation
@@ -205,7 +212,8 @@ fun LoginDemoScreen(
                             authViewModel.backToEmail()
                         },
                         onResend = {
-                            // TODO: 비밀번호 재설정 메일 송신 로직
+                            // 재발송: Supabase에 비밀번호 재설정 메일 재발송
+                            authViewModel.findingPassword()
                         },
                         onBack = {
                             authViewModel.backToLoginPassword()
@@ -215,8 +223,16 @@ fun LoginDemoScreen(
                     is AuthStep.PasswordReset -> PasswordResetStep(
                         viewModel = authViewModel,
                         onReset = {
-                            // TODO: 비밀번호 재설정 로직 백엔드 연결 필요
-                            authViewModel.backToEmail()
+                            // Supabase auth.updateUser로 새 비밀번호 적용
+                            authViewModel.resetPassword(
+                                newPassword = authViewModel.password,
+                                onSuccess = {
+                                    Toast.makeText(context, "비밀번호가 변경되었습니다.", Toast.LENGTH_SHORT).show()
+                                },
+                                onError = { error ->
+                                    Toast.makeText(context, "오류: $error", Toast.LENGTH_SHORT).show()
+                                }
+                            )
                         }
                     )
 
@@ -247,9 +263,10 @@ fun LoginDemoScreen(
                         onSubmit = {
                             // TODO: 백엔드 회원가입 처리 로직
                             // AuthViewModel의 최종 회원가입 처리 더미 로직
-                            authViewModel.completeSignup { nickname ->
-                                Log.d("Signup", "$nickname 가입 완료")
-                            }
+                            authViewModel.completeSignup(
+                                onComplete = { nickname -> Log.d("Signup", "$nickname 가입 완료") },
+                                onError = { error -> Log.e("Signup", "가입 에러: $error") }
+                            )
                         },
                         onBack = {
                             authViewModel.backToNickname()

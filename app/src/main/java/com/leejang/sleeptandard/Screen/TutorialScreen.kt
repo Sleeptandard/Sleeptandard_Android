@@ -71,6 +71,7 @@ import androidx.compose.ui.unit.sp
 import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+
 import com.leejang.sleeptandard.Component.CustomTimePicker
 import com.leejang.sleeptandard.Component.DiamondStepSlider
 import com.leejang.sleeptandard.Component.LiquidGlassBox
@@ -104,6 +105,8 @@ fun TutorialScreen(
         drawRect(Color.White)
         drawContent()
     }
+
+    val backgroundColor = Color.White
 
     var currentPage by remember { mutableIntStateOf(0) }
     val maxPage = 4 // 0: 시작, 1: 알람설정, 2: 취침, 3: 피드백, 4: 절전 상태 해제

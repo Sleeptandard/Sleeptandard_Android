@@ -1,7 +1,14 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.kotlin.serialization)
+}
+
+val localProps = Properties().apply {
+    load(rootProject.file("local.properties").inputStream())
 }
 
 android {
@@ -18,6 +25,8 @@ android {
         versionName = libs.versions.project.versionName.get()
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField("String", "SUPABASE_URL", "\"${localProps["SUPABASE_URL"]}\"")
+        buildConfigField("String", "SUPABASE_ANON_KEY", "\"${localProps["SUPABASE_ANON_KEY"]}\"")
     }
 
     buildTypes {
@@ -40,7 +49,9 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
+
 }
 
 dependencies {
@@ -91,11 +102,21 @@ dependencies {
     // 앱 시작 화면
     implementation("androidx.core:core-splashscreen:1.0.1")
 
-    implementation(libs.coil.compose)
+    // WorkManager (대용량 파일 백그라운드 업로드 + 네트워크 재시도)
+    implementation("androidx.work:work-runtime-ktx:2.9.0")
 
+    implementation(libs.coil.compose)
 
     // 물방울 효과 라이브러리
     implementation("io.github.kyant0:backdrop:1.0.6")
+
+    // Supabase
+    implementation(platform("io.github.jan-tennert.supabase:bom:3.1.2"))
+    implementation("io.github.jan-tennert.supabase:auth-kt")
+    implementation("io.github.jan-tennert.supabase:postgrest-kt")
+    implementation("io.github.jan-tennert.supabase:storage-kt")
+    implementation("io.ktor:ktor-client-okhttp:3.1.2")
+
 
     // 워치앱 선언 (현재 활성화 중)
     wearApp(project(":wear"))

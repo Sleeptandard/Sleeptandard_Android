@@ -1,6 +1,11 @@
  package com.leejang.sleeptandard.Screen
 
 import androidx.activity.compose.BackHandler
+import android.util.Log
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
+import com.leejang.sleeptandard.Component.GenderRadioButton
+import com.leejang.sleeptandard.Component.BirthDatePicker
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -39,6 +44,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
@@ -530,6 +536,7 @@ fun AccountManagementScreen(
 
      // 2. 실시간 유효성 상태 (computed property)
      val isEmailValid = tmpEmail.matches(emailPattern)
+     val scope = rememberCoroutineScope()
 
      Column(
          modifier = Modifier
@@ -554,10 +561,12 @@ fun AccountManagementScreen(
                  .clip(RoundedCornerShape(100.dp)),
              enabled = isEmailValid,
              onClick = {
-                 isEmailExist = viewModel.isEmailExist()
-                 if (!isEmailExist) {
-                     viewModel.updateEmail(tmpEmail)
-                     onEmailUpdate()
+                 scope.launch {
+                     isEmailExist = viewModel.isEmailExistAsync()
+                     if (!isEmailExist) {
+                         viewModel.updateEmail(tmpEmail)
+                         onEmailUpdate()
+                     }
                  }
              },
              contentPadding = PaddingValues(0.dp)
@@ -613,6 +622,7 @@ fun AccountManagementScreen(
 
      // ✅ 전체 유효성: 두 조건이 모두 참이어야 함
      val isNewPasswordValid = isPasswordLengthValid && isNewPasswordCharsValid
+     val scope = rememberCoroutineScope()
 
 
      Column(
@@ -662,8 +672,10 @@ fun AccountManagementScreen(
                      .clip(RoundedCornerShape(100.dp)),
                  enabled = isPasswordLengthValid,
                  onClick = {
-                     isVerified = viewModel.isPasswordCorret(tmpPw)
-                     isClicked = true
+                     scope.launch {
+                         isVerified = viewModel.isPasswordCorrectAsync(tmpPw)
+                         isClicked = true
+                     }
                  },
                  contentPadding = PaddingValues(0.dp)
              ) {
