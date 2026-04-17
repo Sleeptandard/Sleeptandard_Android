@@ -186,12 +186,19 @@ class AuthViewModel : ViewModel() {
                     this.password = this@AuthViewModel.password
                 }
                 val uid = supabase.auth.currentUserOrNull()?.id ?: ""
+                val authEmail = supabase.auth.currentUserOrNull()?.email ?: ""
                 val profile =
                         supabase.postgrest["profiles"]
                                 .select { filter { eq("id", uid) } }
                                 .decodeSingle<ProfileInsert>()
+                                
+                // DB와 Auth의 이메일이 다를 경우(사용자가 이메일 변경 요청 후 인증 링크를 누르지 않아 싱크가 어긋난 경우) 자체 교정
+                if(authEmail.isNotEmpty() && profile.email != authEmail) {
+                    supabase.postgrest["profiles"].update({ set("email", authEmail) }) { filter { eq("id", uid) } }
+                }
+                                
                 val returnedUser = User(
-                    email = profile.email,
+                    email = if (authEmail.isNotEmpty()) authEmail else profile.email,
                     pw = password,
                     nickname = profile.nickname,
                     gender = profile.gender ?: "",
@@ -346,8 +353,12 @@ class AuthViewModel : ViewModel() {
                 Log.d("AuthVM", "이메일 변경 요청 완료 (인증 메일 확인 필요)")
                 onSuccess()
             } catch (e: Exception) {
-                Log.e("AuthVM", "계정 탈퇴 실패: ${e.message}", e)
-                onError(e.message ?: "계정 탈퇴 중 오류가 발생했습니다.")
+                Log.e("AuthVM", "이메일 변경 실패: ${e.message}", e)
+                if (e.message?.contains("email_address_invalid") == true || e.message?.contains("identical") == true) {
+                    onError("이메일 변경 안내메일의 인증 링크를 먼저 눌러야 인증서버의 이메일이 완전히 변경됩니다. 아직 기존 이메일이 서버에 남아있습니다.")
+                } else {
+                    onError(e.message ?: "이메일 변경 중 오류가 발생했습니다.")
+                }
             }
         }
     }
@@ -425,11 +436,11 @@ class AuthViewModel : ViewModel() {
 
     /***********  작동 확인용 서버통신로직  **********/
     // 서버에 해당 이메일이 존재하는지 확인
-    suspend fun isEmailExistAsync(): Boolean {
+    suspend fun isEmailExistAsync(checkEmail: String = email): Boolean {
         return try {
             val result = supabase.postgrest["profiles"]
                 .select(columns = Columns.list("email")) {
-                    filter { eq("email", email) }
+                    filter { eq("email", checkEmail) }
                 }
                 .decodeList<ProfileEmail>()
             result.isNotEmpty()
