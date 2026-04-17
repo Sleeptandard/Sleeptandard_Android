@@ -116,6 +116,9 @@ class AuthViewModel : ViewModel() {
     fun updateBirthdate(input: String) {
         birthdate = input
     }
+    fun clearCurrentStep(){
+        currentStep = AuthStep.EmailInput
+    }
 
     // 이메일 확인 API 호출 로직
     // 1단계: 이메일 확인 로직
@@ -209,6 +212,10 @@ class AuthViewModel : ViewModel() {
                 getUserInfo(returnedUser)
 
                 onSuccess(returnedUser)
+
+                // 로그아웃 했을때 무조건 이메일 입력창으로 들어오게 하기.
+                clearCurrentStep()
+
             } catch (e: Exception) {
                 onError()
             }

@@ -57,6 +57,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -152,22 +153,34 @@ fun AccountManagementScreen(
                     is AccountMenu.Email -> EmailEdit(viewModel = userViewModel, onEmailUpdate = onEmailUpdate)
 
                     // 메인 -> 비밀번호 화면
-                    is AccountMenu.Password -> PasswordEdit(viewModel = userViewModel, onPasswordUpdate = onPasswordUpdate)
+                    is AccountMenu.Password -> PasswordEdit(viewModel = userViewModel, onPasswordUpdate = {
+                        onPasswordUpdate()
+                        navStack.removeAt(navStack.lastIndex)
+                    })
 
                     // 메인 -> 로그아웃/탈퇴 화면
                     is AccountMenu.AuthAction -> AuthActionScreen(userViewModel, navStack)
 
                     /****     2층      ****/
                     // 개인정보 -> 닉네임 화면
-                    is AccountMenu.Nickname -> NicknameEdit(viewModel = userViewModel, onNicknameUpdate = onNicknameUpdate)
+                    is AccountMenu.Nickname -> NicknameEdit(viewModel = userViewModel, onNicknameUpdate = {
+                        onNicknameUpdate()
+                        navStack.removeAt(navStack.lastIndex)
+                    })
 
 
                     // 개인정보 -> 성별 화면
-                    is AccountMenu.Gender -> GenderEdit(viewModel = userViewModel, onGenderUpdate = onGenderUpdate)
+                    is AccountMenu.Gender -> GenderEdit(viewModel = userViewModel, onGenderUpdate = {
+                        onGenderUpdate()
+                        navStack.removeAt(navStack.lastIndex)
+                    })
 
 
                     // 개인정보 -> 생년월일 화면
-                    is AccountMenu.Birthdate -> BirthdateEdit(viewModel = userViewModel, onBirthdateUpdate = onBirthdateUpdate)
+                    is AccountMenu.Birthdate -> BirthdateEdit(viewModel = userViewModel, onBirthdateUpdate = {
+                        onBirthdateUpdate()
+                        navStack.removeAt(navStack.lastIndex)
+                    })
 
 
                     // 로그아웃/탈퇴 -> 로그아웃 화면
@@ -523,8 +536,6 @@ fun AccountManagementScreen(
      viewModel: AuthViewModel,
      onEmailUpdate: () -> Unit
  ) {
-
-
      var tmpEmail by remember { mutableStateOf(viewModel.email) }
      var isEmailExist by remember { mutableStateOf(false) }
 
@@ -542,7 +553,6 @@ fun AccountManagementScreen(
          modifier = Modifier
              .fillMaxSize()
              .imePadding()
-
      ) {
          WhiteTextField(
              value = tmpEmail,
