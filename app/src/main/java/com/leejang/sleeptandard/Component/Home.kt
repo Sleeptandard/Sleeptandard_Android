@@ -79,6 +79,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.leejang.sleeptandard.ui.theme.AppIcons
 import com.leejang.sleeptandard.ui.theme.Key
+import io.ktor.http.headersOf
 import java.util.Calendar
 import java.util.Locale
 import kotlin.math.abs
@@ -121,21 +122,22 @@ fun OptionsSection(
     ) {
         Box(
                 modifier =
-                        Modifier.zIndex(3f)
-                                .neumorphicBackground(
-                                        highlightColor = Color(0xFFB9C8DF).copy(alpha = 0.1f),
-                                        blurRadius1 = 20.dp,
-                                )
-                                // Inner shadow
+                        Modifier
+                            .zIndex(3f)
+                            .neumorphicBackground(
+                                highlightColor = Color(0xFFB9C8DF).copy(alpha = 0.1f),
+                                blurRadius1 = 20.dp,
+                            )
+                            // Inner shadow
                                 .innerShadow(
-                                        shape = RoundedCornerShape(28.dp),
-                                        shadow =
-                                                Shadow(
-                                                        radius = 25.dp,
-                                                        spread = (-12).dp,
-                                                        color = Color(0xFF030E1E).copy(0.8f),
-                                                        offset = DpOffset(x = 5.dp, 6.dp)
-                                                )
+                                    shape = RoundedCornerShape(28.dp),
+                                    shadow =
+                                        Shadow(
+                                            radius = 25.dp,
+                                            spread = (-12).dp,
+                                            color = Color(0xFF030E1E).copy(0.8f),
+                                            offset = DpOffset(x = 5.dp, 6.dp)
+                                        )
                                 )
         ) {
             Box(
@@ -628,87 +630,98 @@ fun WindowTutorial(
                     )
                 }
             }
-            BoxWithConstraints(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
-                val fullWidth = constraints.maxWidth.toFloat()
+            Column(
+                modifier = Modifier.fillMaxWidth().weight(1f)
+            ) {
+                Spacer(Modifier.weight(1f))
 
-                // ✅ [최적화 1] 변하지 않는 값들은 람다 밖에서 한 번만 계산합니다.
-                val rowPaddingPx = with(density) { 35.dp.toPx() }
-                val sliderWidth = (fullWidth - (rowPaddingPx * 2)) * 0.8f
-                val sliderStartOffset = rowPaddingPx + ((fullWidth - (rowPaddingPx * 2)) * 0.1f)
-                val internalSideMarginPx =
-                    with(density) { 12.dp.toPx() } // 원래는 15.dp인데 뭔가 비율이 안맞아서 임의로 내린 값
-                val usableWidth = sliderWidth - (internalSideMarginPx * 2)
-                val thumbCenterY = with(density) { 48.dp.toPx() / 2 }
+                BoxWithConstraints(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
+                    val fullWidth = constraints.maxWidth.toFloat()
 
-                val fraction = (earlyWakeUpMinutes - 10).toFloat() / 20f
-                val thumbCenterX =
-                    sliderStartOffset + internalSideMarginPx + (usableWidth * fraction)
+                    // ✅ [최적화 1] 변하지 않는 값들은 람다 밖에서 한 번만 계산합니다.
+                    val rowPaddingPx = with(density) { 35.dp.toPx() }
+                    val sliderWidth = (fullWidth - (rowPaddingPx * 2)) * 0.8f
+                    val sliderStartOffset = rowPaddingPx + ((fullWidth - (rowPaddingPx * 2)) * 0.1f)
+                    val internalSideMarginPx =
+                        with(density) { 12.dp.toPx() } // 원래는 15.dp인데 뭔가 비율이 안맞아서 임의로 내린 값
+                    val usableWidth = sliderWidth - (internalSideMarginPx * 2)
+                    val thumbCenterY = with(density) { 48.dp.toPx() / 2 }
 
-                WakeUpWindow(
-                    onValueChange = {},
-                    modifier = Modifier,
-                    selectedHour = selectedHour,
-                    selectedMinute = selectedMinute,
-                    selectedIsAm = selectedIsAm,
-                    earlyWakeUpMinutes = earlyWakeUpMinutes,
-                    enabled = false
-                )
+                    val fraction = (earlyWakeUpMinutes - 10).toFloat() / 20f
+                    val thumbCenterX =
+                        sliderStartOffset + internalSideMarginPx + (usableWidth * fraction)
 
-                Icon(
-                    modifier =
-                        Modifier.graphicsLayer {
-                            // 실제 위치 이동 (레이아웃 재계산 없음)
-                            translationX = thumbCenterX - 12.dp.toPx()
-                            translationY = thumbCenterY + 5.dp.toPx()
-                        },
-                    painter = painterResource(AppIcons.HomeHand),
-                    contentDescription = "손모양"
-                )
-            }
-
-
-            Box(modifier = Modifier.height(316.dp)) {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Spacer(Modifier.height(47.dp))
-
-                    Text(
-                        text =
-                            calculateWakeUpRangeText(
-                                selectedHour,
-                                selectedMinute,
-                                selectedIsAm,
-                                earlyWakeUpMinutes
-                            ),
-                        style =
-                            MaterialTheme.typography.bodySmall.copy(
-                                color = Color.White,
-                                fontSize = 15.sp,
-                            )
+                    WakeUpWindow(
+                        onValueChange = {},
+                        modifier = Modifier,
+                        selectedHour = selectedHour,
+                        selectedMinute = selectedMinute,
+                        selectedIsAm = selectedIsAm,
+                        earlyWakeUpMinutes = earlyWakeUpMinutes,
+                        enabled = false
                     )
 
-                    Spacer(Modifier.height(24.dp))
-
-                    Text(
-                        text = "이 범위 안에서",
-                        style =
-                            MaterialTheme.typography.titleSmall.copy(
-                                color = Color(0xFFBCD8FF),
-                                fontSize = 18.sp
-                            )
-                    )
-                    Text(
-                        text = "가장 편하게 깨어날 순간에 알람이 울려요",
-                        style =
-                            MaterialTheme.typography.titleSmall.copy(
-                                color = Color(0xFFBCD8FF),
-                                fontSize = 18.sp
-                            )
+                    Icon(
+                        modifier =
+                            Modifier.graphicsLayer {
+                                // 실제 위치 이동 (레이아웃 재계산 없음)
+                                translationX = thumbCenterX - 12.dp.toPx()
+                                translationY = thumbCenterY + 5.dp.toPx()
+                            },
+                        painter = painterResource(AppIcons.HomeHand),
+                        contentDescription = "손모양"
                     )
                 }
+                Spacer(Modifier.weight(1f))
+
+                Box(modifier = Modifier.height(164.dp)) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Spacer(Modifier.height(47.dp))
+
+                        Text(
+                            text =
+                                calculateWakeUpRangeText(
+                                    selectedHour,
+                                    selectedMinute,
+                                    selectedIsAm,
+                                    earlyWakeUpMinutes
+                                ),
+                            style =
+                                MaterialTheme.typography.bodySmall.copy(
+                                    color = Color.White,
+                                    fontSize = 15.sp,
+                                )
+                        )
+
+                        Spacer(Modifier.height(24.dp))
+
+                        Text(
+                            text = "이 범위 안에서",
+                            style =
+                                MaterialTheme.typography.titleSmall.copy(
+                                    color = Color(0xFFBCD8FF),
+                                    fontSize = 18.sp
+                                )
+                        )
+                        Text(
+                            text = "가장 편하게 깨어날 순간에 알람이 울려요",
+                            style =
+                                MaterialTheme.typography.titleSmall.copy(
+                                    color = Color(0xFFBCD8FF),
+                                    fontSize = 18.sp
+                                )
+                        )
+                    }
+                }
+                Spacer(Modifier.weight(2f))
+                Spacer(Modifier.height(56.dp))
+                Spacer(Modifier.height(25.dp))
+
             }
+
             Row(
                 modifier =
                     Modifier.background(color = Color.White)
@@ -763,6 +776,8 @@ fun WindowTutorial(
                     tint = Color(0xFF050C16)
                 )
             }
+
+
         }
     }
 }
