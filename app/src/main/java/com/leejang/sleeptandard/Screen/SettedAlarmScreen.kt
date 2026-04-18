@@ -84,27 +84,27 @@ fun SettedAlarmScreen(
     var popUp by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit){
-        delay(1500) // 사용자가 화면을 인식할 수 있도록 아주 잠깐 대기합니다.
+        delay(1000) // 사용자가 화면을 인식할 수 있도록 아주 잠깐 대기합니다.
         popUp = !popUp
         // [왕복 1단계] 30분 -> 10분으로 이동 (2초간 부드럽게)
         fontAnimatable.animateTo(
             targetValue = 40f,
-            animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing)
+            animationSpec = tween(durationMillis = 600, easing = FastOutSlowInEasing)
         )
     }
     LaunchedEffect(Unit) {
-        delay(1500) // 사용자가 화면을 인식할 수 있도록 아주 잠깐 대기합니다.
+        delay(1000) // 사용자가 화면을 인식할 수 있도록 아주 잠깐 대기합니다.
         fontSpaceAnimatable.animateTo(
             targetValue = 18f,
-            animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing)
+            animationSpec = tween(durationMillis = 600, easing = FastOutSlowInEasing)
         )
     }
 
     LaunchedEffect(Unit) {
-        delay(1500) // 사용자가 화면을 인식할 수 있도록 아주 잠깐 대기합니다.
+        delay(1000) // 사용자가 화면을 인식할 수 있도록 아주 잠깐 대기합니다.
         topSpaceAnimatable.animateTo(
             targetValue = 90f,
-            animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing)
+            animationSpec = tween(durationMillis = 600, easing = FastOutSlowInEasing)
         )
     }
 
