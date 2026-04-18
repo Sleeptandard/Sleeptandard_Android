@@ -1,6 +1,6 @@
 package com.leejang.sleeptandard.Screen
 
-import android.graphics.BlurMaskFilter
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -14,6 +14,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -28,7 +29,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -47,28 +47,22 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.innerShadow
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
-import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.drawscope.clipRect
-import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
-import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.shadow.Shadow
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.text.style.BaselineShift
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.sp
+import com.leejang.sleeptandard.ClassFile.Alarm
 
 import com.leejang.sleeptandard.ClassFile.AlarmScheduler
+import com.leejang.sleeptandard.Component.neumorphicBackground
 import com.leejang.sleeptandard.Prefs.AlarmPreferences
 import com.leejang.sleeptandard.ViewModel.AlarmViewModel
 import com.leejang.sleeptandard.ui.theme.AppIcons
@@ -84,173 +78,77 @@ fun SettedAlarmScreen(
     val context = LocalContext.current
     val alarm = alarmViewModel.alarm
 
+    val fontAnimatable = remember { Animatable(48f) }
+    val fontSpaceAnimatable = remember { Animatable(8f) }
+    val topSpaceAnimatable = remember { Animatable(200f) }
+    var popUp by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit){
+        delay(1500) // 사용자가 화면을 인식할 수 있도록 아주 잠깐 대기합니다.
+        popUp = !popUp
+        // [왕복 1단계] 30분 -> 10분으로 이동 (2초간 부드럽게)
+        fontAnimatable.animateTo(
+            targetValue = 40f,
+            animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing)
+        )
+    }
+    LaunchedEffect(Unit) {
+        delay(1500) // 사용자가 화면을 인식할 수 있도록 아주 잠깐 대기합니다.
+        fontSpaceAnimatable.animateTo(
+            targetValue = 18f,
+            animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing)
+        )
+    }
+
+    LaunchedEffect(Unit) {
+        delay(1500) // 사용자가 화면을 인식할 수 있도록 아주 잠깐 대기합니다.
+        topSpaceAnimatable.animateTo(
+            targetValue = 90f,
+            animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing)
+        )
+    }
+
     Column(
         modifier = Modifier
-            .fillMaxWidth(),
+            .fillMaxSize(),
         horizontalAlignment = Alignment.CenterHorizontally
     ){
-        Spacer(Modifier.weight(124f))
+        Spacer(Modifier.height(topSpaceAnimatable.value.toInt().dp))
 
-        Column(
-            modifier = Modifier
-        ) {
-            Text(
-                text = earlyWakeUpText(alarm.hour, alarm.minute, alarm.isAm, alarm.earlyWakeUpMinutes),
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    fontSize = 16.sp,
-                    color = Color(0xCCF1F4F9)
-                )
-            )
+        Column(modifier = Modifier.weight(1f)){
+            AnimatedContent(
+                targetState = popUp,
+                transitionSpec = {fadeIn(animationSpec = tween(400)).togetherWith(fadeOut(animationSpec = tween(400)))},
+                label = ""
+            ){popUp ->
 
-            Spacer(Modifier.height(8.dp))
-
-            Row(
-                modifier = Modifier,
-                verticalAlignment = Alignment.Bottom,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ){
-                Text(
-                    text = "~",
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontSize = 48.sp,
-                        color = Color(0xCCF1F4F9),
-                    )
-                )
-                Text(
-                    text = String.format(Locale.getDefault(),"%d : %02d",alarm.hour,alarm.minute),
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontSize = 48.sp,
-                        color = Color(0xCCF1F4F9),
-                    )
-                )
-                Text(
-                    text = "사이 알람",
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontSize = 16.sp,
-                        color = Color(0xCCF1F4F9),
-                        baselineShift = BaselineShift(0.5f)
-                    )
-                )
-            }
-        }
-
-        Spacer(Modifier.weight(28f))
-
-        Box(
-            modifier = Modifier
-                .size(320.dp, 112.dp)
-                .drawBehind {
-                    // 흰색 그림자
-                    val highlightColor1 = Color(0xFFB9C8DF).copy(alpha = 0.15f)
-                    val blurRadius1 = 20.dp.toPx()
-                    val offsetX1 = (-5).dp.toPx()
-                    val offsetY1 = (-5).dp.toPx()
-
-                    drawIntoCanvas { canvas ->
-                        val paint = Paint().asFrameworkPaint().apply {
-                            color = highlightColor1.toArgb()
-                            maskFilter = BlurMaskFilter(blurRadius1, BlurMaskFilter.Blur.NORMAL)
-                        }
-
-                        canvas.nativeCanvas.drawRoundRect(
-                            offsetX1, offsetY1,
-                            size.width + offsetX1, size.height + offsetY1,
-                            30.dp.toPx(), 30.dp.toPx(),
-                            paint
-                        )
+                if(!popUp){
+                    Column(
+                        modifier= Modifier.fillMaxSize(),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        ShowWakeUpTime(alarm, fontAnimatable.value, fontSpaceAnimatable.value)
+                        Spacer(Modifier.weight(1f))
                     }
-
-                    // 검은색 그림자
-                    val highlightColor2 = Color(0xFF020710).copy(alpha = 0.9f)
-                    val blurRadius2 = 15.dp.toPx()
-                    val offsetX2 = (8).dp.toPx()
-                    val offsetY2 = (8).dp.toPx()
-
-                    drawIntoCanvas { canvas ->
-                        val paint = Paint().asFrameworkPaint().apply {
-                            color = highlightColor2.toArgb()
-                            maskFilter = BlurMaskFilter(blurRadius2, BlurMaskFilter.Blur.NORMAL)
-                        }
-
-                        canvas.nativeCanvas.drawRoundRect(
-                            offsetX2, offsetY2,
-                            size.width + offsetX2, size.height + offsetY2,
-                            30.dp.toPx(), 30.dp.toPx(),
-                            paint
+                }else{
+                    Column(
+                        modifier= Modifier.fillMaxSize(),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        ShowWakeUpTime(alarm, fontAnimatable.value, fontSpaceAnimatable.value)
+                        Spacer(Modifier.weight(45f))
+                        SensingStartInfo()
+                        Spacer(Modifier.weight(51f))
+                        ActivityAnimation(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(120.dp)
                         )
+                        Spacer(Modifier.weight(92f))
                     }
-
-                    val gradient = Brush.linearGradient(
-                        colors = listOf(
-                            Color(0xFF07101E),
-                            Color(0xFF101A2A)
-                        ),
-                        // 시작점을 박스의 정중앙(Center)으로 설정
-                        start = Offset(size.width / 2, size.height / 2),
-                        // 끝점을 박스의 우측 하단(BottomEnd)으로 설정
-                        end = Offset(size.width, size.height * 2 / 3)
-                    )
-                    drawRoundRect(
-                        brush = gradient,
-                        cornerRadius = CornerRadius(30.dp.toPx(), 30.dp.toPx()) // 30dp만큼 둥글게
-                    )
-                }
-                // Inner shadow
-                .innerShadow(
-                    shape = RoundedCornerShape(30.dp),
-                    shadow = Shadow(
-                        radius = 25.dp,
-                        spread = (-12).dp,
-                        color = Color(0xFF030E1E).copy(0.8f),
-                        offset = DpOffset(x = 5.dp, 6.dp)
-                    )
-                ),
-            contentAlignment = Alignment.Center
-
-        ){
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ){
-                Text(
-                    text = "데이터 센싱 시작",
-                    fontSize = 16.sp
-                )
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
-                ){
-                    Text(
-                        text = "워치",
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            fontSize = 18.sp,
-                            color = Color(0xFFAFF4F9)
-                        )
-
-                    )
-                    Text(
-                        text = "를 착용해주세요",
-                        fontSize = 18.sp
-                    )
                 }
             }
-
         }
-
-        Spacer(Modifier.weight(92f))
-        
-        ActivityAnimation(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(120.dp)
-        )
-        
-        Spacer(Modifier.weight(92f))
 
         Box(
             modifier = Modifier
@@ -311,11 +209,115 @@ fun SettedAlarmScreen(
 }
 
 @Composable
+private fun ShowWakeUpTime(
+    alarm: Alarm,
+    fontSize: Float,
+    space: Float
+){
+    Column(
+        modifier = Modifier
+    ) {
+        Text(
+            text = earlyWakeUpText(alarm.hour, alarm.minute, alarm.isAm, alarm.earlyWakeUpMinutes),
+            style = MaterialTheme.typography.bodyMedium.copy(
+                fontSize = 16.sp,
+                color = Color(0xCCF1F4F9)
+            )
+        )
+
+        Spacer(Modifier.height(8.dp))
+
+        Row(
+            modifier = Modifier,
+            verticalAlignment = Alignment.Bottom,
+            horizontalArrangement = Arrangement.spacedBy(space.dp)
+        ){
+            Text(
+                text = "~",
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontSize = fontSize.sp,
+                    color = Color(0xCCF1F4F9),
+                )
+            )
+            Text(
+                text = String.format(Locale.getDefault(),"%d : %02d",alarm.hour,alarm.minute),
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontSize = fontSize.sp,
+                    color = Color(0xCCF1F4F9),
+                )
+            )
+            Text(
+                text = "사이 알람",
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontSize = 16.sp,
+                    color = Color(0xCCF1F4F9),
+                    baselineShift = BaselineShift(0.5f)
+                )
+            )
+        }
+    }
+}
+
+@Composable
+private fun SensingStartInfo(){
+    Box(
+        modifier = Modifier
+            .size(320.dp, 112.dp)
+            .neumorphicBackground()
+            // Inner shadow
+            .innerShadow(
+                shape = RoundedCornerShape(30.dp),
+                shadow = Shadow(
+                    radius = 25.dp,
+                    spread = (-12).dp,
+                    color = Color(0xFF030E1E).copy(0.8f),
+                    offset = DpOffset(x = 5.dp, 6.dp)
+                )
+            ),
+        contentAlignment = Alignment.Center
+
+    ){
+        Column(
+            modifier = Modifier
+                .fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ){
+            Text(
+                text = "데이터 센싱 시작",
+                fontSize = 16.sp
+            )
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ){
+                Text(
+                    text = "워치",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 18.sp,
+                        color = Color(0xFFAFF4F9)
+                    )
+
+                )
+                Text(
+                    text = "를 착용해주세요",
+                    fontSize = 18.sp
+                )
+            }
+        }
+
+    }
+}
+
+@Composable
 fun ActivityAnimation(
     modifier: Modifier = Modifier
 ){
     val graphIcon: ImageVector = ImageVector.vectorResource(id = AppIcons.SettedActivityGraph)
-    val animationDuration: Int = 2000 // 그려지는 시간 (ms)
+    val animationDuration: Int = 2500 // 그려지는 시간 (ms)
 
     // 1. 애니메이션 상태 관리 (0.0f ~ 1.0f)
     val infiniteTransition = rememberInfiniteTransition(label = "graph_reveal")
@@ -326,7 +328,7 @@ fun ActivityAnimation(
         animationSpec = infiniteRepeatable(
             animation = keyframes {
                 durationMillis = 6000 // 전체 사이클 (그리기 2s + 대기 1s + 지우기 2s)
-                0f at 0 using LinearEasing
+                0f at 0 using FastOutSlowInEasing
                 1f at animationDuration using FastOutSlowInEasing // 2초간 그리기
                 1f at 6000 // 나머지 시간 동안 1 유지
             },
@@ -343,7 +345,7 @@ fun ActivityAnimation(
             animation = keyframes {
                 durationMillis = 6000
                 0f at 0 // 그리는 동안은 0 유지
-                0f at animationDuration + 1000 // 대기 시간(1s)까지 0 유지
+                0f at animationDuration + 1000 using FastOutSlowInEasing// 대기 시간(1s)까지 0 유지
                 1f at animationDuration + 1000 + animationDuration using FastOutSlowInEasing // 2초간 지우기
                 1f at 6000 // 끝까지 1 유지
             },

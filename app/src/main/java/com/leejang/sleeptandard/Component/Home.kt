@@ -4,6 +4,7 @@ import android.graphics.BlurMaskFilter
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.Easing
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
@@ -593,7 +594,7 @@ fun WindowTutorial(
         // [왕복 1단계] 30분 -> 10분으로 이동 (2초간 부드럽게)
         animatedMinutes.animateTo(
             targetValue = 10f,
-            animationSpec = tween(durationMillis = 1000, easing = CubicBezierEasing(0.5f, 0f, 0.5f, 1f))
+            animationSpec = tween(durationMillis = 1000, easing = LinearEasing)
         )
 
         delay(2500) // 10분 지점에서 잠시 멈춰 강조 효과를 줍니다.
@@ -601,7 +602,7 @@ fun WindowTutorial(
         // [왕복 2단계] 10분 -> 30분으로 다시 복귀 (2초간)
         animatedMinutes.animateTo(
             targetValue = 30f,
-            animationSpec = tween(durationMillis = 1000, easing = CubicBezierEasing(0.5f, 0f, 0.5f, 1f))
+            animationSpec = tween(durationMillis = 1000, easing = LinearEasing)
         )
     }
 
