@@ -1,5 +1,11 @@
 package com.leejang.sleeptandard.Component
 
+/** 홈 화면에 들어가는 대부분의 컴포넌트 모음
+ *
+ * 시발 모르겠다~
+ *
+ */
+
 import android.graphics.BlurMaskFilter
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
@@ -16,27 +22,19 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.asPaddingValues
-import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.windowInsetsBottomHeight
-import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBarDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -99,14 +97,11 @@ fun OptionsSection(
             if (isNone) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
             else MaterialTheme.colorScheme.onSurface
 
-    var entireHeight = 164.dp
-    var vibSurfaceHeight = 54.dp
+    val entireHeight = 164.dp
     var vibTogglechecked = checked
     var vibToggleEnabled = true
 
     if (!isSystemVibrationOn) {
-        entireHeight += 16.dp
-        vibSurfaceHeight = 70.dp
         vibTogglechecked = false
         vibToggleEnabled = false
     }
@@ -118,21 +113,22 @@ fun OptionsSection(
     ) {
         Box(
                 modifier =
-                        Modifier.zIndex(3f)
-                                .neumorphicBackground(
-                                        highlightColor = Color(0xFFB9C8DF).copy(alpha = 0.1f),
-                                        blurRadius1 = 20.dp,
-                                )
-                                // Inner shadow
+                        Modifier
+                            .zIndex(3f)
+                            .neumorphicBackground(
+                                highlightColor = Color(0xFFB9C8DF).copy(alpha = 0.1f),
+                                blurRadius1 = 20.dp,
+                            )
+                            // Inner shadow
                                 .innerShadow(
-                                        shape = RoundedCornerShape(28.dp),
-                                        shadow =
-                                                Shadow(
-                                                        radius = 25.dp,
-                                                        spread = (-12).dp,
-                                                        color = Color(0xFF030E1E).copy(0.8f),
-                                                        offset = DpOffset(x = 5.dp, 6.dp)
-                                                )
+                                    shape = RoundedCornerShape(28.dp),
+                                    shadow =
+                                        Shadow(
+                                            radius = 25.dp,
+                                            spread = (-12).dp,
+                                            color = Color(0xFF030E1E).copy(0.8f),
+                                            offset = DpOffset(x = 5.dp, 6.dp)
+                                        )
                                 )
         ) {
             Box(
@@ -305,6 +301,9 @@ fun OptionsSection(
     }
 }
 
+/**
+ * 홈 화면의 '완료' 버튼
+ */
 @Composable
 fun ConfirmButton(modifier: Modifier = Modifier, onClick: () -> Unit) {
     Button(
@@ -324,6 +323,9 @@ fun ConfirmButton(modifier: Modifier = Modifier, onClick: () -> Unit) {
     }
 }
 
+/**
+ * 기상 윈도우에 들어가는 슬라이더
+ */
 @Composable
 fun DiamondStepSlider(
         value: Int,
@@ -341,44 +343,44 @@ fun DiamondStepSlider(
     val sideMarginPx = with(density) { 15.dp.toPx() }
 
     BoxWithConstraints(
-            modifier =
-                    modifier.fillMaxWidth()
-                            .height(48.dp) // 터치 높이도 조금 더 확보
-                            .pointerInput(Unit) {
-                                if (enabled) {
-                                    detectTapGestures { offset ->
-                                        // ✅ 터치 좌표에서 여유 공간을 뺀 값을 기준으로 비율 계산
-                                        val usableWidth = size.width - (2 * sideMarginPx)
-                                        val ratio =
-                                                ((offset.x - sideMarginPx) / usableWidth).coerceIn(
-                                                        0f,
-                                                        1f
-                                                )
-                                        val rawValue =
-                                                valueRange.first +
-                                                        (valueRange.last - valueRange.first) * ratio
-                                        val snappedValue =
-                                                steps.minByOrNull { abs(it - rawValue) } ?: value
-                                        onValueChange(snappedValue)
-                                    }
-                                }
-                            }
-                            .pointerInput(Unit) {
-                                if (enabled) {
-                                    detectDragGestures { change, _ ->
-                                        val usableWidth = size.width - (2 * sideMarginPx)
-                                        val ratio =
-                                                ((change.position.x - sideMarginPx) / usableWidth)
-                                                        .coerceIn(0f, 1f)
-                                        val rawValue =
-                                                valueRange.first +
-                                                        (valueRange.last - valueRange.first) * ratio
-                                        val snappedValue =
-                                                steps.minByOrNull { abs(it - rawValue) } ?: value
-                                        onValueChange(snappedValue)
-                                    }
-                                }
-                            }
+        modifier =
+            modifier.fillMaxWidth()
+                .height(48.dp) // 터치 높이도 조금 더 확보
+                .pointerInput(Unit) {
+                    if (enabled) {
+                        detectTapGestures { offset ->
+                            // ✅ 터치 좌표에서 여유 공간을 뺀 값을 기준으로 비율 계산
+                            val usableWidth = size.width - (2 * sideMarginPx)
+                            val ratio =
+                                ((offset.x - sideMarginPx) / usableWidth).coerceIn(
+                                    0f,
+                                    1f
+                                )
+                            val rawValue =
+                                valueRange.first +
+                                        (valueRange.last - valueRange.first) * ratio
+                            val snappedValue =
+                                steps.minByOrNull { abs(it - rawValue) } ?: value
+                            onValueChange(snappedValue)
+                        }
+                    }
+                }
+                .pointerInput(Unit) {
+                    if (enabled) {
+                        detectDragGestures { change, _ ->
+                            val usableWidth = size.width - (2 * sideMarginPx)
+                            val ratio =
+                                ((change.position.x - sideMarginPx) / usableWidth)
+                                    .coerceIn(0f, 1f)
+                            val rawValue =
+                                valueRange.first +
+                                        (valueRange.last - valueRange.first) * ratio
+                            val snappedValue =
+                                steps.minByOrNull { abs(it - rawValue) } ?: value
+                            onValueChange(snappedValue)
+                        }
+                    }
+                }
     ) {
         val fullWidth = constraints.maxWidth.toFloat()
         val usableWidth = fullWidth - (2 * sideMarginPx)
@@ -389,104 +391,111 @@ fun DiamondStepSlider(
 
         // 1. 전체 트랙 (배경) - 양옆 여백 적용
         Box(
-                modifier =
-                        Modifier.align(Alignment.Center)
-                                .fillMaxWidth()
-                                .padding(horizontal = 20.dp) // ✅ sideMargin과 동일한 패딩
-                                .height(6.dp)
-                                .background(
-                                        Color.White.copy(alpha = 0.1f),
-                                        RoundedCornerShape(100.dp)
-                                )
+            modifier =
+                Modifier.align(Alignment.Center)
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp) // ✅ sideMargin과 동일한 패딩
+                    .height(6.dp)
+                    .background(
+                        Color.White.copy(alpha = 0.1f),
+                        RoundedCornerShape(100.dp)
+                    )
         )
 
         // 2. 활성 트랙 (색칠되는 부분)
         Box(
-                modifier =
-                        Modifier.align(Alignment.CenterStart)
-                                .offset { IntOffset(sideMarginPx.toInt(), 0) } // ✅ 시작점 보정
-                                .width(with(density) { (thumbCenterX - sideMarginPx).toDp() })
-                                .height(6.dp)
-                                .background(
-                                        brush =
-                                                Brush.horizontalGradient(
-                                                        colors =
-                                                                listOf(
-                                                                        Color(0xFFAAEDF2)
-                                                                                .copy(alpha = 0.8f),
-                                                                        Color(0xFFAAEDF2)
-                                                                )
-                                                ),
-                                        shape = RoundedCornerShape(100.dp)
-                                )
+            modifier =
+                Modifier.align(Alignment.CenterStart)
+                    .offset { IntOffset(sideMarginPx.toInt(), 0) } // ✅ 시작점 보정
+                    .width(with(density) { (thumbCenterX - sideMarginPx).toDp() })
+                    .height(6.dp)
+                    .background(
+                        brush =
+                            Brush.horizontalGradient(
+                                colors =
+                                    listOf(
+                                        Color(0xFFAAEDF2)
+                                            .copy(alpha = 0.8f),
+                                        Color(0xFFAAEDF2)
+                                    )
+                            ),
+                        shape = RoundedCornerShape(100.dp)
+                    )
         )
 
         // 3. 마름모 손잡이
         Box(
-                modifier =
-                        Modifier.offset { IntOffset(thumbCenterX.toInt() - 9.dp.toPx().toInt(), 0) }
-                                .align(Alignment.CenterStart)
-                                .drawBehind {
-                                    // 검은색 그림자
-                                    val highlightColor2 = Color(0xFF020710).copy(alpha = 0.9f)
-                                    val blurRadius2 = 15.dp.toPx()
-                                    val offsetX2 = (-5).dp.toPx()
-                                    val offsetY2 = (0).dp.toPx()
+            modifier =
+                Modifier.offset { IntOffset(thumbCenterX.toInt() - 9.dp.toPx().toInt(), 0) }
+                    .align(Alignment.CenterStart)
+                    .drawBehind {
+                        // 검은색 그림자
+                        val highlightColor2 = Color(0xFF020710).copy(alpha = 0.9f)
+                        val blurRadius2 = 15.dp.toPx()
+                        val offsetX2 = (-5).dp.toPx()
+                        val offsetY2 = (0).dp.toPx()
 
-                                    drawIntoCanvas { canvas ->
-                                        val paint =
-                                                Paint().asFrameworkPaint().apply {
-                                                    color = highlightColor2.toArgb()
-                                                    maskFilter =
-                                                            BlurMaskFilter(
-                                                                    blurRadius2,
-                                                                    BlurMaskFilter.Blur.NORMAL
-                                                            )
-                                                }
-
-                                        canvas.nativeCanvas.drawRoundRect(
-                                                offsetX2,
-                                                offsetY2,
-                                                size.width + offsetX2,
-                                                size.height + offsetY2,
-                                                15.dp.toPx(),
-                                                15.dp.toPx(),
-                                                paint
+                        drawIntoCanvas { canvas ->
+                            val paint =
+                                Paint().asFrameworkPaint().apply {
+                                    color = highlightColor2.toArgb()
+                                    maskFilter =
+                                        BlurMaskFilter(
+                                            blurRadius2,
+                                            BlurMaskFilter.Blur.NORMAL
                                         )
-                                    }
                                 }
-                                .size(18.dp)
-                                .graphicsLayer(rotationZ = 45f)
-                                .background(Color.White, RoundedCornerShape(2.dp))
+
+                            canvas.nativeCanvas.drawRoundRect(
+                                offsetX2,
+                                offsetY2,
+                                size.width + offsetX2,
+                                size.height + offsetY2,
+                                15.dp.toPx(),
+                                15.dp.toPx(),
+                                paint
+                            )
+                        }
+                    }
+                    .size(18.dp)
+                    .graphicsLayer(rotationZ = 45f)
+                    .background(Color.White, RoundedCornerShape(2.dp))
         )
 
-        // indicator
+        // 4. indicator (말풍선)
         if (showIndicator) {
             Box(
-                    modifier =
-                            Modifier.offset {
-                                IntOffset(
-                                        thumbCenterX.toInt() - 42.dp.toPx().toInt(),
-                                        (-(32)).dp.toPx().toInt()
-                                )
-                            },
-                    contentAlignment = Alignment.Center
+                modifier =
+                    Modifier.offset {
+                        IntOffset(
+                            thumbCenterX.toInt() - 42.dp.toPx().toInt(),
+                            (-(32)).dp.toPx().toInt()
+                        )
+                    },
+                contentAlignment = Alignment.Center
             ) {
                 Image(
-                        modifier = Modifier.size(84.dp, 45.dp),
-                        painter = painterResource(AppIcons.HomeWindowIndicator),
-                        contentDescription = "windowIndicator",
+                    modifier = Modifier.size(84.dp, 45.dp),
+                    painter = painterResource(AppIcons.HomeWindowIndicator),
+                    contentDescription = "windowIndicator",
                 )
                 Text(
-                        modifier = Modifier.offset(y = (-3).dp),
-                        text = String.format("%d분 전", value),
-                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
+                    modifier = Modifier.offset(y = (-3).dp),
+                    text = String.format(Locale.getDefault(),"%d분 전", value),
+                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
                 )
             }
         }
     }
 }
 
+/** 기상 윈도우
+ *
+ * 최소/최대 설정 시간 + 다이아몬드 슬라이더 + 알람 시간범위 구성
+ *
+ * enabled: 홈화면에서 쓰냐 / 튜토리얼에서 쓰냐 의 차이
+ *
+ */
 @Composable
 fun WakeUpWindow(
         modifier: Modifier = Modifier,
@@ -500,77 +509,89 @@ fun WakeUpWindow(
     Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         // 기상 윈도우 슬라이더 부분
         Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 15.dp),
-                horizontalArrangement = Arrangement.SpaceAround,
-                verticalAlignment = Alignment.CenterVertically
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 15.dp),
+            horizontalArrangement = Arrangement.SpaceAround,
+            verticalAlignment = Alignment.CenterVertically
         ) {
+            // 최소 설정 시간
             Text(
-                    text = "10분",
-                    style =
-                            MaterialTheme.typography.bodySmall.copy(
-                                    color = Color(0xFFAFF4F9),
-                                    fontSize = 14.sp
-                            )
+                text = "10분",
+                style =
+                    MaterialTheme.typography.bodySmall.copy(
+                        color = Color(0xFFAFF4F9),
+                        fontSize = 14.sp
+                    )
             )
 
+            // 슬라이더
             Column(
-                    modifier =
-                            Modifier.fillMaxWidth(0.8f) // 슬라이더의 전체 길이
-                                    .padding(end = 4.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
+                modifier =
+                    Modifier.fillMaxWidth(0.8f) // 슬라이더의 전체 길이
+                        .padding(end = 4.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 DiamondStepSlider(
-                        value = earlyWakeUpMinutes,
-                        onValueChange = onValueChange,
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = enabled
+                    value = earlyWakeUpMinutes,
+                    onValueChange = onValueChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = enabled
                 )
             }
 
+            // 최대 설정 시간
             Text(
-                    "30분",
-                    style =
-                            MaterialTheme.typography.bodySmall.copy(
-                                    color = Color(0xFFAFF4F9),
-                                    fontSize = 14.sp
-                            )
+                "30분",
+                style =
+                    MaterialTheme.typography.bodySmall.copy(
+                        color = Color(0xFFAFF4F9),
+                        fontSize = 14.sp
+                    )
             )
         }
+        // enabled: 홈 화면에서 사용할 때
+        // 알람 시간범위 출력
         if (enabled) {
             Text(
-                    text =
-                            calculateWakeUpRangeText(
-                                    selectedHour,
-                                    selectedMinute,
-                                    selectedIsAm,
-                                    earlyWakeUpMinutes
-                            ),
-                    style =
-                            MaterialTheme.typography.bodyMedium.copy(
-                                    fontSize = 15.sp,
-                            )
+                text =
+                    calculateWakeUpRangeText(
+                        selectedHour,
+                        selectedMinute,
+                        selectedIsAm,
+                        earlyWakeUpMinutes
+                    ),
+                style =
+                    MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 15.sp,
+                    )
             )
 
             Spacer(Modifier.height(8.dp))
 
-            Column(
-                modifier = Modifier.height(16.dp)
-            ) {
-                if (earlyWakeUpMinutes < 20) {
-                    Text(
-                        text = "윈도우가 좁으면 적절한 기상 타이밍이 없을 수 있어요",
-                        style =
-                            MaterialTheme.typography.bodyMedium.copy(
-                                fontSize = 13.sp,
-                                color = Color(0xFFFF9F0A)
-                            )
-                    )
-                }
+            if (earlyWakeUpMinutes < 20) {
+                Text(
+                    text = "윈도우가 좁으면 적절한 기상 타이밍이 없을 수 있어요",
+                    style =
+                        MaterialTheme.typography.bodyMedium.copy(
+                            fontSize = 13.sp,
+                            color = Color(0xFFFF9F0A)
+                        )
+                )
             }
+            // !enabled: 윈도우 튜토리얼에서 사용할 때
+            // 알람시간 범위 미출력
+        }else{
+            Spacer(Modifier.height((15.sp).value.dp))
+            Spacer(Modifier.height(8.dp))
         }
+
     }
 }
 
+/** 튜토리얼을 끝내고 홈 화면으로 들어오면 나오는 기상윈도우 설명창
+ *
+ * 다이아몬드 슬라이더를 홈 화면과 정확히 일치시키게 구성하는것 때문에 복잡해진 버러지 창
+ *
+ */
 @Composable
 fun WindowTutorial(
         modifier: Modifier = Modifier,
@@ -607,10 +628,13 @@ fun WindowTutorial(
     val earlyWakeUpMinutes = animatedMinutes.value.toInt()
     var isChecked by remember { mutableStateOf(true) }
 
-    var checkBackground = if (isChecked) Color(0xFF050C16) else Color.White
+    val checkBackground = if (isChecked) Color(0xFF050C16) else Color.White
 
     Box(modifier = modifier.fillMaxSize()) {
+
         Column(modifier = Modifier.fillMaxSize()) {
+
+            // 타임피커 부분 박스
             Box(modifier = Modifier.weight(1f)) {
                 Column(
                     modifier = modifier.fillMaxSize(),
@@ -628,87 +652,101 @@ fun WindowTutorial(
                     )
                 }
             }
-            BoxWithConstraints(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
-                val fullWidth = constraints.maxWidth.toFloat()
 
-                // ✅ [최적화 1] 변하지 않는 값들은 람다 밖에서 한 번만 계산합니다.
-                val rowPaddingPx = with(density) { 35.dp.toPx() }
-                val sliderWidth = (fullWidth - (rowPaddingPx * 2)) * 0.8f
-                val sliderStartOffset = rowPaddingPx + ((fullWidth - (rowPaddingPx * 2)) * 0.1f)
-                val internalSideMarginPx =
-                    with(density) { 12.dp.toPx() } // 원래는 15.dp인데 뭔가 비율이 안맞아서 임의로 내린 값
-                val usableWidth = sliderWidth - (internalSideMarginPx * 2)
-                val thumbCenterY = with(density) { 48.dp.toPx() / 2 }
+            // 기상윈도우 ~ 끝(완료 버튼 밑 공간) 까지에 해당하는 박스
+            Column(
+                modifier = Modifier.fillMaxWidth().weight(1f)
+            ) {
+                Spacer(Modifier.weight(1f))
 
-                val fraction = (earlyWakeUpMinutes - 10).toFloat() / 20f
-                val thumbCenterX =
-                    sliderStartOffset + internalSideMarginPx + (usableWidth * fraction)
+                BoxWithConstraints(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
+                    val fullWidth = constraints.maxWidth.toFloat()
 
-                WakeUpWindow(
-                    onValueChange = {},
-                    modifier = Modifier,
-                    selectedHour = selectedHour,
-                    selectedMinute = selectedMinute,
-                    selectedIsAm = selectedIsAm,
-                    earlyWakeUpMinutes = earlyWakeUpMinutes,
-                    enabled = false
-                )
+                    // ✅ [최적화 1] 변하지 않는 값들은 람다 밖에서 한 번만 계산합니다.
+                    val rowPaddingPx = with(density) { 35.dp.toPx() }
+                    val sliderWidth = (fullWidth - (rowPaddingPx * 2)) * 0.8f
+                    val sliderStartOffset = rowPaddingPx + ((fullWidth - (rowPaddingPx * 2)) * 0.1f)
+                    val internalSideMarginPx =
+                        with(density) { 12.dp.toPx() } // 원래는 15.dp인데 뭔가 비율이 안맞아서 임의로 내린 값
+                    val usableWidth = sliderWidth - (internalSideMarginPx * 2)
+                    val thumbCenterY = with(density) { 48.dp.toPx() / 2 }
 
-                Icon(
-                    modifier =
-                        Modifier.graphicsLayer {
-                            // 실제 위치 이동 (레이아웃 재계산 없음)
-                            translationX = thumbCenterX - 12.dp.toPx()
-                            translationY = thumbCenterY + 5.dp.toPx()
-                        },
-                    painter = painterResource(AppIcons.HomeHand),
-                    contentDescription = "손모양"
-                )
-            }
+                    val fraction = (earlyWakeUpMinutes - 10).toFloat() / 20f
+                    val thumbCenterX =
+                        sliderStartOffset + internalSideMarginPx + (usableWidth * fraction)
 
-
-            Box(modifier = Modifier.height(316.dp)) {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Spacer(Modifier.height(47.dp))
-
-                    Text(
-                        text =
-                            calculateWakeUpRangeText(
-                                selectedHour,
-                                selectedMinute,
-                                selectedIsAm,
-                                earlyWakeUpMinutes
-                            ),
-                        style =
-                            MaterialTheme.typography.bodySmall.copy(
-                                color = Color.White,
-                                fontSize = 15.sp,
-                            )
+                    WakeUpWindow(
+                        onValueChange = {},
+                        modifier = Modifier,
+                        selectedHour = selectedHour,
+                        selectedMinute = selectedMinute,
+                        selectedIsAm = selectedIsAm,
+                        earlyWakeUpMinutes = earlyWakeUpMinutes,
+                        enabled = false
                     )
 
-                    Spacer(Modifier.height(24.dp))
-
-                    Text(
-                        text = "이 범위 안에서",
-                        style =
-                            MaterialTheme.typography.titleSmall.copy(
-                                color = Color(0xFFBCD8FF),
-                                fontSize = 18.sp
-                            )
-                    )
-                    Text(
-                        text = "가장 편하게 깨어날 순간에 알람이 울려요",
-                        style =
-                            MaterialTheme.typography.titleSmall.copy(
-                                color = Color(0xFFBCD8FF),
-                                fontSize = 18.sp
-                            )
+                    Icon(
+                        modifier =
+                            Modifier.graphicsLayer {
+                                // 실제 위치 이동 (레이아웃 재계산 없음)
+                                translationX = thumbCenterX - 12.dp.toPx()
+                                translationY = thumbCenterY + 5.dp.toPx()
+                            },
+                        painter = painterResource(AppIcons.HomeHand),
+                        contentDescription = "손모양"
                     )
                 }
+                Spacer(Modifier.weight(1f))
+
+                Box(modifier = Modifier.height(164.dp)) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Spacer(Modifier.height(47.dp))
+
+                        Text(
+                            text =
+                                calculateWakeUpRangeText(
+                                    selectedHour,
+                                    selectedMinute,
+                                    selectedIsAm,
+                                    earlyWakeUpMinutes
+                                ),
+                            style =
+                                MaterialTheme.typography.bodySmall.copy(
+                                    color = Color.White,
+                                    fontSize = 15.sp,
+                                )
+                        )
+
+                        Spacer(Modifier.height(24.dp))
+
+                        Text(
+                            text = "이 범위 안에서",
+                            style =
+                                MaterialTheme.typography.titleSmall.copy(
+                                    color = Color(0xFFBCD8FF),
+                                    fontSize = 18.sp
+                                )
+                        )
+                        Text(
+                            text = "가장 편하게 깨어날 순간에 알람이 울려요",
+                            style =
+                                MaterialTheme.typography.titleSmall.copy(
+                                    color = Color(0xFFBCD8FF),
+                                    fontSize = 18.sp
+                                )
+                        )
+                    }
+                }
+                Spacer(Modifier.weight(2f))
+                Spacer(Modifier.height(56.dp))
+                Spacer(Modifier.height(25.dp))
+
             }
+
+            // 네비게이션 바텀바와 같은 크기
             Row(
                 modifier =
                     Modifier.background(color = Color.White)
@@ -763,6 +801,8 @@ fun WindowTutorial(
                     tint = Color(0xFF050C16)
                 )
             }
+
+
         }
     }
 }

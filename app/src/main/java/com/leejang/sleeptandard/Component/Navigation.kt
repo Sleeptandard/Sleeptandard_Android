@@ -3,6 +3,7 @@ package com.leejang.sleeptandard.Component
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
+import android.util.Log
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -10,13 +11,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
@@ -72,30 +70,30 @@ import com.leejang.sleeptandard.ViewModel.AlarmViewModel
 import com.leejang.sleeptandard.ViewModel.AuthViewModel
 import com.leejang.sleeptandard.ui.theme.AppIcons
 
-sealed class Screen(val route: String, val showBottomBar: Boolean = true) {
-    object Home : Screen("home", showBottomBar = true)
-    object Journal : Screen("journal", showBottomBar = true)
-    object Settings : Screen("settings", showBottomBar = true)
-    object SendingData: Screen("sendingdata", showBottomBar = true)
-    object QnADetail : Screen("qna_detail/{id}", showBottomBar = true) {
+sealed class Screen(val route: String) {
+    object Home : Screen("home")
+    object Journal : Screen("journal")
+    object Settings : Screen("settings")
+    object SendingData: Screen("sendingdata")
+    object QnADetail : Screen("qna_detail/{id}") {
         fun createRoute(id: String) = "qna_detail/$id"
     }
-    object AccountManagement : Screen("accont_management", showBottomBar = true)
+    object AccountManagement : Screen("accont_management")
 
     // 컴포즈 스플래시 화면
     // object Splash : Screen("splash" , showBottomBar = false)
-    object SettedAlarm : Screen("settedAlarm", showBottomBar = false)
-    object ReviewAlarm : Screen("reviewAlarm", showBottomBar = false)
-    object QnA: Screen("qna", showBottomBar = false)
-    object Inquire: Screen("inquire", showBottomBar = false )
-    object Tutorial: Screen("tutorial", showBottomBar = false)
-    object AlarmRing: Screen("alarmringscreen", showBottomBar = false)
+    object SettedAlarm : Screen("settedAlarm")
+    object ReviewAlarm : Screen("reviewAlarm")
+    object QnA: Screen("qna")
+    object Inquire: Screen("inquire")
+    object Tutorial: Screen("tutorial")
+    object AlarmRing: Screen("alarmringscreen")
 
 
-    object Experiment : Screen("experiment", showBottomBar = false)
+    object Experiment : Screen("experiment")
 
     /** 로그인 데모 **/
-    object LoginDemo : Screen("loginDemo", showBottomBar = false)
+    object LoginDemo : Screen("loginDemo")
 }
 
 @Composable
@@ -168,9 +166,11 @@ fun AppNav(
                         popUpTo(Screen.Home.route){inclusive = true}
                     }
                 },
+                /*
                 goExperimentScreen = {
                     rememberNavController.navigate(Screen.Experiment.route)
                 },
+                 */
                 showWindowTutorial = showWindowTutorial,
                 onDismissTutorial = { isChecked ->
                     // 2번 요구사항: 체크박스를 체크하고 닫았다면 영구적으로 보이지 않게 저장
@@ -334,6 +334,7 @@ fun AppNav(
                         rememberNavController.popBackStack()
                     } catch (e: Exception) {
                         Toast.makeText(context, "이메일 앱을 찾을 수 없습니다.", Toast.LENGTH_SHORT).show()
+                        Log.d("no_email", "$e")
                     }
                 },
                 showInquireModal = isBlurred,
