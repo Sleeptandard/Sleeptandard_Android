@@ -3,6 +3,9 @@ package com.leejang.sleeptandard.Screen
 import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.DurationBasedAnimationSpec
+import androidx.compose.animation.core.Easing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -55,19 +58,26 @@ import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.dropShadow
+import androidx.compose.ui.draw.innerShadow
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Brush.Companion.horizontalGradient
 import androidx.compose.ui.graphics.Brush.Companion.linearGradient
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.RadialGradient
+import androidx.compose.ui.graphics.drawscope.DrawScope.Companion.DefaultBlendMode
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.shadow.Shadow
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
@@ -76,6 +86,7 @@ import com.leejang.sleeptandard.Component.CustomTimePicker
 import com.leejang.sleeptandard.Component.DiamondStepSlider
 import com.leejang.sleeptandard.Component.LiquidGlassBox
 import com.leejang.sleeptandard.ui.theme.AppIcons
+import com.leejang.sleeptandard.ui.theme.Neon
 
 @Composable
 fun TutorialScreen(
@@ -383,62 +394,65 @@ fun StartPage(){
 
             Spacer(Modifier.height(110.dp))
         }
-        BoxWithConstraints(modifier = Modifier.fillMaxWidth().height(24.dp)) {
+        BoxWithConstraints(modifier = Modifier.fillMaxWidth().height(24.dp).zIndex(2f)) {
 
-            val targetX = maxWidth * (51f / 72f) - 9.dp
-            val targetY = maxHeight * (1f / 2f) - 6.dp
+            val targetX = maxWidth * (51f / 72f) - 12.dp
+            val targetY = maxHeight * (1f / 2f) - 8.dp
 
             // 1. 깜빡임(Pulse)을 위한 무한 애니메이션 설정
             val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-            val alpha by infiniteTransition.animateFloat(
-                initialValue = 0.3f, // 가장 흐릴 때
-                targetValue = 0.9f,  // 가장 선명할 때
+
+            val spread by infiniteTransition.animateFloat(
+                initialValue = 1f, // 가장 흐릴 때
+                targetValue = 6f,  // 가장 선명할 때
                 animationSpec = infiniteRepeatable(
-                    animation = tween(1500, easing = LinearEasing), // 1.5초 간격
-                    repeatMode = RepeatMode.Reverse
+                    animation = keyframes {
+                        durationMillis = 3000 // 전체 사이클 (그리기 2s + 대기 1s + 지우기 2s)
+                        1f at 0 using LinearEasing
+                        6f at 300 using LinearEasing // 2초간 그리기
+                        6f at 1500 using LinearEasing
+                        1f at 1800 using LinearEasing
+                        1f at 3000 using LinearEasing// 나머지 시간 동안 1 유지
+                    },
+                        // tween(1500, easing = CubicBezierEasing(0f,1f,1f,0f)), // 1.5초 간격
+                    repeatMode = RepeatMode.Restart
                 ),
-                label = "alpha"
+                label = "spread"
             )
+
             // 2. 드롭 쉐도우와 원을 겹치기 위한 Box
             Box(
                 modifier = Modifier
-                    .offset(x = targetX, y = targetY),
+                    .offset(x = targetX, y = targetY)
+                    .size(20.dp),
                 contentAlignment = Alignment.Center) {
 
-                // ✅ 레이어 1: 깜빡이는 드롭 쉐도우 (광원 효과)
                 Box(
                     modifier = Modifier
-                        .size(16.dp) // 원보다 약간 크게 설정하여 빛이 퍼지게 함
-                        .graphicsLayer {
-                            this.alpha = alpha // 애니메이션되는 투명도 적용
-                            compositingStrategy = CompositingStrategy.Offscreen // 블러 성능 최적화
-                        }
-                        .blur(radius = 25.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)
-                        .background(
-                            // "알람의 정석" 메인 테마인 민트/블루 그라데이션
-                            brush = Brush.radialGradient(listOf(Color(0xFF437AC7), Color(0xFFAAEDF2))),
-                            shape = CircleShape
-                        )
-                        /*
+                        .background(Color.White, CircleShape)
+                        .size(12.dp)
                         .dropShadow(
                             shape = CircleShape,
                             shadow = Shadow(
                                 radius = 12.dp,
-                                spread = 1.dp,
-                                color = Color(0xFFAFF4F9).copy(alpha),
-                                offset = DpOffset(x = 0.dp, y = 0.dp)
+                                spread = spread.dp,
+                                color = Neon,
+                                blendMode = BlendMode.Screen
                             )
                         )
-                         */
-                )
+                        .innerShadow(
+                            shape = CircleShape,
+                            shadow = Shadow(
+                                radius = 3.dp,
+                                color = Neon,
+                                spread = 3.dp,
+                                alpha = 0.8f,
+                            )
+                        )
 
-                // ✅ 레이어 2: 실제 12.dp 크기의 흰색 원
-                Box(
-                    modifier = Modifier
-                        .size(12.dp)
-                        .background(Color.White, CircleShape)
                 )
             }
+
             /*
             Box(
                 modifier = Modifier
@@ -461,7 +475,8 @@ fun StartPage(){
         Image(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(150.dp),
+                .height(150.dp)
+                .zIndex(1f),
             painter = painterResource(AppIcons.TutorialGraph2),
             contentDescription = "그래프",
             contentScale = ContentScale.Fit

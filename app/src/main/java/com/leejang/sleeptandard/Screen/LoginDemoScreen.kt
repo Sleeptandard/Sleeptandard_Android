@@ -1538,7 +1538,10 @@ fun CompletedStep(
             modifier = Modifier
                 .clip(RoundedCornerShape(100.dp))
                 .fillMaxWidth()
-                .clickable { onConfirm(viewModel.loadUserInfo()) },
+                .clickable {
+                    onConfirm(viewModel.loadUserInfo())
+                    viewModel.clearCurrentStep()
+                           },
             contentAlignment = Alignment.Center
         ){
             Box(

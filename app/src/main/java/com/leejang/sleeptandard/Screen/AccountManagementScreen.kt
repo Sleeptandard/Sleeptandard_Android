@@ -57,6 +57,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -152,22 +153,34 @@ fun AccountManagementScreen(
                     is AccountMenu.Email -> EmailEdit(viewModel = userViewModel, onEmailUpdate = onEmailUpdate)
 
                     // 메인 -> 비밀번호 화면
-                    is AccountMenu.Password -> PasswordEdit(viewModel = userViewModel, onPasswordUpdate = onPasswordUpdate)
+                    is AccountMenu.Password -> PasswordEdit(viewModel = userViewModel, onPasswordUpdate = {
+                        onPasswordUpdate()
+                        navStack.removeAt(navStack.lastIndex)
+                    })
 
                     // 메인 -> 로그아웃/탈퇴 화면
                     is AccountMenu.AuthAction -> AuthActionScreen(userViewModel, navStack)
 
                     /****     2층      ****/
                     // 개인정보 -> 닉네임 화면
-                    is AccountMenu.Nickname -> NicknameEdit(viewModel = userViewModel, onNicknameUpdate = onNicknameUpdate)
+                    is AccountMenu.Nickname -> NicknameEdit(viewModel = userViewModel, onNicknameUpdate = {
+                        onNicknameUpdate()
+                        navStack.removeAt(navStack.lastIndex)
+                    })
 
 
                     // 개인정보 -> 성별 화면
-                    is AccountMenu.Gender -> GenderEdit(viewModel = userViewModel, onGenderUpdate = onGenderUpdate)
+                    is AccountMenu.Gender -> GenderEdit(viewModel = userViewModel, onGenderUpdate = {
+                        onGenderUpdate()
+                        navStack.removeAt(navStack.lastIndex)
+                    })
 
 
                     // 개인정보 -> 생년월일 화면
-                    is AccountMenu.Birthdate -> BirthdateEdit(viewModel = userViewModel, onBirthdateUpdate = onBirthdateUpdate)
+                    is AccountMenu.Birthdate -> BirthdateEdit(viewModel = userViewModel, onBirthdateUpdate = {
+                        onBirthdateUpdate()
+                        navStack.removeAt(navStack.lastIndex)
+                    })
 
 
                     // 로그아웃/탈퇴 -> 로그아웃 화면
@@ -523,8 +536,6 @@ fun AccountManagementScreen(
      viewModel: AuthViewModel,
      onEmailUpdate: () -> Unit
  ) {
-
-
      var tmpEmail by remember { mutableStateOf(viewModel.email) }
      var isEmailExist by remember { mutableStateOf(false) }
 
@@ -542,14 +553,42 @@ fun AccountManagementScreen(
          modifier = Modifier
              .fillMaxSize()
              .imePadding()
-
      ) {
          WhiteTextField(
              value = tmpEmail,
-             onValueChange = { tmpEmail = it },
+             onValueChange = { 
+                 tmpEmail = it 
+                 isEmailExist = false
+             },
              placeholder = "이메일",
              isEmailInput = true
          )
+         
+         if (isEmailExist) {
+             Spacer(Modifier.height(12.dp))
+             Row(
+                 modifier = Modifier
+                     .fillMaxWidth(),
+                 horizontalArrangement = Arrangement.Center,
+                 verticalAlignment = Alignment.CenterVertically
+             ) {
+                 Image(
+                     painter = painterResource(AppIcons.RegisterWarning),
+                     contentDescription = "경고"
+                 )
+                 Text(
+                     modifier = Modifier.padding(start = 6.dp),
+                     text = "이미 가입된 이메일입니다",
+                     style = MaterialTheme.typography.bodyMedium.copy(
+                         fontSize = 14.sp,
+                         color = Color(0xFFEF4444)
+                     ),
+                     textAlign = TextAlign.Center,
+                     lineHeight = 16.sp
+                 )
+             }
+         }
+
          Spacer(Modifier.weight(1f))
 
 
@@ -562,7 +601,12 @@ fun AccountManagementScreen(
              enabled = isEmailValid,
              onClick = {
                  scope.launch {
-                     isEmailExist = viewModel.isEmailExistAsync()
+                     // 현재와 동일한 이메일로 변경시 중복검사 통과
+                     if (tmpEmail == viewModel.email) {
+                         onEmailUpdate()
+                         return@launch
+                     }
+                     isEmailExist = viewModel.isEmailExistAsync(tmpEmail)
                      if (!isEmailExist) {
                          viewModel.updateEmail(tmpEmail)
                          onEmailUpdate()
@@ -727,10 +771,12 @@ fun AccountManagementScreen(
              )
 
              Spacer(Modifier.weight(1f))
+             // 에러를 표시해야 하는 조건: 새 비밀번호가 입력되었는데 유효하지 않거나, 확인 비밀번호가 입력되었는데 일치하지 않는 경우
+             val showError = (tmpNewPw.isNotEmpty() && !isNewPasswordValid) || (tmpNewPwConfirm.isNotEmpty() && tmpNewPw != tmpNewPwConfirm)
+             // 변경 가능한 조건: 새 비밀번호 입력됨, 유효함, 확인 비밀번호와 일치함
+             val isPasswordReady = tmpNewPw.isNotEmpty() && tmpNewPwConfirm.isNotEmpty() && isNewPasswordValid && (tmpNewPw == tmpNewPwConfirm)
 
-             val isWrong = (tmpNewPw.isNotEmpty() && !isNewPasswordValid) || ((tmpNewPw != tmpNewPwConfirm) && tmpNewPwConfirm.isNotEmpty())
-
-             if(isWrong) {
+             if(showError) {
 
                  Spacer(Modifier.height(12.dp))
                  Row(
@@ -764,8 +810,9 @@ fun AccountManagementScreen(
              Button(
                  modifier = Modifier
                      .clip(RoundedCornerShape(100.dp)),
-                 enabled = isOk,
+                 enabled = isPasswordReady,
                  onClick = {
+                     viewModel.updatePassword(tmpNewPw)
                      onPasswordUpdate()
                  },
                  contentPadding = PaddingValues(0.dp)
@@ -784,7 +831,7 @@ fun AccountManagementScreen(
                              fontSize = 18.sp,
 
                              color =
-                                 if (isOk) {
+                                 if (isPasswordReady) {
                                      Key
                                  } else
                                      Color.Black.copy(alpha = 0.5f)
