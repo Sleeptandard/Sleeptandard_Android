@@ -503,74 +503,71 @@ fun WakeUpWindow(
     Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         // 기상 윈도우 슬라이더 부분
         Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 15.dp),
-                horizontalArrangement = Arrangement.SpaceAround,
-                verticalAlignment = Alignment.CenterVertically
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 15.dp),
+            horizontalArrangement = Arrangement.SpaceAround,
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                    text = "10분",
-                    style =
-                            MaterialTheme.typography.bodySmall.copy(
-                                    color = Color(0xFFAFF4F9),
-                                    fontSize = 14.sp
-                            )
+                text = "10분",
+                style =
+                    MaterialTheme.typography.bodySmall.copy(
+                        color = Color(0xFFAFF4F9),
+                        fontSize = 14.sp
+                    )
             )
 
             Column(
-                    modifier =
-                            Modifier.fillMaxWidth(0.8f) // 슬라이더의 전체 길이
-                                    .padding(end = 4.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
+                modifier =
+                    Modifier.fillMaxWidth(0.8f) // 슬라이더의 전체 길이
+                        .padding(end = 4.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 DiamondStepSlider(
-                        value = earlyWakeUpMinutes,
-                        onValueChange = onValueChange,
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = enabled
+                    value = earlyWakeUpMinutes,
+                    onValueChange = onValueChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = enabled
                 )
             }
 
             Text(
-                    "30분",
-                    style =
-                            MaterialTheme.typography.bodySmall.copy(
-                                    color = Color(0xFFAFF4F9),
-                                    fontSize = 14.sp
-                            )
+                "30분",
+                style =
+                    MaterialTheme.typography.bodySmall.copy(
+                        color = Color(0xFFAFF4F9),
+                        fontSize = 14.sp
+                    )
             )
         }
         if (enabled) {
             Text(
-                    text =
-                            calculateWakeUpRangeText(
-                                    selectedHour,
-                                    selectedMinute,
-                                    selectedIsAm,
-                                    earlyWakeUpMinutes
-                            ),
-                    style =
-                            MaterialTheme.typography.bodyMedium.copy(
-                                    fontSize = 15.sp,
-                            )
+                text =
+                    calculateWakeUpRangeText(
+                        selectedHour,
+                        selectedMinute,
+                        selectedIsAm,
+                        earlyWakeUpMinutes
+                    ),
+                style =
+                    MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 15.sp,
+                    )
             )
 
             Spacer(Modifier.height(8.dp))
 
-            Column(
-                modifier = Modifier.height(16.dp)
-            ) {
-                if (earlyWakeUpMinutes < 20) {
-                    Text(
-                        text = "윈도우가 좁으면 적절한 기상 타이밍이 없을 수 있어요",
-                        style =
-                            MaterialTheme.typography.bodyMedium.copy(
-                                fontSize = 13.sp,
-                                color = Color(0xFFFF9F0A)
-                            )
-                    )
-                }
+            if (earlyWakeUpMinutes < 20) {
+                Text(
+                    text = "윈도우가 좁으면 적절한 기상 타이밍이 없을 수 있어요",
+                    style =
+                        MaterialTheme.typography.bodyMedium.copy(
+                            fontSize = 13.sp,
+                            color = Color(0xFFFF9F0A)
+                        )
+                )
             }
         }
+
     }
 }
 
