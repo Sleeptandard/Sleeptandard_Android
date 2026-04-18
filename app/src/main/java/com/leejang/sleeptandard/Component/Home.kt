@@ -566,6 +566,9 @@ fun WakeUpWindow(
                         )
                 )
             }
+        }else{
+            Spacer(Modifier.height((15.sp).value.dp))
+            Spacer(Modifier.height(8.dp))
         }
 
     }
