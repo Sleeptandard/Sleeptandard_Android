@@ -1,30 +1,32 @@
 package com.leejang.sleeptandard.Component
 
+/** 홈 - 알람음 설정창에 들어가면 보여줄 내용들
+ *
+ * 시발 모르겠다~
+ *
+ */
+
 
 import android.content.Context
 import android.graphics.BlurMaskFilter
+import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.Ringtone
 import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Build
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.RadioButton
-import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -36,13 +38,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.innerShadow
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Paint
-import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
@@ -127,6 +127,7 @@ fun AlarmSoundSettingContent(
         val systemMax = (audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM) * 0.7f).toInt()
         audioManager.setStreamVolume(AudioManager.STREAM_ALARM, systemMax, 0)
 
+        /*
         val r = RingtoneManager.getRingtone(context, uri) ?: return
 
         // 앱 내 설정된 볼륨 비율 적용 (API 28 이상)
@@ -136,8 +137,24 @@ fun AlarmSoundSettingContent(
 
         r.streamType = AudioManager.STREAM_ALARM
         playingRingtone = r
+
+         */
+
+        // ... 기존 로직 중 링톤을 설정하는 부분 (약 136라인)
+        val ringtone = RingtoneManager.getRingtone(context, uri)
+        playingRingtone = ringtone
+
+        // 1. AudioAttributes 객체를 생성합니다.
+        val audioAttributes = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_ALARM)             // 목적: 알람
+            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION) // 성격: 신호음(알림)
+            .build()
+
+        // 2. ✅ 기존의 streamType 설정 대신 audioAttributes를 할당합니다.
+        ringtone.audioAttributes = audioAttributes
+
         try {
-            r.play()
+            ringtone.play()
         } catch (_: Throwable) { }
         previewToken++
     }
@@ -399,7 +416,6 @@ private fun ToneRow(
     selected: Boolean,
     onClick: () -> Unit
 ) {
-    val line = Color(0xFFD4DCE4)
     Column(
         modifier = Modifier
             .fillMaxWidth()

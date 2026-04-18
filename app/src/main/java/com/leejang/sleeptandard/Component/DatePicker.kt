@@ -1,5 +1,12 @@
 package com.leejang.sleeptandard.Component
 
+/** 회원가입 / 계정정보 변경에서 사용하는 Date Picker
+ *
+ * 시발 모르겠다~
+ *
+ */
+
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
