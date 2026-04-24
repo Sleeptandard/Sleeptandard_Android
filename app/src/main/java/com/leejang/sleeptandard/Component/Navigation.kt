@@ -189,7 +189,9 @@ fun AppNav(
                 scheduler = scheduler,
                 onTurnAlarmOff = {
                     rememberNavController.navigate(Screen.Home.route){
-                        popUpTo(Screen.SettedAlarm.route){inclusive = true}
+                        // 0번(루트)까지 모든 화면을 스택에서 제거(inclusive)합니다.
+                        popUpTo(0) { inclusive = true }
+                        launchSingleTop = true
                     }
                 }
             )
@@ -455,9 +457,12 @@ fun AppNav(
                             else -> Screen.Home.route
                         }
                         rememberNavController.navigate(target) {
-                            launchSingleTop = true
-                            restoreState = true
-                            popUpTo(Screen.Home.route) { saveState = true }
+                            launchSingleTop = true  // 동일 화면이 스택 맨 위에 있다면 새로 만들지 않음
+                            restoreState = true     // 이전에 입력한 정보 등이 있다면 복구
+                            // 뒤로가기를 누르면 그래프에 설정되어 있는 startDestination으로 날아감
+                            popUpTo(rememberNavController.graph.startDestinationId) {
+                                saveState = true
+                            }
                         }
                     }
                 )
