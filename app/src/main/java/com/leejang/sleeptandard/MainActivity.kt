@@ -77,8 +77,8 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        val startDestination = getStartDestination(alarmPrefs, isResetPassword)
-
+        //val startDestination = getStartDestination(alarmPrefs, isResetPassword)
+        val startDestination = Screen.Home.route
         // 자동 로그인으로 홈 화면에 진입한 경우 환영 메시지 띄우기
         if (startDestination == Screen.Home.route) {
             lifecycleScope.launch(Dispatchers.IO) {

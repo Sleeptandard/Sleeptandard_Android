@@ -30,8 +30,10 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.BottomSheetDefaults
+import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.Alignment
@@ -69,7 +71,7 @@ fun HomeScreen(
     onClickConfirm: ()-> Unit,
     showWindowTutorial: Boolean,
     onDismissTutorial: (Boolean) -> Unit, // ✅ Boolean 인자 추가
-    // goExperimentScreen: ()-> Unit = {},
+    goExperimentScreen: ()-> Unit = {},
 ) {
     val context = LocalContext.current
     val alarmPrefs = remember(context) { AlarmPreferences(context) }  // 알람 SharedPreference 가져오기
@@ -285,6 +287,15 @@ fun HomeScreen(
                         .height(56.dp),
                     onClick = { showSituationModal = true }
                 )
+
+                Button(
+                    modifier = Modifier.fillMaxWidth().height(40.dp),
+                    onClick = goExperimentScreen
+                ){
+                    Text(
+                        text = "실험장"
+                    )
+                }
 
                 Spacer(Modifier.height(25.dp))
             }

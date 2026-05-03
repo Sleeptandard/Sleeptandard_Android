@@ -1,382 +1,174 @@
 package com.leejang.sleeptandard.Screen
 
-import android.graphics.BlurMaskFilter
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BatteryFull
+import androidx.compose.material.icons.filled.DeviceThermostat
+import androidx.compose.material.icons.filled.NightsStay
+import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.draw.innerShadow
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Brush.Companion.horizontalGradient
-import androidx.compose.ui.graphics.Brush.Companion.linearGradient
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Paint
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
-import androidx.compose.ui.graphics.nativeCanvas
-import androidx.compose.ui.graphics.shadow.Shadow
-import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.BaselineShift
-import androidx.compose.ui.text.style.LineHeightStyle
-import androidx.compose.ui.unit.DpOffset
-import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.leejang.sleeptandard.Component.CustomTimePicker
 
+// --- 데이터 모델 ---
+data class PotchLog(
+    val date: String,
+    val day: String,
+    val sleepTime: String,
+    val score: Int,
+    val temp: String,
+    val battery: String
+)
+
+// --- 더미 데이터 (사진 기반) ---
+val dummyLogs = listOf(
+    PotchLog("JAN 29", "SAT", "8h 12m", 88, "36.5°C", "92%"),
+    PotchLog("JAN 28", "SUN", "8h 12m", 89, "36.5°C", "92%"),
+    PotchLog("JAN 27", "MON", "8h 12m", 99, "36.5°C", "92%"),
+    PotchLog("JAN 26", "TUE", "8h 12m", 88, "36.5°C", "92%"),
+    PotchLog("JAN 25", "WED", "8h 12m", 75, "36.5°C", "92%")
+)
 
 @Composable
 fun ExperimentScreen() {
-
-    fun onSubmit(){
-
-    }
-
-    val buttonGradient = linearGradient(
-        listOf(Color(0xFF437AC7),
-            Color(0xFFAFF4F9))
-    )
+    // 배경색: 사진의 어두운 남색 계열 (#111723)
+    val backgroundColor = Color(0xFF111723)
+    val cardColor = Color.White.copy(alpha = 0.08f)
+    val accentColor = Color(0xFFB9E5EA)
 
     Column(
-        modifier = Modifier.fillMaxSize(),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    )
-    {
-
-        var varue by remember { mutableFloatStateOf(0.5f) }
-        
-        Spacer(Modifier.weight(100f))
-
-        Text(
-            text = "오늘 기상 점수는 몇 점인가요?",
-            style = MaterialTheme.typography.bodyMedium.copy(
-                fontSize = 20.sp,
-                color = Color.White
-            )
-        )
-
-        Spacer(Modifier.height(10.dp))
-
-        Text(
-            text = "얼마나 개운하게 일어났는지 알려주세요",
-            style = MaterialTheme.typography.bodyMedium.copy(
-                fontSize = 16.sp,
-                color = Color.White.copy(alpha = 0.7f)
-            )
-        )
-        
-        Spacer(Modifier.weight(104f))
-
-        SemiCircularSliderEX(
-            value = varue,
-            onValueChange = { f -> varue = f }
-        )
-
-        Spacer(Modifier.weight(104f))
-
-        Box(
-            modifier = Modifier
-                .clip(RoundedCornerShape(100.dp))
-                .clickable{
-                    onSubmit()
-                },
-            contentAlignment = Alignment.Center
-        ){
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(60.dp)
-                    .background(brush = buttonGradient)
-                    .blur(30.dp)
-                    .border(
-                        width = 1.dp,
-                        brush = Brush.verticalGradient(
-                            colors = listOf(
-                                Color.White.copy(alpha = 0.4f), // 테두리 위쪽 (빛남)
-                                Color.Transparent,             // 테두리 중간 (투명)
-                                Color.White.copy(alpha = 0.1f)  // 테두리 아래쪽 (은은함)
-                            )
-                        ),
-                        shape = RoundedCornerShape(24.dp)
-                    ),
-                contentAlignment = Alignment.Center
-            ){
-
-            }
-
-            Text(
-                text = "제출",
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    fontSize = 18.sp,
-                    color = Color.White
-                )
-            )
-
-        }
-
-
-        Spacer(Modifier.height(90.dp))
-
-    }
-}
-
-@Composable
-fun SemiCircularSliderEX(
-    value: Float, // 0.0f ~ 1.0f
-    onValueChange: (Float) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val strokeWidth = 24.dp
-    val density = LocalDensity.current
-
-    // 점수에 따른 광원 색상
-    val glowColor = when {
-        value < 0.33f -> Color(0xFFFF5967)
-        value < 0.66f -> Color(0xFFFFE359)
-        else -> Color(0xFF59FF85)
-    }
-
-    val sliderGradient = horizontalGradient(
-        listOf(
-            Color(0xFF1C447C),
-            Color(0xFF050C16),
-
-        )
-    )
-
-
-
-    Box(
         modifier = Modifier
-            .size(286.dp)
-            .clip(shape = CircleShape)
-            .background(color = Color.White)
-            ,
-        contentAlignment = Alignment.Center
-    ){
-        BoxWithConstraints(
-            modifier = modifier.size(252.dp),
-            contentAlignment = Alignment.Center
+            .fillMaxSize()
+            .background(backgroundColor)
+            .padding(16.dp)
+    ) {
+        Text(
+            text = "POTCH DATA JOURNAL",
+            color = Color.White,
+            fontSize = 22.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(vertical = 16.dp)
+        )
+
+        LazyColumn(
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            val width = constraints.maxWidth.toFloat()
-            val strokeWidthPx = with(density) { strokeWidth.toPx() }
+            // 1. Weekly Summary Card
+            item {
+                WeeklySummaryCard(cardColor, accentColor)
+            }
 
-            // ✅ 1. 조작 가능한 실제 가로 길이 및 마진 계산
-            // 트랙의 두께 절반 지점부터 반대쪽 두께 절반 지점까지를 100% 범위로 잡습니다.
-            val sideMarginPx = strokeWidthPx / 2
-            val usableWidth = width - (2 * sideMarginPx)
+            // 2. Sleep Chart Card
+            item {
+                SleepChartCard(cardColor, accentColor)
+            }
 
-            // ✅ 2. 트랙 중앙선 반지름 계산 (손잡이 정렬용)
-            val centerRadius = (width - strokeWidthPx) / 2f
-            val centerOffset = Offset(width / 2, width / 2)
-
-            Canvas(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .pointerInput(Unit) {
-                        detectDragGestures { change, _ ->
-                            // ✅ 3. x축 변화값만 사용하여 비율 계산
-                            val touchX = change.position.x
-                            val normalized =
-                                ((touchX - sideMarginPx) / usableWidth).coerceIn(0f, 1f)
-                            onValueChange(normalized)
-                        }
-                    }
-            ) {
-                // A. 배경 트랙
-                drawArc(
-                    color = Color(0xFF050C16).copy(alpha = 0.1f),
-                    startAngle = 180f,
-                    sweepAngle = 180f,
-                    useCenter = false,
-                    topLeft = Offset(sideMarginPx, sideMarginPx),
-                    size = Size(centerRadius * 2, centerRadius * 2),
-                    style = Stroke(width = strokeWidthPx, cap = StrokeCap.Round)
-                )
-
-                // B. 활성 트랙 (애니메이션 없이 즉각 반응)
-                drawArc(
-                    brush = sliderGradient,
-                    startAngle = 180f,
-                    sweepAngle = 180f * value,
-                    useCenter = false,
-                    topLeft = Offset(sideMarginPx, sideMarginPx),
-                    size = Size(centerRadius * 2, centerRadius * 2),
-                    style = Stroke(width = strokeWidthPx, cap = StrokeCap.Round)
-                )
-
-                // C. ✅ 손잡이 좌표: 중앙선 반지름(centerRadius)을 기준으로 계산
-                val thumbAngle = Math.toRadians(180.0 + (180.0 * value))
-                val thumbX = centerOffset.x + centerRadius * kotlin.math.cos(thumbAngle).toFloat()
-                val thumbY = centerOffset.y + centerRadius * kotlin.math.sin(thumbAngle).toFloat()
-
-                // 손잡이 그림자
-                drawIntoCanvas { canvas ->
-                    val shadowPaint = Paint().asFrameworkPaint().apply {
-                        color = Color.Black.copy(alpha = 0.3f).toArgb()
-                        maskFilter = BlurMaskFilter(8.dp.toPx(), BlurMaskFilter.Blur.NORMAL)
-                    }
-                    canvas.nativeCanvas.drawCircle(thumbX, thumbY, 14.dp.toPx(), shadowPaint)
-                }
-
-                // 손잡이 본체
-                drawCircle(
+            // 3. Data Log Section
+            item {
+                Text(
+                    text = "DATA LOG",
                     color = Color.White,
-                    radius = 12.dp.toPx(),
-                    center = Offset(thumbX, thumbY)
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(top = 8.dp)
                 )
             }
 
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 50.dp, start = 5.dp, end = 5.dp),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ){
-                Text(
-                    text = "-",
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        color = Color(0xFF1C447C),
-                        fontSize = 25.sp
-                    )
-                )
-
-                Text(
-                    text = "+",
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        color = Color(0xFF1C447C),
-                        fontSize = 25.sp
-                    )
-                )
-            }
-
-
-
-            // 5. 중앙 텍스트 (0 ~ 100점)
-            Row(
-                verticalAlignment = Alignment.Bottom) {
-                Text(
-                    modifier = Modifier.alignByBaseline(),
-                    text = "${(value * 100).toInt()}",
-                    style = MaterialTheme.typography.bodyLarge.copy(
-                        fontSize = 50.sp,
-                        color = Color.Black,
-                    ),
-
-                )
-                Text(
-                    modifier = Modifier.alignByBaseline(),
-                    text = "점",
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        color = Color.Black,
-                        fontSize = 25.sp,
-
-                    ))
+            items(dummyLogs) { log ->
+                DataLogItem(log, cardColor, accentColor)
             }
         }
-        // 4. 하단 광원 효과 (Glow)
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .height(60.dp)
-                .blur(10.dp)
-                .background(
-                    brush = Brush.verticalGradient(
-                        colors = listOf(Color.Transparent, glowColor),
-                    )
-                )
-        )
     }
-
-
 }
 
 @Composable
-fun GlassCard(
-    modifier: Modifier = Modifier,
-    content: @Composable () -> Unit
-) {
-    val backgroundColor = Color.White.copy(alpha = 0.1f)
-    val borderColor = Color.White.copy(alpha = 0.2f)
-
-    Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(24.dp)) // 카드 모양
+fun WeeklySummaryCard(backgroundColor: Color, accentColor: Color) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = backgroundColor),
+        shape = RoundedCornerShape(20.dp),
+        modifier = Modifier.fillMaxWidth()
     ) {
-        // [Layer 1] 배경 블러 & 그라데이션
-        Box(
-            modifier = Modifier
-                .matchParentSize()
-                .blur(30.dp) // 유리 뒤를 흐리게
-                .background(
-                    brush = Brush.verticalGradient(
-                        colors = listOf(
-                            Color.White.copy(alpha = 0.15f), // 위쪽 하이라이트
-                            Color.White.copy(alpha = 0.05f)  // 아래쪽 그림자
-                        )
-                    )
-                )
-                .border(
-                    width = 1.dp,
-                    brush = Brush.verticalGradient(
-                        colors = listOf(
-                            Color.White.copy(alpha = 0.4f), // 테두리 위쪽 (빛남)
-                            Color.Transparent,             // 테두리 중간 (투명)
-                            Color.White.copy(alpha = 0.1f)  // 테두리 아래쪽 (은은함)
-                        )
-                    ),
-                    shape = RoundedCornerShape(24.dp)
-                )
-        )
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text("JAN 23 - JAN 29", color = Color.Gray, fontSize = 12.sp)
+            Spacer(modifier = Modifier.height(16.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceAround
+            ) {
+                SummaryItem(Icons.Default.NightsStay, "avg. sleep", "8h 12m", accentColor)
+                SummaryItem(Icons.Default.DeviceThermostat, "avg. temp", "36.5°C", Color.Magenta)
+                SummaryItem(Icons.Default.BatteryFull, "avg. battery", "92%", Color.Green)
+            }
+        }
+    }
+}
 
-        // [Layer 2] 실제 내용물 (선명함 유지)
-        Box(modifier = Modifier.padding(24.dp)) {
-            content()
+@Composable
+fun SummaryItem(icon: ImageVector, label: String, value: String, iconColor: Color) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Icon(icon, contentDescription = null, tint = iconColor, modifier = Modifier.size(24.dp))
+        Text(label, color = Color.Gray, fontSize = 10.sp)
+        Text(value, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+fun SleepChartCard(backgroundColor: Color, accentColor: Color) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = backgroundColor),
+        shape = RoundedCornerShape(20.dp),
+        modifier = Modifier.fillMaxWidth().height(200.dp)
+    ) {
+        Box(modifier = Modifier.fillMaxSize().padding(16.dp), contentAlignment = Alignment.Center) {
+            // 차트 로직은 복잡하므로 텍스트로 대체하거나 간단한 박스로 표현 가능
+            Text("Sleep Trend Chart (Bar)", color = Color.Gray)
+            // 여기에 나중에 Canvas나 Chart Library를 붙이시면 됩니다.
+        }
+    }
+}
+
+@Composable
+fun DataLogItem(log: PotchLog, backgroundColor: Color, accentColor: Color) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = backgroundColor),
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp).fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column {
+                Text(log.date, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Text(log.day, color = Color.Gray, fontSize = 10.sp)
+            }
+
+            Text(log.sleepTime, color = Color.White, fontSize = 14.sp)
+
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("${log.score}", color = accentColor, fontSize = 18.sp, fontWeight = FontWeight.Black)
+                Text("SCORE", color = Color.Gray, fontSize = 8.sp)
+            }
+
+            Column {
+                Text("TEMP", color = Color.Gray, fontSize = 9.sp)
+                Text(log.temp, color = Color.White, fontSize = 12.sp)
+            }
+
+            Column {
+                Text("BATTERY", color = Color.Gray, fontSize = 9.sp)
+                Text(log.battery, color = Color.White, fontSize = 12.sp)
+            }
         }
     }
 }
