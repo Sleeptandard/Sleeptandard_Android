@@ -34,6 +34,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.leejang.sleeptandard.Potch.PacketErrorLog
 import com.leejang.sleeptandard.Potch.PotchBleState
 import com.leejang.sleeptandard.Potch.PotchBleViewModel
 import kotlin.math.abs
@@ -128,7 +129,7 @@ fun ExperimentScreen(
 
         DeveloperCard(
             timestamp = sensorData?.timestamp,
-            packetLossCount = processorState.packetLossCount,
+            packetLossCount = processorState.crcErrorCount,
             sequenceErrorCount = processorState.missingSequenceErrors,
             batteryVoltage = sensorData?.batteryVoltage,
             batteryRaw = sensorData?.batteryRaw,
@@ -139,7 +140,23 @@ fun ExperimentScreen(
             deviceName = bleState.deviceName,
             mtu = bleState.mtu,
             onReset = { viewModel.resetProcessor() },
-            bleState = bleState
+            bleState = bleState,
+
+            totalMiniPackets = processorState.totalMiniPackets,
+            validMiniPackets = processorState.validMiniPackets,
+            damagedPacketCount = processorState.damagedPacketCount,
+            estimatedLostPacketCount = processorState.estimatedLostPacketCount,
+            parsedSuperFrameCount = processorState.parsedSuperFrameCount,
+            lastFragCounter = processorState.lastFragCounter,
+            expectedFragCounter = processorState.expectedFragCounter,
+            recentPacketErrors = processorState.recentPacketErrors,
+
+            onTestLengthError = { viewModel.debugTestLengthError() },
+            onTestMiniHeaderError = { viewModel.debugTestMiniHeaderError() },
+            onTestSequenceLoss = { viewModel.debugTestSequenceLoss() },
+            onTestSuperHeaderError = { viewModel.debugTestSuperHeaderError() },
+            onTestCrcError = { viewModel.debugTestCrcError() },
+            onTestCounterWrapAround = { viewModel.debugTestCounterWrapAround() }
         )
 
         Button(
@@ -249,7 +266,22 @@ private fun DeveloperCard(
     deviceName: String?,
     mtu: Int,
     onReset: () -> Unit,
-    bleState: PotchBleState
+    bleState: PotchBleState,
+    totalMiniPackets: Int,
+    validMiniPackets: Int,
+    damagedPacketCount: Int,
+    estimatedLostPacketCount: Int,
+    parsedSuperFrameCount: Int,
+    lastFragCounter: Int?,
+    expectedFragCounter: Int?,
+    recentPacketErrors: List<PacketErrorLog>,
+
+    onTestLengthError: () -> Unit,
+    onTestMiniHeaderError: () -> Unit,
+    onTestSequenceLoss: () -> Unit,
+    onTestSuperHeaderError: () -> Unit,
+    onTestCrcError: () -> Unit,
+    onTestCounterWrapAround: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -321,6 +353,33 @@ private fun DeveloperCard(
             value = "${sequenceErrorCount}건",
             valueColor = if (sequenceErrorCount == 0) Color(0xFF3DFF78) else Color(0xFFFF4B55)
         )
+        DevRow(
+            label = "수신 Mini Packet",
+            value = "$validMiniPackets / $totalMiniPackets"
+        )
+
+        DevRow(
+            label = "완성 Super Frame",
+            value = "${parsedSuperFrameCount}개"
+        )
+
+        DevRow(
+            label = "손상 패킷",
+            value = "${damagedPacketCount}건",
+            valueColor = if (damagedPacketCount == 0) Color(0xFF3DFF78) else Color(0xFFFF4B55)
+        )
+
+        DevRow(
+            label = "손실 추정 Packet",
+            value = "${estimatedLostPacketCount}개",
+            valueColor = if (estimatedLostPacketCount == 0) Color(0xFF3DFF78) else Color(0xFFFF4B55)
+        )
+
+        DevRow(
+            label = "최근 Counter",
+            value = "${lastFragCounter ?: "-"} → 다음 ${expectedFragCounter ?: "-"}"
+        )
+
 
         DevRow(
             label = "배터리 전압",
@@ -395,6 +454,74 @@ private fun DeveloperCard(
                 value = bleState.lastSavedLogPath
             )
         }
+        Spacer(Modifier.height(14.dp))
+        DividerLine()
+        Spacer(Modifier.height(12.dp))
+
+        Text(
+            text = "최근 패킷 이상 내역",
+            color = Color(0xFFFF922E),
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Bold
+        )
+
+        Spacer(Modifier.height(8.dp))
+
+        if (recentPacketErrors.isEmpty()) {
+            Text(
+                text = "감지된 손상/손실 패킷이 없습니다.",
+                color = Color.White.copy(alpha = 0.65f),
+                fontSize = 14.sp
+            )
+        } else {
+            recentPacketErrors.forEach { error ->
+                PacketErrorRow(error)
+            }
+        }
+
+
+        Spacer(Modifier.height(14.dp))
+        DividerLine()
+        Spacer(Modifier.height(12.dp))
+
+        Text(
+            text = "패킷 검증 테스트",
+            color = Color(0xFFFF922E),
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Bold
+        )
+
+        Spacer(Modifier.height(10.dp))
+
+        PacketTestButton(
+            text = "길이 오류 테스트",
+            onClick = { onTestLengthError() }
+        )
+
+        PacketTestButton(
+            text = "Mini Header 오류 테스트",
+            onClick = { onTestMiniHeaderError() }
+        )
+
+        PacketTestButton(
+            text = "Sequence 손실 테스트",
+            onClick = { onTestSequenceLoss() }
+        )
+
+        PacketTestButton(
+            text = "Super Header 오류 테스트",
+            onClick = { onTestSuperHeaderError() }
+        )
+
+        PacketTestButton(
+            text = "CRC 오류 테스트",
+            onClick = { onTestCrcError() }
+        )
+
+        PacketTestButton(
+            text = "Counter 4095→0 테스트",
+            onClick = { onTestCounterWrapAround() }
+        )
 
     }
 }
@@ -595,4 +722,78 @@ private fun formatMillis(ms: Long): String {
     val seconds = totalSeconds % 60
 
     return "%02d:%02d:%02d".format(hours, minutes, seconds)
+}
+
+@Composable
+private fun PacketErrorRow(
+    error: PacketErrorLog
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 5.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color.White.copy(alpha = 0.05f))
+            .padding(horizontal = 10.dp, vertical = 8.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = error.type,
+                color = when (error.type) {
+                    "CRC" -> Color(0xFFFF4B55)
+                    "SEQUENCE" -> Color(0xFFFFD166)
+                    "LENGTH" -> Color(0xFFFF922E)
+                    else -> Color(0xFF4CD3FF)
+                },
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace
+            )
+
+            Spacer(Modifier.weight(1f))
+
+            Text(
+                text = error.fragCounter?.let { "counter=$it" } ?: "",
+                color = Color.White.copy(alpha = 0.45f),
+                fontSize = 12.sp,
+                fontFamily = FontFamily.Monospace
+            )
+        }
+
+        Spacer(Modifier.height(4.dp))
+
+        Text(
+            text = error.message,
+            color = Color.White.copy(alpha = 0.75f),
+            fontSize = 12.sp,
+            fontFamily = FontFamily.Monospace
+        )
+    }
+}
+
+@Composable
+private fun PacketTestButton(
+    text: String,
+    onClick: () -> Unit
+) {
+    Button(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(42.dp)
+            .padding(vertical = 3.dp),
+        shape = RoundedCornerShape(14.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = Color.White.copy(alpha = 0.08f),
+            contentColor = Color.White
+        ),
+        onClick = onClick
+    ) {
+        Text(
+            text = text,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.SemiBold
+        )
+    }
 }

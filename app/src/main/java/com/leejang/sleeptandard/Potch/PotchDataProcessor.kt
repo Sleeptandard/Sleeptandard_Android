@@ -1,6 +1,5 @@
 package com.leejang.sleeptandard.Potch
 
-import com.leejang.sleeptandard.Potch.SensorData
 import kotlinx.coroutines.flow.MutableStateFlow
 
 import kotlinx.coroutines.flow.StateFlow
@@ -12,6 +11,14 @@ import kotlinx.coroutines.flow.update
  * BLE 통신으로 들어온 raw byte를 파싱한 결과와,
  * 패킷 오류 정보, 마지막 로그 등을 UI에서 볼 수 있게 저장한다.
  */
+
+data class PacketErrorLog(
+    val type: String,
+    val message: String,
+    val fragCounter: Int? = null,
+    val timestampMs: Long = System.currentTimeMillis()
+)
+
 data class DataProcessorState(
     // 마지막으로 정상 파싱된 센서 데이터
     // 아직 수신된 데이터가 없거나 파싱 전이면 null
@@ -19,7 +26,7 @@ data class DataProcessorState(
 
     // CRC 검증 실패 횟수
     // 패킷 데이터가 손상되었을 가능성을 확인하기 위한 누적 카운트
-    val packetLossCount: Int = 0,
+    val crcErrorCount: Int = 0,
 
     // Fragment 순서가 예상과 다르게 들어온 횟수
     // BLE notification 누락 또는 순서 꼬임을 감지하기 위한 누적 카운트
@@ -27,7 +34,31 @@ data class DataProcessorState(
 
     // 마지막 처리 상태를 사람이 읽을 수 있게 저장하는 로그 메시지
     // 예: "CRC OK!", "Length Drop", "Seq Drop" 등
-    val lastLog: String = "No data yet"
+    val lastLog: String = "No data yet",
+
+    // 전체 수신된 BLE mini packet 수
+    val totalMiniPackets: Int = 0,
+
+    // 정상 형식으로 처리된 mini packet 수
+    val validMiniPackets: Int = 0,
+
+    // 손상된 mini packet 또는 super frame 수
+    val damagedPacketCount: Int = 0,
+
+    // counter 차이로 추정한 손실 mini packet 수
+    val estimatedLostPacketCount: Int = 0,
+
+    // 완성되어 파싱된 super frame 수
+    val parsedSuperFrameCount: Int = 0,
+
+    // 최근 패킷 오류 내역
+    val recentPacketErrors: List<PacketErrorLog> = emptyList(),
+
+    // 마지막으로 수신한 fragment counter
+    val lastFragCounter: Int? = null,
+
+    // 다음에 기대하는 fragment counter
+    val expectedFragCounter: Int? = null
 )
 /**
  * Potch BLE 기기에서 들어오는 raw byte 데이터를 실제 센서 데이터로 변환하는 클래스.
@@ -118,123 +149,114 @@ class PotchDataProcessor {
      */
     @Synchronized
     fun processIncomingData(data: ByteArray) {
-        // 마지막 수신 길이를 로그로 기록
         updateLog("Rcv length: ${data.size}")
 
-        // Potch protocol상 fragment는 반드시 204 bytes여야 한다.
-        // 길이가 다르면 잘못된 notification으로 보고 버린다.
+        _state.update {
+            it.copy(totalMiniPackets = it.totalMiniPackets + 1)
+        }
+
         if (data.size != fragmentSize) {
-            updateLog("Length Drop: expected $fragmentSize, got ${data.size}")
+            val msg = "Length Drop: expected $fragmentSize, got ${data.size}"
+
+            _state.update {
+                it.copy(damagedPacketCount = it.damagedPacketCount + 1)
+            }
+
+            addPacketError(
+                type = "LENGTH",
+                message = msg
+            )
             return
         }
 
-        /**
-         * 1. Mini Header Parsing
-         *
-         * data[0], data[1] 두 바이트가 mini header.
-         * Swift 코드와 동일하게 big endian으로 해석한다.
-         *
-         * 예:
-         * data[0] = 0x50
-         * data[1] = 0x01
-         * miniHeader = 0x5001
-         */
         val miniHeader =
             ((data[0].toInt() and 0xFF) shl 8) or
                     (data[1].toInt() and 0xFF)
 
-        /**
-         * miniHeader 상위 4비트.
-         *
-         * Potch protocol에서는 이 값이 0x5여야 정상 fragment로 판단한다.
-         */
         val headerPrefix = (miniHeader shr 12) and 0xF
 
-        // headerPrefix가 0x5가 아니면 잘못된 fragment이므로 buffer를 비우고 중단
         if (headerPrefix != 0x5) {
-            updateLog("Header Prefix Drop: $headerPrefix")
+            val msg = "Header Prefix Drop: expected 0x5, got 0x${headerPrefix.toString(16)}"
+
+            _state.update {
+                it.copy(damagedPacketCount = it.damagedPacketCount + 1)
+            }
+
+            addPacketError(
+                type = "MINI_HEADER",
+                message = msg
+            )
+
             buffer.clear()
             return
         }
 
-        /**
-         * miniHeader 하위 12비트.
-         *
-         * Fragment 순서를 나타내는 counter 값이다.
-         * 0x000 ~ 0xFFF 범위를 순환한다.
-         */
         val fragCounter = miniHeader and 0x0FFF
 
-        /**
-         * 2. Sequence Validation
-         *
-         * 이전 fragment를 기준으로 다음에 와야 할 counter와
-         * 실제 들어온 counter를 비교한다.
-         */
         expectedFragCounter?.let { expected ->
             if (fragCounter != expected) {
-                // 예상한 counter와 다르면 fragment가 누락되었거나 순서가 꼬인 것
+                val distance = counterDistance(expected, fragCounter)
+
+                // expected 다음에 actual이 왔다면 distance만큼 counter가 건너뛴 것.
+                // 예: expected=10, actual=13이면 10,11,12가 안 왔다고 보고 3개 손실 추정.
+                val lostCount = if (distance in 1..4095) distance else 1
+
+                val msg = "Seq Drop. Exp: $expected, Got: $fragCounter, Lost≈$lostCount"
+
                 _state.update {
                     it.copy(
                         missingSequenceErrors = it.missingSequenceErrors + 1,
-                        lastLog = "Seq Drop. Exp: $expected, Got: $fragCounter"
+                        estimatedLostPacketCount = it.estimatedLostPacketCount + lostCount
                     )
                 }
 
-                // 순서가 깨졌으므로 지금까지 모아둔 payload는 신뢰할 수 없어 비운다.
+                addPacketError(
+                    type = "SEQUENCE",
+                    message = msg,
+                    fragCounter = fragCounter
+                )
+
                 buffer.clear()
             }
         }
 
-        /**
-         * 다음 fragment에서 기대할 counter 값 갱신.
-         *
-         * 12-bit counter이므로 0xFFF 다음에는 0x000으로 돌아가야 한다.
-         * 그래서 & 0x0FFF를 적용한다.
-         */
         expectedFragCounter = (fragCounter + 1) and 0x0FFF
 
-        /**
-         * 3. Append Payload
-         *
-         * 앞의 2 bytes는 mini header이므로 제외하고,
-         * 나머지 202 bytes만 실제 Super Frame payload로 사용한다.
-         */
+        _state.update {
+            it.copy(
+                validMiniPackets = it.validMiniPackets + 1,
+                lastFragCounter = fragCounter,
+                expectedFragCounter = expectedFragCounter
+            )
+        }
+
         val payload = data.copyOfRange(2, data.size)
 
-        /**
-         * Super Frame 동기화 확인.
-         *
-         * buffer가 비어 있다는 것은 새 Super Frame의 시작을 기다리는 상태다.
-         * 이때 첫 payload의 시작이 0xAA 0xAA여야 정상 프레임 시작으로 인정한다.
-         */
         if (buffer.isEmpty()) {
             if (
                 payload.size < 2 ||
                 (payload[0].toInt() and 0xFF) != 0xAA ||
                 (payload[1].toInt() and 0xFF) != 0xAA
             ) {
-                // 아직 Super Frame 시작점을 못 찾은 상태
-                updateLog("Syncing... waiting for start of frame")
+                val msg = "Syncing... waiting for Super Header 0xAAAA"
+
+                addPacketError(
+                    type = "SYNC",
+                    message = msg,
+                    fragCounter = fragCounter
+                )
+
                 return
             }
         }
 
-        // 정상 payload라면 buffer 뒤에 누적한다.
         payload.forEach { buffer.addLast(it) }
 
-        /**
-         * 4. If buffer is full, parse the Super Frame
-         *
-         * buffer에 1212 bytes 이상 쌓이면 하나의 Super Frame이 완성된 것이다.
-         */
         if (buffer.size >= superFrameSize) {
-            // buffer 앞에서부터 1212 bytes를 꺼내 Super Frame으로 만든다.
             val superFrame = ByteArray(superFrameSize) {
                 buffer.removeFirst()
             }
 
-            // 완성된 Super Frame 파싱
             parseSuperFrame(superFrame)
         }
     }
@@ -279,14 +301,20 @@ class PotchDataProcessor {
             (data[0].toInt() and 0xFF) != 0xAA ||
             (data[1].toInt() and 0xFF) != 0xAA
         ) {
-            updateLog(
-                "Super Header Drop: 0x%02X%02X".format(
-                    data[0].toInt() and 0xFF,
-                    data[1].toInt() and 0xFF
-                )
+            val msg = "Super Header Drop: 0x%02X%02X".format(
+                data[0].toInt() and 0xFF,
+                data[1].toInt() and 0xFF
             )
 
-            // 프레임 시작이 잘못되었으므로 동기화를 다시 맞추기 위해 buffer를 비운다.
+            _state.update {
+                it.copy(damagedPacketCount = it.damagedPacketCount + 1)
+            }
+
+            addPacketError(
+                type = "SUPER_HEADER",
+                message = msg
+            )
+
             buffer.clear()
             return
         }
@@ -355,13 +383,18 @@ class PotchDataProcessor {
 
             _state.update {
                 it.copy(
-                    packetLossCount = it.packetLossCount + 1,
+                    crcErrorCount = it.crcErrorCount + 1,
+                    damagedPacketCount = it.damagedPacketCount + 1,
                     lastLog = logMsg
                 )
             }
 
-            // Swift 코드처럼 CRC가 틀려도 일단 데이터는 표시하도록 return 하지 않음
-            // 안정성을 우선하려면 여기에서 return 하도록 바꿀 수도 있음.
+            addPacketError(
+                type = "CRC",
+                message = logMsg
+            )
+
+            // 기존 Swift 코드처럼 CRC가 틀려도 데이터는 표시하도록 return 하지 않음
         } else {
             updateLog("CRC OK!")
         }
@@ -392,7 +425,10 @@ class PotchDataProcessor {
 
         // 마지막 파싱 결과를 상태에 반영해서 UI가 갱신되도록 한다.
         _state.update {
-            it.copy(lastParsedData = parsed)
+            it.copy(
+                lastParsedData = parsed,
+                parsedSuperFrameCount = it.parsedSuperFrameCount + 1
+            )
         }
     }
 
@@ -453,4 +489,190 @@ class PotchDataProcessor {
             it.copy(lastLog = message)
         }
     }
+
+    private fun addPacketError(
+        type: String,
+        message: String,
+        fragCounter: Int? = null
+    ) {
+        _state.update { current ->
+            val updatedErrors = listOf(
+                PacketErrorLog(
+                    type = type,
+                    message = message,
+                    fragCounter = fragCounter
+                )
+            ) + current.recentPacketErrors
+
+            current.copy(
+                lastLog = message,
+                recentPacketErrors = updatedErrors.take(8)
+            )
+        }
+    }
+
+    private fun counterDistance(expected: Int, actual: Int): Int {
+        // counter는 12bit라서 0~4095 순환
+        return (actual - expected) and 0x0FFF
+    }
+
+    /**
+     * 테스트용 정상 Mini Packet 생성 함수.
+     *
+     * 실제 BLE에서 들어온 것처럼 204 bytes packet을 만든다.
+     * - 앞 2 bytes: Mini Header
+     * - 나머지 202 bytes: Payload
+     */
+    private fun makeDebugMiniPacket(
+        counter: Int,
+        prefix: Int = 0x5,
+        payloadStartWithSuperHeader: Boolean = true
+    ): ByteArray {
+        val packet = ByteArray(fragmentSize) { 0x00 }
+
+        val miniHeader = ((prefix and 0xF) shl 12) or (counter and 0x0FFF)
+
+        packet[0] = ((miniHeader shr 8) and 0xFF).toByte()
+        packet[1] = (miniHeader and 0xFF).toByte()
+
+        if (payloadStartWithSuperHeader) {
+            packet[2] = 0xAA.toByte()
+            packet[3] = 0xAA.toByte()
+        }
+
+        return packet
+    }
+
+    /**
+     * 1. 길이 오류 테스트.
+     *
+     * Mini Packet은 반드시 204 bytes여야 하는데,
+     * 일부러 197 bytes짜리 packet을 넣어서 Length Drop이 뜨는지 확인한다.
+     */
+    fun debugTestLengthError() {
+        val wrongLengthPacket = ByteArray(197) { 0x00 }
+        processIncomingData(wrongLengthPacket)
+    }
+
+    /**
+     * 2. Mini Header prefix 오류 테스트.
+     *
+     * Mini Header 상위 4bit는 반드시 0x5여야 한다.
+     * 일부러 0x3으로 만들어 Header Prefix Drop이 뜨는지 확인한다.
+     */
+    fun debugTestMiniHeaderError() {
+        val wrongHeaderPacket = makeDebugMiniPacket(
+            counter = 1,
+            prefix = 0x3,
+            payloadStartWithSuperHeader = true
+        )
+
+        processIncomingData(wrongHeaderPacket)
+    }
+
+    /**
+     * 3. Sequence 손실 테스트.
+     *
+     * 다음에 counter 10이 와야 하는 상황을 만든 뒤,
+     * 실제로는 counter 12를 넣어서 10, 11번 packet이 손실된 것처럼 만든다.
+     */
+    fun debugTestSequenceLoss() {
+        buffer.clear()
+        expectedFragCounter = 10
+
+        val skippedPacket = makeDebugMiniPacket(
+            counter = 12,
+            prefix = 0x5,
+            payloadStartWithSuperHeader = true
+        )
+
+        processIncomingData(skippedPacket)
+    }
+
+    /**
+     * 4. Super Header 오류 테스트.
+     *
+     * 새 Super Frame의 시작 payload는 0xAA 0xAA여야 한다.
+     * 일부러 0xBB 0xBB로 시작하게 해서 Sync/Super Header 오류를 확인한다.
+     */
+    fun debugTestSuperHeaderError() {
+        buffer.clear()
+        expectedFragCounter = null
+
+        val packet = makeDebugMiniPacket(
+            counter = 20,
+            prefix = 0x5,
+            payloadStartWithSuperHeader = false
+        )
+
+        packet[2] = 0xBB.toByte()
+        packet[3] = 0xBB.toByte()
+
+        processIncomingData(packet)
+    }
+
+    /**
+     * 5. CRC 오류 테스트.
+     *
+     * 1212 bytes짜리 Super Frame을 직접 만들고,
+     * CRC 값을 일부러 틀리게 넣어서 CRC 오류가 뜨는지 확인한다.
+     */
+    fun debugTestCrcError() {
+        buffer.clear()
+        expectedFragCounter = null
+
+        val superFrame = ByteArray(superFrameSize) { 0x00 }
+
+        // Super Header
+        superFrame[0] = 0xAA.toByte()
+        superFrame[1] = 0xAA.toByte()
+
+        // NTC raw 예시값
+        superFrame[2] = 0x05
+        superFrame[3] = 0xDC.toByte()
+
+        // Timestamp 예시값, little endian
+        superFrame[4] = 0x01
+        superFrame[5] = 0x02
+        superFrame[6] = 0x03
+        superFrame[7] = 0x04
+
+        // Battery raw 예시값
+        superFrame[8] = 0x0A
+        superFrame[9] = 0xAF.toByte()
+
+        // CRC를 일부러 틀리게 넣음
+        superFrame[10] = 0x12
+        superFrame[11] = 0x34
+
+        parseSuperFrame(superFrame)
+    }
+
+    /**
+     * 6. Counter wrap-around 테스트.
+     *
+     * counter는 4095 다음에 0으로 돌아가야 한다.
+     * 4095 → 0 순서가 정상으로 처리되는지 확인한다.
+     */
+    fun debugTestCounterWrapAround() {
+        reset()
+
+        val packet4095 = makeDebugMiniPacket(
+            counter = 4095,
+            prefix = 0x5,
+            payloadStartWithSuperHeader = true
+        )
+
+        val packet0 = makeDebugMiniPacket(
+            counter = 0,
+            prefix = 0x5,
+            payloadStartWithSuperHeader = false
+        )
+
+        processIncomingData(packet4095)
+        processIncomingData(packet0)
+
+        updateLog("DEBUG: Counter wrap-around test completed. 4095 → 0")
+    }
+
 }
