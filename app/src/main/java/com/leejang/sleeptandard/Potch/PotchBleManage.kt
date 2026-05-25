@@ -15,6 +15,8 @@ import android.bluetooth.le.ScanResult
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -112,6 +114,24 @@ class PotchBleManager(
          */
         private const val TARGET_MTU = 247
     }
+
+    // 메인 스레드에서 재연결 딜레이 작업을 실행하기 위한 Handler
+    private val reconnectHandler = Handler(Looper.getMainLooper())
+
+    // 사용자가 직접 연결 해제를 눌렀는지 구분하는 플래그
+    private var manualDisconnect = false
+
+    // 현재 재연결 시도 중인지 여부
+    private var isReconnecting = false
+
+    // 재연결 시도 횟수
+    private var reconnectAttempt = 0
+
+    // 최대 재연결 시도 횟수
+    private val maxReconnectAttempts = 5
+
+    // 재연결 시도 간격
+    private val reconnectDelayMs = 1000L
 
     /**
      * Activity context 대신 applicationContext를 저장한다.
@@ -279,6 +299,11 @@ class PotchBleManager(
                     // 연결된 기기 이름을 가져온다.
                     val name = getDeviceName(gatt.device)
 
+                    manualDisconnect = false
+                    isReconnecting = false
+                    reconnectAttempt = 0
+                    reconnectHandler.removeCallbacksAndMessages(null)
+
                     // 팟치 연결 성공 시 raw data 로깅 시작
                     dataLogger.start()
 
@@ -292,6 +317,8 @@ class PotchBleManager(
                             lastLog = "Connected to ${name ?: TARGET_NAME}"
                         )
                     }
+
+                    gatt.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH)
 
                     // Potch는 204 bytes notification을 보내므로 기본 MTU 23으로는 부족하다.
                     // 먼저 MTU를 247로 요청하고, MTU 변경이 완료되면 서비스 탐색을 시작한다.
@@ -308,20 +335,27 @@ class PotchBleManager(
                     // 연결이 끊어진 경우
                     log("Disconnected. Reconnecting...")
 
+                    val name = getDeviceName(gatt.device)
+
                     // UI 상태를 "연결 안 됨"으로 갱신한다.
                     _state.update {
                         it.copy(
                             isConnected = false,
-                            deviceName = null,
-                            lastLog = "Disconnected. Reconnecting..."
+                            deviceName = name,
+                            lastLog = if (manualDisconnect) {
+                                "Disconnected by user"
+                            } else {
+                                "Disconnected unexpectedly. Reconnecting soon..."
+                            }
                         )
                     }
 
                     // 기존 GATT 자원 정리
                     closeGatt()
 
-                    // 자동 재연결을 위해 다시 스캔 시작
-                    startScan()
+                    if (!manualDisconnect) {
+                        scheduleReconnect()
+                    }
                 }
             }
         }
@@ -456,6 +490,8 @@ class PotchBleManager(
      */
     @SuppressLint("MissingPermission")
     fun startScan() {
+        manualDisconnect = false
+
         val adapter = bluetoothAdapter
 
         // 블루투스 기능이 없는 기기이거나 adapter를 얻지 못한 경우
@@ -565,25 +601,19 @@ class PotchBleManager(
     fun disconnect() {
         if (!hasBlePermissions()) return
 
-        // 연결 해제 요청
+        manualDisconnect = true
+        reconnectHandler.removeCallbacksAndMessages(null)
+        isReconnecting = false
+        reconnectAttempt = 0
+
         gatt?.disconnect()
-
-        // GATT 자원 정리
         closeGatt()
-
-        // 연결 해제 시 지금까지 로깅한 raw data를 파일로 저장
-        val savedPath = dataLogger.stopAndSave()
 
         _state.update {
             it.copy(
                 isConnected = false,
                 deviceName = null,
-                lastSavedLogPath = savedPath,
-                lastLog = if (savedPath != null) {
-                    "Disconnected. Log saved: $savedPath"
-                } else {
-                    "Disconnected. No log data to save."
-                }
+                lastLog = "Disconnected by user"
             )
         }
     }
@@ -596,6 +626,8 @@ class PotchBleManager(
      */
     @SuppressLint("MissingPermission")
     fun close() {
+        manualDisconnect = true
+        reconnectHandler.removeCallbacksAndMessages(null)
         stopScan()
         disconnect()
     }
@@ -724,5 +756,57 @@ class PotchBleManager(
         _state.update {
             it.copy(lastError = message, lastLog = message)
         }
+    }
+
+
+    @SuppressLint("MissingPermission")
+    private fun scheduleReconnect() {
+        if (!hasBlePermissions()) {
+            error("Missing Bluetooth permissions")
+            return
+        }
+
+        val device = targetDevice
+
+        if (device == null) {
+            log("No target device for reconnect. Start scanning...")
+            startScan()
+            return
+        }
+
+        if (isReconnecting) return
+
+        isReconnecting = true
+
+        reconnectHandler.postDelayed({
+            if (manualDisconnect) {
+                isReconnecting = false
+                return@postDelayed
+            }
+
+            reconnectAttempt++
+
+            _state.update {
+                it.copy(
+                    lastLog = "Reconnecting to ${getDeviceName(device) ?: TARGET_NAME}... ($reconnectAttempt/$maxReconnectAttempts)"
+                )
+            }
+
+            closeGatt()
+
+            gatt = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                device.connectGatt(appContext, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
+            } else {
+                device.connectGatt(appContext, false, gattCallback)
+            }
+
+            isReconnecting = false
+
+            if (reconnectAttempt >= maxReconnectAttempts) {
+                reconnectAttempt = 0
+                log("Reconnect attempts exceeded. Start scanning again...")
+                startScan()
+            }
+        }, reconnectDelayMs)
     }
 }
