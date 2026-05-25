@@ -52,3 +52,6 @@ out/
 
 # Cache
 .cxx/
+
+# local.properties
+local.properties

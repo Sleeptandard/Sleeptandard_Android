@@ -171,4 +171,46 @@ class PotchBleViewModel(
         // BLE 스캔 중지 + 연결 해제 + GATT 자원 정리
         bleManager.close()
     }
+
+    /**
+     * 길이 오류 검증 버튼용 함수.
+     */
+    fun debugTestLengthError() {
+        dataProcessor.debugTestLengthError()
+    }
+
+    /**
+     * Mini Header prefix 오류 검증 버튼용 함수.
+     */
+    fun debugTestMiniHeaderError() {
+        dataProcessor.debugTestMiniHeaderError()
+    }
+
+    /**
+     * Sequence 손실 검증 버튼용 함수.
+     */
+    fun debugTestSequenceLoss() {
+        dataProcessor.debugTestSequenceLoss()
+    }
+
+    /**
+     * Super Header 오류 검증 버튼용 함수.
+     */
+    fun debugTestSuperHeaderError() {
+        dataProcessor.debugTestSuperHeaderError()
+    }
+
+    /**
+     * CRC 오류 검증 버튼용 함수.
+     */
+    fun debugTestCrcError() {
+        dataProcessor.debugTestCrcError()
+    }
+
+    /**
+     * Counter 4095 → 0 순환 검증 버튼용 함수.
+     */
+    fun debugTestCounterWrapAround() {
+        dataProcessor.debugTestCounterWrapAround()
+    }
 }
