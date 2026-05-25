@@ -21,65 +21,61 @@ class PotchDataLogger(
 ) {
     private val appContext = context.applicationContext
 
-    // 로그 저장 여부
     private var isLogging = false
 
-    // 로그 시작 시간
-    private var startTimeMillis: Long = 0L
-
-    // CSV에 들어갈 행들을 임시로 저장
     private val rows = mutableListOf<String>()
 
-    // 마지막으로 저장된 파일 경로
     var lastSavedFilePath: String? = null
         private set
 
-    /**
-     * 로깅 시작.
-     * 팟치 연결 성공 시 호출.
-     */
     fun start() {
         isLogging = true
-        startTimeMillis = System.currentTimeMillis()
         rows.clear()
         lastSavedFilePath = null
 
         rows.add(
             listOf(
-                "elapsed_ms",
-                "system_time_ms",
-                "packet_size",
-                "hex"
+                "phone_time",
+                "timestamp",
+                "super_frame_hex",
+                "complete",
+                "miss_packet_num",
+                "error_log"
             ).joinToString(",")
         )
     }
 
-    /**
-     * BLE notification으로 받은 raw ByteArray를 CSV 한 줄로 저장.
-     */
-    fun logPacket(data: ByteArray) {
+    fun logSuperFrame(
+        phoneTimeMillis: Long,
+        timestamp: Long?,
+        superFrame: ByteArray,
+        complete: String,
+        missPacketNum: String,
+        errorLog: String
+    ) {
         if (!isLogging) return
 
-        val now = System.currentTimeMillis()
-        val elapsed = now - startTimeMillis
-        val hex = data.joinToString(" ") { byte ->
+        val phoneTimeText = SimpleDateFormat(
+            "yyyy-MM-dd HH:mm:ss.SSS",
+            Locale.getDefault()
+        ).format(Date(phoneTimeMillis))
+
+        val hex = superFrame.joinToString(" ") { byte ->
             "%02X".format(byte.toInt() and 0xFF)
         }
 
         val row = listOf(
-            elapsed.toString(),
-            now.toString(),
-            data.size.toString(),
-            "\"$hex\""
+            escapeCsv(phoneTimeText),
+            timestamp?.toString() ?: "",
+            escapeCsv(hex),
+            complete,
+            escapeCsv(missPacketNum),
+            escapeCsv(errorLog)
         ).joinToString(",")
 
         rows.add(row)
     }
 
-    /**
-     * 현재까지 쌓인 로그를 CSV 파일로 저장하고 로깅 종료.
-     * 팟치 연결 해제 시 호출.
-     */
     fun stopAndSave(): String? {
         if (!isLogging && rows.size <= 1) return null
 
@@ -90,7 +86,7 @@ class PotchDataLogger(
             Locale.getDefault()
         ).format(Date())
 
-        val fileName = "potch_raw_log_$timestamp.csv"
+        val fileName = "potch_super_frame_log_$timestamp.csv"
         val csvText = rows.joinToString("\n")
 
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -100,10 +96,6 @@ class PotchDataLogger(
         }
     }
 
-
-    /**
-     * 저장하지 않고 로그 초기화.
-     */
     fun clear() {
         isLogging = false
         rows.clear()
@@ -133,7 +125,9 @@ class PotchDataLogger(
             output.write(csvText.toByteArray())
         }
 
-        return "Download/PotchLogs/$fileName"
+        val path = "Download/PotchLogs/$fileName"
+        lastSavedFilePath = path
+        return path
     }
 
     private fun saveToDownloadsBelowApi29(
@@ -152,6 +146,11 @@ class PotchDataLogger(
         val file = File(potchDir, fileName)
         file.writeText(csvText)
 
+        lastSavedFilePath = file.absolutePath
         return file.absolutePath
+    }
+
+    private fun escapeCsv(value: String): String {
+        return "\"" + value.replace("\"", "\"\"") + "\""
     }
 }

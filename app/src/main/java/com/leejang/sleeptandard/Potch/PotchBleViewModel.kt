@@ -21,6 +21,8 @@ class PotchBleViewModel(
     application: Application
 ) : AndroidViewModel(application) {
 
+    private val dataLogger = PotchDataLogger(application.applicationContext)
+
     /**
      * BLE로 수신한 raw byte 데이터를 실제 센서 데이터로 변환하는 파서.
      *
@@ -35,7 +37,9 @@ class PotchBleViewModel(
      *
      * 등이 dataProcessor.state에 저장된다.
      */
-    val dataProcessor = PotchDataProcessor()
+    val dataProcessor = PotchDataProcessor(
+        dataLogger = dataLogger
+    )
 
     /**
      * Potch BLE 연결을 실제로 담당하는 클래스.
@@ -55,7 +59,8 @@ class PotchBleViewModel(
      */
     private val bleManager = PotchBleManager(
         context = application.applicationContext,
-        dataProcessor = dataProcessor
+        dataProcessor = dataProcessor,
+        dataLogger = dataLogger
     )
 
     /**

@@ -69,7 +69,8 @@ class PotchBleManager(
     context: Context,
 
     // BLE characteristic으로 들어온 raw byte 데이터를 실제 센서 데이터로 파싱하는 클래스
-    private val dataProcessor: PotchDataProcessor
+    private val dataProcessor: PotchDataProcessor,
+    private val dataLogger: PotchDataLogger
 ) {
     companion object {
         /**
@@ -141,7 +142,7 @@ class PotchBleManager(
      */
     private val appContext = context.applicationContext
 
-    private val dataLogger = PotchDataLogger(appContext)
+
 
     /**
      * Android 시스템의 BluetoothManager.
@@ -448,8 +449,6 @@ class PotchBleManager(
                 // 수신된 raw byte 데이터
                 val value = characteristic.value ?: return
 
-                // raw BLE packet 로그 저장
-                dataLogger.logPacket(value)
 
                 // 실제 파싱은 PotchDataProcessor에게 맡긴다.
                 dataProcessor.processIncomingData(value)
@@ -469,8 +468,6 @@ class PotchBleManager(
             // 우리가 구독한 Potch characteristic에서 온 데이터인지 확인
             if (characteristic.uuid == CHAR_UUID) {
 
-                // raw BLE packet 로그 저장
-                dataLogger.logPacket(value)
 
                 // 수신된 raw byte 데이터를 파서로 전달
                 dataProcessor.processIncomingData(value)
@@ -601,6 +598,8 @@ class PotchBleManager(
     fun disconnect() {
         if (!hasBlePermissions()) return
 
+        val savedPath = dataLogger.stopAndSave()
+
         manualDisconnect = true
         reconnectHandler.removeCallbacksAndMessages(null)
         isReconnecting = false
@@ -613,7 +612,12 @@ class PotchBleManager(
             it.copy(
                 isConnected = false,
                 deviceName = null,
-                lastLog = "Disconnected by user"
+                lastSavedLogPath = savedPath,
+                lastLog = if (savedPath != null) {
+                    "Disconnected. Super frame log saved: $savedPath"
+                } else {
+                    "Disconnected. No super frame log data to save."
+                }
             )
         }
     }

@@ -74,7 +74,12 @@ data class DataProcessorState(
  * 5. 1212 bytes Super Frame이 완성되면 파싱한다.
  * 6. NTC, timestamp, battery, IMU, CRC 정보를 추출한다.
  */
-class PotchDataProcessor {
+class PotchDataProcessor(
+    private val dataLogger: PotchDataLogger? = null
+) {
+
+    private val currentFrameErrors = mutableListOf<String>()
+    private val currentFrameMissPacketNums = mutableListOf<Int>()
 
     /**
      * 내부에서 수정 가능한 상태 값.
@@ -166,6 +171,12 @@ class PotchDataProcessor {
                 type = "LENGTH",
                 message = msg
             )
+
+            logMissFrameAndClear(
+                reason = msg,
+                missPacketNum = currentMiniPacketIndexInFrame()
+            )
+
             return
         }
 
@@ -187,7 +198,11 @@ class PotchDataProcessor {
                 message = msg
             )
 
-            buffer.clear()
+            logMissFrameAndClear(
+                reason = msg,
+                missPacketNum = currentMiniPacketIndexInFrame()
+            )
+
             return
         }
 
@@ -196,10 +211,11 @@ class PotchDataProcessor {
         expectedFragCounter?.let { expected ->
             if (fragCounter != expected) {
                 val distance = counterDistance(expected, fragCounter)
-
-                // expected 다음에 actual이 왔다면 distance만큼 counter가 건너뛴 것.
-                // 예: expected=10, actual=13이면 10,11,12가 안 왔다고 보고 3개 손실 추정.
                 val lostCount = if (distance in 1..4095) distance else 1
+
+                val startMissIndex = currentMiniPacketIndexInFrame()
+                val missNums = (startMissIndex until startMissIndex + lostCount)
+                    .map { ((it - 1) % 6) + 1 }
 
                 val msg = "Seq Drop. Exp: $expected, Got: $fragCounter, Lost≈$lostCount"
 
@@ -216,7 +232,13 @@ class PotchDataProcessor {
                     fragCounter = fragCounter
                 )
 
-                buffer.clear()
+                currentFrameErrors.add(msg)
+                currentFrameMissPacketNums.addAll(missNums)
+
+                logMissFrameAndClear(
+                    reason = msg,
+                    missPacketNum = startMissIndex
+                )
             }
         }
 
@@ -292,11 +314,10 @@ class PotchDataProcessor {
      * - [612..1211]: IMU data, 600 bytes
      */
     private fun parseSuperFrame(data: ByteArray) {
-        /**
-         * Super Header 검사.
-         *
-         * 완성된 프레임의 시작은 반드시 0xAA 0xAA여야 한다.
-         */
+        var frameComplete = true
+        val frameErrors = mutableListOf<String>()
+        val missNums = mutableListOf<Int>()
+
         if (
             (data[0].toInt() and 0xFF) != 0xAA ||
             (data[1].toInt() and 0xFF) != 0xAA
@@ -306,6 +327,10 @@ class PotchDataProcessor {
                 data[1].toInt() and 0xFF
             )
 
+            frameComplete = false
+            frameErrors.add(msg)
+            missNums.add(1)
+
             _state.update {
                 it.copy(damagedPacketCount = it.damagedPacketCount + 1)
             }
@@ -314,72 +339,40 @@ class PotchDataProcessor {
                 type = "SUPER_HEADER",
                 message = msg
             )
-
-            buffer.clear()
-            return
         }
 
-        /**
-         * 2. NTC, Index 2~3
-         *
-         * NTC 온도 센서의 raw ADC 값.
-         *
-         * data[2]의 하위 4비트와 data[3] 전체를 합쳐 12-bit 값으로 만든다.
-         */
         val ntcRaw =
             ((data[2].toInt() and 0x0F) shl 8) or
                     (data[3].toInt() and 0xFF)
 
-        /**
-         * 3. Timestamp, Index 4~7
-         *
-         * 펌웨어에서 보낸 시간 값.
-         * little endian으로 저장되어 있으므로 낮은 바이트부터 조립한다.
-         */
         val timestamp =
             ((data[4].toLong() and 0xFFL)) or
                     ((data[5].toLong() and 0xFFL) shl 8) or
                     ((data[6].toLong() and 0xFFL) shl 16) or
                     ((data[7].toLong() and 0xFFL) shl 24)
 
-        /**
-         * 4. Battery, Index 8~9
-         *
-         * 배터리 전압 측정용 raw ADC 값.
-         *
-         * NTC와 마찬가지로 data[8]의 하위 4비트와 data[9]를 합쳐
-         * 12-bit 값으로 만든다.
-         */
         val batteryRaw =
             ((data[8].toInt() and 0x0F) shl 8) or
                     (data[9].toInt() and 0xFF)
 
-        /**
-         * 5. CRC Verification, Index 10~11
-         *
-         * 수신된 CRC 값.
-         * 여기서는 big endian으로 조립한다.
-         */
         val receivedCrc =
             ((data[10].toInt() and 0xFF) shl 8) or
                     (data[11].toInt() and 0xFF)
 
-        /**
-         * CRC 계산용 데이터 복사본.
-         *
-         * CRC 필드 자체는 계산에서 제외해야 하므로
-         * data[10], data[11]을 0으로 만든 뒤 CRC를 계산한다.
-         */
         val crcData = data.copyOf()
         crcData[10] = 0x00
         crcData[11] = 0x00
 
-        // Zephyr 방식 CRC16 계산
         val calculatedCrc = zephyrCrc16(crcData)
 
-        // 수신된 CRC와 계산된 CRC가 다르면 데이터 손상 가능성이 있음
         if (receivedCrc != calculatedCrc) {
             val logMsg = "CRC! Rcv:%04X Calc:%04X".format(receivedCrc, calculatedCrc)
+
+            frameComplete = false
+            frameErrors.add(logMsg)
+
+            // CRC는 특정 미니 패킷 번호를 단정하기 어려우므로 all로 표시
+            currentFrameMissPacketNums.addAll(listOf(1, 2, 3, 4, 5, 6))
 
             _state.update {
                 it.copy(
@@ -393,29 +386,12 @@ class PotchDataProcessor {
                 type = "CRC",
                 message = logMsg
             )
-
-            // 기존 Swift 코드처럼 CRC가 틀려도 데이터는 표시하도록 return 하지 않음
         } else {
             updateLog("CRC OK!")
         }
 
-        /**
-         * 6. IMU Data, Index 612~1211
-         *
-         * BMA400 IMU 센서 데이터.
-         * 총 600 bytes.
-         *
-         * 보통 6 bytes 단위로 X/Y/Z축 16-bit 값이 들어있다고 가정하면
-         * 100개의 샘플을 만들 수 있다.
-         */
         val imuData = data.copyOfRange(612, 1212)
 
-        /**
-         * 파싱된 raw 값들을 SensorData 객체로 변환.
-         *
-         * SensorData 내부에서 ntcRaw를 섭씨 온도로 바꾸거나,
-         * batteryRaw를 전압으로 바꾸는 계산을 할 수 있다.
-         */
         val parsed = SensorData(
             timestamp = timestamp,
             ntcRaw = ntcRaw,
@@ -423,7 +399,26 @@ class PotchDataProcessor {
             imuData = imuData
         )
 
-        // 마지막 파싱 결과를 상태에 반영해서 UI가 갱신되도록 한다.
+        val allErrors = currentFrameErrors + frameErrors
+        val allMissNums = (currentFrameMissPacketNums + missNums)
+            .distinct()
+            .sorted()
+
+        val completeText =
+            if (frameComplete && allErrors.isEmpty()) "complete" else "miss"
+
+        dataLogger?.logSuperFrame(
+            phoneTimeMillis = System.currentTimeMillis(),
+            timestamp = timestamp,
+            superFrame = data,
+            complete = completeText,
+            missPacketNum = allMissNums.joinToString("|"),
+            errorLog = allErrors.joinToString(" / ")
+        )
+
+        currentFrameErrors.clear()
+        currentFrameMissPacketNums.clear()
+
         _state.update {
             it.copy(
                 lastParsedData = parsed,
@@ -673,6 +668,38 @@ class PotchDataProcessor {
         processIncomingData(packet0)
 
         updateLog("DEBUG: Counter wrap-around test completed. 4095 → 0")
+    }
+
+    private fun currentMiniPacketIndexInFrame(): Int {
+        // payload 202B 단위로 몇 개 쌓였는지 계산
+        // 다음에 들어올 패킷 번호이므로 +1
+        return (buffer.size / 202) + 1
+    }
+
+    private fun logMissFrameAndClear(reason: String, missPacketNum: Int?) {
+        currentFrameErrors.add(reason)
+
+        if (missPacketNum != null) {
+            currentFrameMissPacketNums.add(missPacketNum.coerceIn(1, 6))
+        }
+
+        val partialFrame = buffer.toByteArray()
+
+        dataLogger?.logSuperFrame(
+            phoneTimeMillis = System.currentTimeMillis(),
+            timestamp = null,
+            superFrame = partialFrame,
+            complete = "miss",
+            missPacketNum = currentFrameMissPacketNums
+                .distinct()
+                .sorted()
+                .joinToString("|"),
+            errorLog = currentFrameErrors.joinToString(" / ")
+        )
+
+        buffer.clear()
+        currentFrameErrors.clear()
+        currentFrameMissPacketNums.clear()
     }
 
 }
