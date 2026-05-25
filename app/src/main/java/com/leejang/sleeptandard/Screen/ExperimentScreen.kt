@@ -165,21 +165,32 @@ fun ExperimentScreen(
                 .height(64.dp),
             shape = RoundedCornerShape(22.dp),
             colors = ButtonDefaults.buttonColors(
-                containerColor =
-                    if (bleState.isConnected) Color(0xFFD83A40)
-                    else Color(0xFF2F8CFF)
+                containerColor = when {
+                    bleState.isConnected -> Color(0xFFD83A40)
+                    bleState.isReconnecting -> Color(0xFFFF8A22)
+                    else -> Color(0xFF2F8CFF)
+                }
             ),
             onClick = {
-                if (bleState.isConnected) {
-                    viewModel.disconnect()
-                } else {
-                    viewModel.startScan()
+                when {
+                    bleState.isConnected -> {
+                        viewModel.disconnect()
+                    }
+
+                    bleState.isReconnecting -> {
+                        viewModel.stopReconnectAndSaveLog()
+                    }
+
+                    else -> {
+                        viewModel.startScan()
+                    }
                 }
             }
         ) {
             Text(
                 text = when {
-                    bleState.isConnected -> "연결 해제"
+                    bleState.isConnected -> "종료 및 저장"
+                    bleState.isReconnecting -> "종료하기"
                     bleState.isScanning -> "스캔 중..."
                     else -> "Potch 연결"
                 },

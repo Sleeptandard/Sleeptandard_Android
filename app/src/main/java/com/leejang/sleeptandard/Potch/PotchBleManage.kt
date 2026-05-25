@@ -35,6 +35,8 @@ data class PotchBleState(
     // Potch 기기와 GATT 연결이 완료되었는지 여부
     val isConnected: Boolean = false,
 
+    val isReconnecting: Boolean = false,
+
     // 연결된 BLE 기기의 이름
     val deviceName: String? = null,
 
@@ -306,13 +308,14 @@ class PotchBleManager(
                     reconnectHandler.removeCallbacksAndMessages(null)
 
                     // 팟치 연결 성공 시 raw data 로깅 시작
-                    dataLogger.start()
+                    dataLogger.startIfNeeded()
 
                     // UI 상태를 "연결됨"으로 갱신한다.
                     _state.update {
                         it.copy(
                             isConnected = true,
                             isScanning = false,
+                            isReconnecting = false,
                             deviceName = name,
                             lastError = null,
                             lastLog = "Connected to ${name ?: TARGET_NAME}"
@@ -333,29 +336,39 @@ class PotchBleManager(
                 }
 
                 BluetoothProfile.STATE_DISCONNECTED -> {
-                    // 연결이 끊어진 경우
-                    log("Disconnected. Reconnecting...")
-
                     val name = getDeviceName(gatt.device)
 
-                    // UI 상태를 "연결 안 됨"으로 갱신한다.
-                    _state.update {
-                        it.copy(
-                            isConnected = false,
-                            deviceName = name,
-                            lastLog = if (manualDisconnect) {
-                                "Disconnected by user"
-                            } else {
-                                "Disconnected unexpectedly. Reconnecting soon..."
-                            }
-                        )
-                    }
-
-                    // 기존 GATT 자원 정리
                     closeGatt()
 
                     if (!manualDisconnect) {
+                        val msg = "BLE disconnected unexpectedly. Reconnecting..."
+
+                        dataLogger.logConnectionEvent(
+                            event = "disconnected",
+                            message = msg
+                        )
+
+                        _state.update {
+                            it.copy(
+                                isConnected = false,
+                                isScanning = false,
+                                isReconnecting = true,
+                                deviceName = name,
+                                lastLog = msg
+                            )
+                        }
+
                         scheduleReconnect()
+                    } else {
+                        _state.update {
+                            it.copy(
+                                isConnected = false,
+                                isScanning = false,
+                                isReconnecting = false,
+                                deviceName = null,
+                                lastLog = "Disconnected by user"
+                            )
+                        }
                     }
                 }
             }
@@ -611,6 +624,8 @@ class PotchBleManager(
         _state.update {
             it.copy(
                 isConnected = false,
+                isScanning = false,
+                isReconnecting = false,
                 deviceName = null,
                 lastSavedLogPath = savedPath,
                 lastLog = if (savedPath != null) {
@@ -782,9 +797,20 @@ class PotchBleManager(
 
         isReconnecting = true
 
+        _state.update {
+            it.copy(
+                isReconnecting = true,
+                isScanning = false,
+                lastLog = "Reconnecting soon..."
+            )
+        }
+
         reconnectHandler.postDelayed({
             if (manualDisconnect) {
                 isReconnecting = false
+                _state.update {
+                    it.copy(isReconnecting = false)
+                }
                 return@postDelayed
             }
 
@@ -792,6 +818,7 @@ class PotchBleManager(
 
             _state.update {
                 it.copy(
+                    isReconnecting = true,
                     lastLog = "Reconnecting to ${getDeviceName(device) ?: TARGET_NAME}... ($reconnectAttempt/$maxReconnectAttempts)"
                 )
             }
@@ -804,13 +831,52 @@ class PotchBleManager(
                 device.connectGatt(appContext, false, gattCallback)
             }
 
-            isReconnecting = false
-
             if (reconnectAttempt >= maxReconnectAttempts) {
                 reconnectAttempt = 0
-                log("Reconnect attempts exceeded. Start scanning again...")
-                startScan()
+                isReconnecting = false
+
+                _state.update {
+                    it.copy(
+                        isReconnecting = false,
+                        lastLog = "Reconnect attempts exceeded. Waiting for user action."
+                    )
+                }
             }
         }, reconnectDelayMs)
+    }
+
+    @SuppressLint("MissingPermission")
+    fun stopReconnectAndSaveLog() {
+        manualDisconnect = true
+
+        reconnectHandler.removeCallbacksAndMessages(null)
+        isReconnecting = false
+        reconnectAttempt = 0
+
+        stopScan()
+        gatt?.disconnect()
+        closeGatt()
+
+        dataLogger.logConnectionEvent(
+            event = "finished",
+            message = "User stopped reconnect. Saving log."
+        )
+
+        val savedPath = dataLogger.stopAndSave()
+
+        _state.update {
+            it.copy(
+                isConnected = false,
+                isScanning = false,
+                isReconnecting = false,
+                deviceName = null,
+                lastSavedLogPath = savedPath,
+                lastLog = if (savedPath != null) {
+                    "Reconnect stopped. Log saved: $savedPath"
+                } else {
+                    "Reconnect stopped. No log data to save."
+                }
+            )
+        }
     }
 }

@@ -218,4 +218,8 @@ class PotchBleViewModel(
     fun debugTestCounterWrapAround() {
         dataProcessor.debugTestCounterWrapAround()
     }
+
+    fun stopReconnectAndSaveLog() {
+        bleManager.stopReconnectAndSaveLog()
+    }
 }

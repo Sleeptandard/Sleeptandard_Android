@@ -153,4 +153,32 @@ class PotchDataLogger(
     private fun escapeCsv(value: String): String {
         return "\"" + value.replace("\"", "\"\"") + "\""
     }
+
+    fun startIfNeeded() {
+        if (isLogging) return
+        start()
+    }
+
+    fun logConnectionEvent(
+        event: String,
+        message: String
+    ) {
+        if (!isLogging) return
+
+        val phoneTimeText = SimpleDateFormat(
+            "yyyy-MM-dd HH:mm:ss.SSS",
+            Locale.getDefault()
+        ).format(Date(System.currentTimeMillis()))
+
+        val row = listOf(
+            escapeCsv(phoneTimeText),
+            "",
+            "",
+            event,
+            "",
+            escapeCsv(message)
+        ).joinToString(",")
+
+        rows.add(row)
+    }
 }
