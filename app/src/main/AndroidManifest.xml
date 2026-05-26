@@ -12,6 +12,7 @@
     <!-- WorkManager Expedited 작업 실행에 필수 (Android 12+) -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
 
     <!-- Samsung Freecess 등 제조사 배터리 최적화 우회를 위한 필수 권한 -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
@@ -103,6 +104,11 @@
                 <data android:scheme="wear" android:host="*" />
             </intent-filter>
         </service>
+
+        <service
+            android:name=".Potch.PotchBleForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice|dataSync" />
 
         <!-- FileProvider for sharing log files -->
         <provider
