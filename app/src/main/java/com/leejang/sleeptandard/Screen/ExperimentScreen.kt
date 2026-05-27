@@ -37,6 +37,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.leejang.sleeptandard.Potch.PacketErrorLog
 import com.leejang.sleeptandard.Potch.PotchBleState
 import com.leejang.sleeptandard.Potch.PotchBleViewModel
+import com.leejang.sleeptandard.Potch.SleepStagePotch
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -46,6 +47,7 @@ fun ExperimentScreen(
 ) {
     val bleState by viewModel.bleState.collectAsState()
     val processorState by viewModel.processorState.collectAsState()
+    val sleepStage by viewModel.sleepStage.collectAsState()
 
     val sensorData = processorState.lastParsedData
 
@@ -71,6 +73,49 @@ fun ExperimentScreen(
 
     val scrollState = rememberScrollState()
 
+    // ── 수면 단계 추론 정보 가공 ────────────────────────────────────
+    val rawFrames = processorState.parsedSuperFrameCount
+    val currentEpochs = (rawFrames / 30).coerceAtMost(5) // 30 SuperFrame = 1 Epoch (100Hz)
+    val isWarmingUp = sleepStage == SleepStagePotch.UNKNOWN && currentEpochs < 5
+
+    // 단계별 UI 스타일 (네온 컬러 테마)
+    val stageColor = when (sleepStage) {
+        SleepStagePotch.WAKE -> Color(0xFFFF922E)      // 오렌지
+        SleepStagePotch.LIGHT -> Color(0xFF33B3FF)     // 스카이블루
+        SleepStagePotch.DEEP -> Color(0xFF9E4BFF)      // 바이올렛
+        SleepStagePotch.REM -> Color(0xFF00E676)       // 그린
+        else -> Color(0xFF88888F)                      // 그레이 (UNKNOWN)
+    }
+
+    val stageBackground = when (sleepStage) {
+        SleepStagePotch.WAKE -> Color(0xFF422E1A)
+        SleepStagePotch.LIGHT -> Color(0xFF1E3245)
+        SleepStagePotch.DEEP -> Color(0xFF2E1E45)
+        SleepStagePotch.REM -> Color(0xFF1B3D2B)
+        else -> Color(0xFF22222A)
+    }
+
+    val stageName = when (sleepStage) {
+        SleepStagePotch.WAKE -> "깨어남 (WAKE)"
+        SleepStagePotch.LIGHT -> "얕은 수면 (LIGHT)"
+        SleepStagePotch.DEEP -> "깊은 수면 (DEEP)"
+        SleepStagePotch.REM -> "꿈 수면 (REM)"
+        else -> if (isWarmingUp) "추론 준비 중" else "측정 대기"
+    }
+
+    val stageDesc = when (sleepStage) {
+        SleepStagePotch.WAKE -> "뒤척임이 관찰되거나 깨어있는 상태입니다."
+        SleepStagePotch.LIGHT -> "피로를 회복하는 얕은 잠 단계입니다."
+        SleepStagePotch.DEEP -> "뇌와 신체가 깊게 휴식하는 수면 단계입니다."
+        SleepStagePotch.REM -> "기억을 정리하는 꿈 수면 단계입니다."
+        else -> if (isWarmingUp) {
+            "2.5분(5 에포크) 버퍼가 채워진 후 추론이 시작됩니다.\n현재 진행도: $currentEpochs/5 에포크 (${rawFrames % 30}/30)"
+        } else {
+            "센서 연결을 완료하면 수면 추론이 시작됩니다."
+        }
+    }
+    // ──────────────────────────────────────────────────────────────
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -81,6 +126,81 @@ fun ExperimentScreen(
             .navigationBarsPadding(),
         verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {
+        // 🌟 실시간 수면 단계 추론 결과 메인 카드
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(32.dp))
+                .background(stageBackground)
+                .border(
+                    width = 1.5.dp,
+                    color = stageColor.copy(alpha = 0.4f),
+                    shape = RoundedCornerShape(32.dp)
+                )
+                .padding(24.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // 활성화 인디케이터 펄스 효과 대용 닷
+                Box(
+                    modifier = Modifier
+                        .size(10.dp)
+                        .clip(CircleShape)
+                        .background(stageColor)
+                )
+                
+                Spacer(Modifier.width(10.dp))
+                
+                Text(
+                    text = "실시간 수면 단계 추론 (AI)",
+                    color = Color.White.copy(alpha = 0.65f),
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
+            Spacer(Modifier.height(18.dp))
+
+            Text(
+                text = stageName,
+                color = Color.White,
+                fontSize = 34.sp,
+                fontWeight = FontWeight.ExtraBold
+            )
+
+            Spacer(Modifier.height(10.dp))
+
+            Text(
+                text = stageDesc,
+                color = Color.White.copy(alpha = 0.8f),
+                fontSize = 15.sp,
+                lineHeight = 22.sp,
+                fontWeight = FontWeight.Medium
+            )
+
+            // 준비 상태 게이지 바
+            if (isWarmingUp) {
+                Spacer(Modifier.height(16.dp))
+                val progress = (rawFrames.toFloat() / 150f).coerceIn(0f, 1f)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(6.dp)
+                        .clip(RoundedCornerShape(100.dp))
+                        .background(Color.White.copy(alpha = 0.1f))
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(progress)
+                            .height(6.dp)
+                            .clip(RoundedCornerShape(100.dp))
+                            .background(stageColor)
+                    )
+                }
+            }
+        }
+
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(10.dp)
