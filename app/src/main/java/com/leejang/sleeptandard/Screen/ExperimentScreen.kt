@@ -39,6 +39,13 @@ import com.leejang.sleeptandard.Potch.PotchBleState
 import com.leejang.sleeptandard.Potch.PotchBleViewModel
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import androidx.compose.foundation.clickable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateListOf
+import com.leejang.sleeptandard.Potch.InternalPotchLogFile
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @Composable
 fun ExperimentScreen(
@@ -70,6 +77,17 @@ fun ExperimentScreen(
         movementSummary?.movementLabel ?: "--"
 
     val scrollState = rememberScrollState()
+
+    val internalLogFiles by viewModel.internalLogFiles.collectAsState()
+    val lastExportMessage by viewModel.lastExportMessage.collectAsState()
+
+    val selectedLogFileNames = remember {
+        mutableStateListOf<String>()
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.refreshInternalLogFiles()
+    }
 
     Column(
         modifier = Modifier
@@ -157,6 +175,26 @@ fun ExperimentScreen(
             onTestSuperHeaderError = { viewModel.debugTestSuperHeaderError() },
             onTestCrcError = { viewModel.debugTestCrcError() },
             onTestCounterWrapAround = { viewModel.debugTestCounterWrapAround() }
+        )
+
+        InternalLogFileExportCard(
+            files = internalLogFiles,
+            selectedFileNames = selectedLogFileNames,
+            lastExportMessage = lastExportMessage,
+            onRefresh = {
+                viewModel.refreshInternalLogFiles()
+            },
+            onToggleSelect = { fileName ->
+                if (selectedLogFileNames.contains(fileName)) {
+                    selectedLogFileNames.remove(fileName)
+                } else {
+                    selectedLogFileNames.add(fileName)
+                }
+            },
+            onExportSelected = {
+                viewModel.exportSelectedInternalLogFiles(selectedLogFileNames.toList())
+                selectedLogFileNames.clear()
+            }
         )
 
         Button(
@@ -806,5 +844,205 @@ private fun PacketTestButton(
             fontSize = 14.sp,
             fontWeight = FontWeight.SemiBold
         )
+    }
+}
+
+@Composable
+private fun InternalLogFileExportCard(
+    files: List<InternalPotchLogFile>,
+    selectedFileNames: List<String>,
+    lastExportMessage: String?,
+    onRefresh: () -> Unit,
+    onToggleSelect: (String) -> Unit,
+    onExportSelected: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(26.dp))
+            .background(Color(0xFF1E1E25))
+            .border(
+                width = 1.dp,
+                color = Color(0xFF4CD3FF).copy(alpha = 0.35f),
+                shape = RoundedCornerShape(26.dp)
+            )
+            .padding(18.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "📁 내부 로그 파일",
+                color = Color(0xFF4CD3FF),
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold
+            )
+
+            Spacer(Modifier.weight(1f))
+
+            Text(
+                text = "새로고침",
+                color = Color.White.copy(alpha = 0.75f),
+                fontSize = 14.sp,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(100.dp))
+                    .background(Color.White.copy(alpha = 0.08f))
+                    .clickable { onRefresh() }
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+            )
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        Text(
+            text = "앱 내부 저장소에 실시간 append된 CSV 파일 목록입니다. 선택 후 Download/PotchLogs로 내보낼 수 있습니다.",
+            color = Color.White.copy(alpha = 0.55f),
+            fontSize = 13.sp,
+            lineHeight = 18.sp
+        )
+
+        Spacer(Modifier.height(14.dp))
+        DividerLine()
+        Spacer(Modifier.height(12.dp))
+
+        if (files.isEmpty()) {
+            Text(
+                text = "내부 저장소에 로그 파일이 없습니다.",
+                color = Color.White.copy(alpha = 0.65f),
+                fontSize = 14.sp
+            )
+        } else {
+            files.forEach { file ->
+                InternalLogFileRow(
+                    file = file,
+                    selected = selectedFileNames.contains(file.name),
+                    onClick = {
+                        onToggleSelect(file.name)
+                    }
+                )
+            }
+        }
+
+        Spacer(Modifier.height(14.dp))
+
+        Button(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp),
+            shape = RoundedCornerShape(18.dp),
+            enabled = selectedFileNames.isNotEmpty(),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Color(0xFF2F8CFF),
+                contentColor = Color.White,
+                disabledContainerColor = Color.White.copy(alpha = 0.08f),
+                disabledContentColor = Color.White.copy(alpha = 0.35f)
+            ),
+            onClick = onExportSelected
+        ) {
+            Text(
+                text = if (selectedFileNames.isEmpty()) {
+                    "내보낼 파일 선택"
+                } else {
+                    "선택한 ${selectedFileNames.size}개 파일 내보내기"
+                },
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+
+        if (lastExportMessage != null) {
+            Spacer(Modifier.height(10.dp))
+
+            Text(
+                text = lastExportMessage,
+                color = Color.White.copy(alpha = 0.75f),
+                fontSize = 13.sp
+            )
+        }
+    }
+}
+
+@Composable
+private fun InternalLogFileRow(
+    file: InternalPotchLogFile,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    val modifiedText = remember(file.lastModifiedMillis) {
+        SimpleDateFormat(
+            "yyyy-MM-dd HH:mm:ss",
+            Locale.getDefault()
+        ).format(Date(file.lastModifiedMillis))
+    }
+
+    val sizeText = remember(file.sizeBytes) {
+        formatFileSize(file.sizeBytes)
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 5.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(
+                if (selected) Color(0xFF2F8CFF).copy(alpha = 0.20f)
+                else Color.White.copy(alpha = 0.05f)
+            )
+            .border(
+                width = 1.dp,
+                color =
+                    if (selected) Color(0xFF2F8CFF).copy(alpha = 0.85f)
+                    else Color.White.copy(alpha = 0.05f),
+                shape = RoundedCornerShape(16.dp)
+            )
+            .clickable { onClick() }
+            .padding(12.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = if (selected) "☑" else "☐",
+                color = if (selected) Color(0xFF4CD3FF) else Color.White.copy(alpha = 0.5f),
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold
+            )
+
+            Spacer(Modifier.padding(horizontal = 4.dp))
+
+            Text(
+                text = file.name,
+                color = Color.White,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        Spacer(Modifier.height(6.dp))
+
+        Text(
+            text = "$sizeText · $modifiedText",
+            color = Color.White.copy(alpha = 0.55f),
+            fontSize = 12.sp,
+            fontFamily = FontFamily.Monospace
+        )
+    }
+}
+
+private fun formatFileSize(bytes: Long): String {
+    return when {
+        bytes >= 1024L * 1024L -> {
+            "%.2f MB".format(bytes / (1024.0 * 1024.0))
+        }
+
+        bytes >= 1024L -> {
+            "%.1f KB".format(bytes / 1024.0)
+        }
+
+        else -> {
+            "$bytes B"
+        }
     }
 }

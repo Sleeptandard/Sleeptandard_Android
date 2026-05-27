@@ -6,6 +6,8 @@ import android.os.Build
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import com.leejang.sleeptandard.Potch.PotchBleForegroundService
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 
 class PotchBleViewModel(
     application: Application
@@ -56,4 +58,36 @@ class PotchBleViewModel(
     fun debugTestCrcError() {}
 
     fun debugTestCounterWrapAround() {}
+
+    private val _internalLogFiles = MutableStateFlow<List<InternalPotchLogFile>>(emptyList())
+    val internalLogFiles: StateFlow<List<InternalPotchLogFile>> = _internalLogFiles
+
+    private val _lastExportMessage = MutableStateFlow<String?>(null)
+    val lastExportMessage: StateFlow<String?> = _lastExportMessage
+
+    fun refreshInternalLogFiles() {
+        val context = getApplication<Application>().applicationContext
+
+        _internalLogFiles.value =
+            PotchDataLogger.listInternalLogFiles(context)
+    }
+
+    fun exportSelectedInternalLogFiles(fileNames: List<String>) {
+        val context = getApplication<Application>().applicationContext
+
+        val exportedPaths =
+            PotchDataLogger.exportInternalLogFilesToDownloads(
+                context = context,
+                fileNames = fileNames
+            )
+
+        _lastExportMessage.value =
+            if (exportedPaths.isEmpty()) {
+                "내보낸 파일이 없습니다."
+            } else {
+                "${exportedPaths.size}개 파일을 Download/PotchLogs로 내보냈습니다."
+            }
+
+        refreshInternalLogFiles()
+    }
 }
