@@ -14,7 +14,10 @@ import androidx.core.content.ContextCompat
 import com.leejang.sleeptandard.Potch.PotchBleManager
 import com.leejang.sleeptandard.Potch.PotchDataLogger
 import com.leejang.sleeptandard.Potch.PotchDataProcessor
+import com.leejang.sleeptandard.Potch.PotchEpochAccumulator
+import com.leejang.sleeptandard.Potch.PotchInferenceManager
 import com.leejang.sleeptandard.Potch.PotchServiceStateHolder
+import com.leejang.sleeptandard.Potch.PotchWindowBuffer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -36,6 +39,12 @@ class PotchBleForegroundService : Service() {
     private var dataLogger: PotchDataLogger? = null
     private var dataProcessor: PotchDataProcessor? = null
     private var bleManager: PotchBleManager? = null
+
+    // ── 추론 파이프라인 ────────────────────────────────────────────────
+    private var inferenceManager: PotchInferenceManager? = null
+    private var windowBuffer: PotchWindowBuffer? = null
+    private var epochAccumulator: PotchEpochAccumulator? = null
+    // ──────────────────────────────────────────────────────────────────
 
     override fun onCreate() {
         super.onCreate()
@@ -81,6 +90,26 @@ class PotchBleForegroundService : Service() {
         dataProcessor = processor
         bleManager = manager
 
+        // ── 추론 파이프라인 초기화 ─────────────────────────────────────
+        val inference = PotchInferenceManager(applicationContext)
+
+        val window = PotchWindowBuffer(windowSize = 5) { epochWindow ->
+            // 5 에포크 완성 → 추론 실행 (백그라운드 스레드)
+            serviceScope.launch(Dispatchers.Default) {
+                val stage = inference.predict(epochWindow)
+                PotchServiceStateHolder.updateSleepStage(stage)
+            }
+        }
+
+        val accumulator = PotchEpochAccumulator { epoch ->
+            window.addEpoch(epoch)
+        }
+
+        inferenceManager = inference
+        windowBuffer = window
+        epochAccumulator = accumulator
+        // ──────────────────────────────────────────────────────────────
+
         serviceScope.launch {
             manager.state.collect { state ->
                 PotchServiceStateHolder.updateBleState(state)
@@ -99,6 +128,13 @@ class PotchBleForegroundService : Service() {
         serviceScope.launch {
             processor.state.collect { state ->
                 PotchServiceStateHolder.updateProcessorState(state)
+
+                // 새 SensorData가 파싱될 때마다 accumulator에 전달
+                state.lastParsedData?.let { sensorData ->
+                    serviceScope.launch(Dispatchers.Default) {
+                        accumulator.process(sensorData)
+                    }
+                }
             }
         }
     }

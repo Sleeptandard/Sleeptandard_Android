@@ -14,6 +14,9 @@ class PotchBleViewModel(
     val bleState = PotchServiceStateHolder.bleState
     val processorState = PotchServiceStateHolder.processorState
 
+    /** 가장 최근 수면 단계 추론 결과 — UI에서 collectAsState()로 관찰 */
+    val sleepStage = PotchServiceStateHolder.sleepStage
+
     fun startScan() {
         val context = getApplication<Application>().applicationContext
 
