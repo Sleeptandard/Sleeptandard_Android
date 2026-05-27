@@ -22,26 +22,25 @@ class PotchDataLogger(
     private val appContext = context.applicationContext
 
     private var isLogging = false
+    private var logFile: File? = null
 
-    private val rows = mutableListOf<String>()
+    fun startIfNeeded() {
+        if (isLogging && logFile != null) return
 
-    var lastSavedFilePath: String? = null
-        private set
-
-    fun start() {
         isLogging = true
-        rows.clear()
-        lastSavedFilePath = null
 
-        rows.add(
-            listOf(
-                "phone_time",
-                "timestamp",
-                "super_frame_hex",
-                "complete",
-                "miss_packet_num",
-                "error_log"
-            ).joinToString(",")
+        val timestamp = SimpleDateFormat(
+            "yyyyMMdd_HHmmss",
+            Locale.getDefault()
+        ).format(Date())
+
+        val dir = File(appContext.filesDir, "PotchLogs")
+        if (!dir.exists()) dir.mkdirs()
+
+        logFile = File(dir, "potch_session_$timestamp.csv")
+
+        logFile?.writeText(
+            "phone_time,timestamp,super_frame_hex,complete,miss_packet_num,error_log\n"
         )
     }
 
@@ -60,8 +59,8 @@ class PotchDataLogger(
             Locale.getDefault()
         ).format(Date(phoneTimeMillis))
 
-        val hex = superFrame.joinToString(" ") { byte ->
-            "%02X".format(byte.toInt() and 0xFF)
+        val hex = superFrame.joinToString(" ") {
+            "%02X".format(it.toInt() and 0xFF)
         }
 
         val row = listOf(
@@ -73,90 +72,7 @@ class PotchDataLogger(
             escapeCsv(errorLog)
         ).joinToString(",")
 
-        rows.add(row)
-    }
-
-    fun stopAndSave(): String? {
-        if (!isLogging && rows.size <= 1) return null
-
-        isLogging = false
-
-        val timestamp = SimpleDateFormat(
-            "yyyyMMdd_HHmmss",
-            Locale.getDefault()
-        ).format(Date())
-
-        val fileName = "potch_super_frame_log_$timestamp.csv"
-        val csvText = rows.joinToString("\n")
-
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            saveToDownloadsApi29AndAbove(fileName, csvText)
-        } else {
-            saveToDownloadsBelowApi29(fileName, csvText)
-        }
-    }
-
-    fun clear() {
-        isLogging = false
-        rows.clear()
-        lastSavedFilePath = null
-    }
-
-    @RequiresApi(Build.VERSION_CODES.Q)
-    private fun saveToDownloadsApi29AndAbove(
-        fileName: String,
-        csvText: String
-    ): String? {
-        val resolver = appContext.contentResolver
-
-        val values = ContentValues().apply {
-            put(MediaStore.Downloads.DISPLAY_NAME, fileName)
-            put(MediaStore.Downloads.MIME_TYPE, "text/csv")
-            put(
-                MediaStore.Downloads.RELATIVE_PATH,
-                Environment.DIRECTORY_DOWNLOADS + "/PotchLogs"
-            )
-        }
-
-        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-            ?: return null
-
-        resolver.openOutputStream(uri)?.use { output ->
-            output.write(csvText.toByteArray())
-        }
-
-        val path = "Download/PotchLogs/$fileName"
-        lastSavedFilePath = path
-        return path
-    }
-
-    private fun saveToDownloadsBelowApi29(
-        fileName: String,
-        csvText: String
-    ): String? {
-        val downloadsDir = Environment.getExternalStoragePublicDirectory(
-            Environment.DIRECTORY_DOWNLOADS
-        )
-
-        val potchDir = File(downloadsDir, "PotchLogs")
-        if (!potchDir.exists()) {
-            potchDir.mkdirs()
-        }
-
-        val file = File(potchDir, fileName)
-        file.writeText(csvText)
-
-        lastSavedFilePath = file.absolutePath
-        return file.absolutePath
-    }
-
-    private fun escapeCsv(value: String): String {
-        return "\"" + value.replace("\"", "\"\"") + "\""
-    }
-
-    fun startIfNeeded() {
-        if (isLogging) return
-        start()
+        logFile?.appendText(row + "\n")
     }
 
     fun logConnectionEvent(
@@ -168,7 +84,7 @@ class PotchDataLogger(
         val phoneTimeText = SimpleDateFormat(
             "yyyy-MM-dd HH:mm:ss.SSS",
             Locale.getDefault()
-        ).format(Date(System.currentTimeMillis()))
+        ).format(Date())
 
         val row = listOf(
             escapeCsv(phoneTimeText),
@@ -179,6 +95,15 @@ class PotchDataLogger(
             escapeCsv(message)
         ).joinToString(",")
 
-        rows.add(row)
+        logFile?.appendText(row + "\n")
+    }
+
+    fun stopAndSave(): String? {
+        isLogging = false
+        return logFile?.absolutePath
+    }
+
+    private fun escapeCsv(value: String): String {
+        return "\"" + value.replace("\"", "\"\"") + "\""
     }
 }

@@ -47,11 +47,19 @@ class PotchBleForegroundService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START -> {
+                markSessionRunning(true)
                 startPotchReceiving()
             }
 
             ACTION_STOP_AND_SAVE -> {
+                markSessionRunning(false)
                 stopPotchReceivingAndSave()
+            }
+
+            null -> {
+                if (isSessionRunning()) {
+                    startPotchReceiving()
+                }
             }
         }
 
@@ -178,5 +186,17 @@ class PotchBleForegroundService : Service() {
             }
 
         return hasBluetoothPermissions && hasNotificationPermission
+    }
+
+    private fun markSessionRunning(running: Boolean) {
+        getSharedPreferences("potch_service", MODE_PRIVATE)
+            .edit()
+            .putBoolean("session_running", running)
+            .apply()
+    }
+
+    private fun isSessionRunning(): Boolean {
+        return getSharedPreferences("potch_service", MODE_PRIVATE)
+            .getBoolean("session_running", false)
     }
 }
