@@ -116,9 +116,38 @@ class PotchBleForegroundService : Service() {
     }
 
     private fun stopPotchReceivingAndSave() {
-        bleManager?.stopReconnectAndSaveLog()
-        stopForeground(STOP_FOREGROUND_DETACH)
-        stopSelf()
+        val manager = bleManager
+
+        if (manager == null) {
+            stopForeground(STOP_FOREGROUND_DETACH)
+            stopSelf()
+            return
+        }
+
+        updateNotification("Potch 로그 저장 중...")
+
+        // BLE 연결/스캔/재연결은 메인 스레드에서 먼저 정리
+        manager.stopReconnectOnly()
+
+        // 대용량 파일 복사는 IO 스레드에서 실행
+        serviceScope.launch {
+            val savedPath = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                manager.saveCurrentLog()
+            }
+
+            manager.updateLogSavedState(savedPath)
+
+            updateNotification(
+                if (savedPath != null) {
+                    "로그 저장 완료"
+                } else {
+                    "저장할 로그가 없습니다"
+                }
+            )
+
+            stopForeground(STOP_FOREGROUND_DETACH)
+            stopSelf()
+        }
     }
 
     override fun onDestroy() {

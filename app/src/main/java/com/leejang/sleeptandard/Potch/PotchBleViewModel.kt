@@ -5,9 +5,13 @@ import android.content.Intent
 import android.os.Build
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
 import com.leejang.sleeptandard.Potch.PotchBleForegroundService
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class PotchBleViewModel(
     application: Application
@@ -68,26 +72,36 @@ class PotchBleViewModel(
     fun refreshInternalLogFiles() {
         val context = getApplication<Application>().applicationContext
 
-        _internalLogFiles.value =
-            PotchDataLogger.listInternalLogFiles(context)
+        viewModelScope.launch {
+            val files = withContext(Dispatchers.IO) {
+                PotchDataLogger.listInternalLogFiles(context)
+            }
+
+            _internalLogFiles.value = files
+        }
     }
 
     fun exportSelectedInternalLogFiles(fileNames: List<String>) {
         val context = getApplication<Application>().applicationContext
 
-        val exportedPaths =
-            PotchDataLogger.exportInternalLogFilesToDownloads(
-                context = context,
-                fileNames = fileNames
-            )
+        viewModelScope.launch {
+            _lastExportMessage.value = "파일 내보내는 중..."
 
-        _lastExportMessage.value =
-            if (exportedPaths.isEmpty()) {
-                "내보낸 파일이 없습니다."
-            } else {
-                "${exportedPaths.size}개 파일을 Download/PotchLogs로 내보냈습니다."
+            val exportedPaths = withContext(Dispatchers.IO) {
+                PotchDataLogger.exportInternalLogFilesToDownloads(
+                    context = context,
+                    fileNames = fileNames
+                )
             }
 
-        refreshInternalLogFiles()
+            _lastExportMessage.value =
+                if (exportedPaths.isEmpty()) {
+                    "내보낸 파일이 없습니다."
+                } else {
+                    "${exportedPaths.size}개 파일을 Download/PotchLogs로 내보냈습니다."
+                }
+
+            refreshInternalLogFiles()
+        }
     }
 }

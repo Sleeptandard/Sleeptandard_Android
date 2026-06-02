@@ -1,5 +1,6 @@
 package com.leejang.sleeptandard.Screen
 
+import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -937,7 +938,14 @@ private fun InternalLogFileExportCard(
                 disabledContainerColor = Color.White.copy(alpha = 0.08f),
                 disabledContentColor = Color.White.copy(alpha = 0.35f)
             ),
-            onClick = onExportSelected
+            onClick = {
+                try{
+                    onExportSelected()
+                }catch(e:Exception){
+                    Log.e("export", "Fucking error: $e")
+                }
+
+            }
         ) {
             Text(
                 text = if (selectedFileNames.isEmpty()) {

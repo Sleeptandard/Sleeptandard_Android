@@ -7,6 +7,8 @@ import android.os.Environment
 import android.provider.MediaStore
 import androidx.annotation.RequiresApi
 import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -181,13 +183,7 @@ class PotchDataLogger(
             return null
         }
 
-        val fileName = sourceFile.name
-
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            copyToDownloadsApi29AndAbove(fileName, sourceFile.readText())
-        } else {
-            copyToDownloadsBelowApi29(fileName, sourceFile.readText())
-        }
+        return copyFileToDownloads(sourceFile)
     }
 
     /**
@@ -208,6 +204,7 @@ class PotchDataLogger(
         lastSavedFilePath = null
     }
 
+    /*
     @RequiresApi(Build.VERSION_CODES.Q)
     private fun copyToDownloadsApi29AndAbove(
         fileName: String,
@@ -255,6 +252,8 @@ class PotchDataLogger(
         lastSavedFilePath = file.absolutePath
         return file.absolutePath
     }
+
+     */
 
     private fun escapeCsv(value: String): String {
         return "\"" + value.replace("\"", "\"\"") + "\""
@@ -304,15 +303,13 @@ class PotchDataLogger(
 
                 val exportedPath =
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        copyToDownloadsApi29AndAbove(
+                        copyFileToDownloadsApi29AndAbove(
                             context = appContext,
-                            fileName = sourceFile.name,
-                            csvText = sourceFile.readText()
+                            sourceFile = sourceFile
                         )
                     } else {
-                        copyToDownloadsBelowApi29(
-                            fileName = sourceFile.name,
-                            csvText = sourceFile.readText()
+                        copyFileToDownloadsBelowApi29(
+                            sourceFile = sourceFile
                         )
                     }
 
@@ -323,14 +320,13 @@ class PotchDataLogger(
 
             return exportedPaths
         }
-
         @RequiresApi(Build.VERSION_CODES.Q)
-        private fun copyToDownloadsApi29AndAbove(
+        private fun copyFileToDownloadsApi29AndAbove(
             context: Context,
-            fileName: String,
-            csvText: String
+            sourceFile: File
         ): String? {
             val resolver = context.contentResolver
+            val fileName = sourceFile.name
 
             val values = ContentValues().apply {
                 put(MediaStore.Downloads.DISPLAY_NAME, fileName)
@@ -345,15 +341,16 @@ class PotchDataLogger(
                 ?: return null
 
             resolver.openOutputStream(uri)?.use { output ->
-                output.write(csvText.toByteArray())
+                FileInputStream(sourceFile).use { input ->
+                    input.copyTo(output, bufferSize = 1024 * 1024)
+                }
             }
 
             return "Download/$DOWNLOAD_LOG_DIR_NAME/$fileName"
         }
 
-        private fun copyToDownloadsBelowApi29(
-            fileName: String,
-            csvText: String
+        private fun copyFileToDownloadsBelowApi29(
+            sourceFile: File
         ): String? {
             val downloadsDir = Environment.getExternalStoragePublicDirectory(
                 Environment.DIRECTORY_DOWNLOADS
@@ -364,10 +361,75 @@ class PotchDataLogger(
                 potchDir.mkdirs()
             }
 
-            val file = File(potchDir, fileName)
-            file.writeText(csvText)
+            val targetFile = File(potchDir, sourceFile.name)
 
-            return file.absolutePath
+            FileInputStream(sourceFile).use { input ->
+                FileOutputStream(targetFile).use { output ->
+                    input.copyTo(output, bufferSize = 1024 * 1024)
+                }
+            }
+
+            return targetFile.absolutePath
+        }
+
+    }
+
+    private fun copyFileToDownloads(sourceFile: File): String? {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            copyFileToDownloadsApi29AndAbove(sourceFile)
+        } else {
+            copyFileToDownloadsBelowApi29(sourceFile)
         }
     }
+
+    @RequiresApi(Build.VERSION_CODES.Q)
+    private fun copyFileToDownloadsApi29AndAbove(sourceFile: File): String? {
+        val resolver = appContext.contentResolver
+        val fileName = sourceFile.name
+
+        val values = ContentValues().apply {
+            put(MediaStore.Downloads.DISPLAY_NAME, fileName)
+            put(MediaStore.Downloads.MIME_TYPE, "text/csv")
+            put(
+                MediaStore.Downloads.RELATIVE_PATH,
+                Environment.DIRECTORY_DOWNLOADS + "/PotchLogs"
+            )
+        }
+
+        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+            ?: return null
+
+        resolver.openOutputStream(uri)?.use { output ->
+            FileInputStream(sourceFile).use { input ->
+                input.copyTo(output, bufferSize = 1024 * 1024)
+            }
+        }
+
+        val path = "Download/PotchLogs/$fileName"
+        lastSavedFilePath = path
+        return path
+    }
+
+    private fun copyFileToDownloadsBelowApi29(sourceFile: File): String? {
+        val downloadsDir = Environment.getExternalStoragePublicDirectory(
+            Environment.DIRECTORY_DOWNLOADS
+        )
+
+        val potchDir = File(downloadsDir, "PotchLogs")
+        if (!potchDir.exists()) {
+            potchDir.mkdirs()
+        }
+
+        val targetFile = File(potchDir, sourceFile.name)
+
+        FileInputStream(sourceFile).use { input ->
+            FileOutputStream(targetFile).use { output ->
+                input.copyTo(output, bufferSize = 1024 * 1024)
+            }
+        }
+
+        lastSavedFilePath = targetFile.absolutePath
+        return targetFile.absolutePath
+    }
+
 }
