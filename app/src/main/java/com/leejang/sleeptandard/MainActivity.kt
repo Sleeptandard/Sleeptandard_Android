@@ -1,5 +1,6 @@
 package com.leejang.sleeptandard
 
+import android.content.Intent
 import android.os.Bundle
 import java.io.File
 import androidx.activity.ComponentActivity
@@ -21,6 +22,9 @@ import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.handleDeeplinks
 import kotlinx.coroutines.runBlocking
 import android.widget.Toast
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.lifecycleScope
 import com.leejang.sleeptandard.ViewModel.ProfileInsert
 import io.github.jan.supabase.postgrest.postgrest
@@ -32,10 +36,22 @@ import com.leejang.sleeptandard.Prefs.UserInfoPreferences
 // 마이크 테스트
 class MainActivity : ComponentActivity() {
 
+    private var openScreenFromNotification by mutableStateOf<String?>(null)
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+
+        setIntent(intent)
+
+        openScreenFromNotification = intent.getStringExtra("open_screen")
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         val splash = installSplashScreen()
 
         super.onCreate(savedInstanceState)
+
+        openScreenFromNotification = intent.getStringExtra("open_screen")
 
         // 권한 설정 여부 확인. 안되어 있으면 설정 창으로
         val scheduler = AlarmScheduler(applicationContext)
@@ -112,7 +128,11 @@ class MainActivity : ComponentActivity() {
                     startDestination = startDestination,
                     initialAlarm = alarmPrefs.loadAlarm(),
                     userInfo = loadedUser,
-                    isPasswordReset = isResetPassword
+                    isPasswordReset = isResetPassword,
+                    openScreen = openScreenFromNotification,
+                    onOpenScreenConsumed = {
+                        openScreenFromNotification = null
+                    }
                 )
             }
         }

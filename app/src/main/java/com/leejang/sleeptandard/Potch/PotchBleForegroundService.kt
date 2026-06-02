@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -11,6 +12,7 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
+import com.leejang.sleeptandard.MainActivity
 import com.leejang.sleeptandard.Potch.PotchBleManager
 import com.leejang.sleeptandard.Potch.PotchDataLogger
 import com.leejang.sleeptandard.Potch.PotchDataProcessor
@@ -128,12 +130,44 @@ class PotchBleForegroundService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun buildNotification(contentText: String): Notification {
+        // 알림 클릭 시 앱의 MainActivity를 연다.
+        // MainActivity 쪽에서 open_screen 값을 보고 Potch/Experiment 화면으로 이동시키면 됨.
+        val openAppIntent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("open_screen", "experiment")
+        }
+
+        val openAppPendingIntent = PendingIntent.getActivity(
+            this,
+            3001,
+            openAppIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        // 알림의 "종료 및 저장" 버튼을 눌렀을 때 ForegroundService에 종료 액션 전달
+        val stopIntent = Intent(this, PotchBleForegroundService::class.java).apply {
+            action = ACTION_STOP_AND_SAVE
+        }
+
+        val stopPendingIntent = PendingIntent.getService(
+            this,
+            3002,
+            stopIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
             .setContentTitle("알람의 정석")
             .setContentText(contentText)
+            .setContentIntent(openAppPendingIntent)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
+            .addAction(
+                android.R.drawable.ic_menu_close_clear_cancel,
+                "종료 및 저장",
+                stopPendingIntent
+            )
             .build()
     }
 

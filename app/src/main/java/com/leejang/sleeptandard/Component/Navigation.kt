@@ -99,16 +99,29 @@ sealed class Screen(val route: String) {
 @Composable
 fun AppNav(
     scheduler: AlarmScheduler,
-    // 실험중
     startDestination: String = Screen.Home.route,
     initialAlarm: Alarm? = null,
     userInfo: User? = null,
-    isPasswordReset: Boolean = false
+    isPasswordReset: Boolean = false,
+    openScreen: String? = null,
+    onOpenScreenConsumed: () -> Unit = {}
 ){
     /*** 기존에 있던 코드 ***/
     val rememberNavController = rememberNavController()
     val alarmViewModel: AlarmViewModel = viewModel()
     val authViewModel: AuthViewModel = viewModel()
+
+    LaunchedEffect(openScreen) {
+        when (openScreen) {
+            "experiment" -> {
+                rememberNavController.navigate(Screen.Experiment.route) {
+                    launchSingleTop = true
+                }
+
+                onOpenScreenConsumed()
+            }
+        }
+    }
 
 
     // 앱 시작 시, initialAlarm이 있으면 ViewModel에 세팅
