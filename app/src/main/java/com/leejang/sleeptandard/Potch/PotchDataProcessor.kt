@@ -1,5 +1,6 @@
 package com.leejang.sleeptandard.Potch
 
+import android.util.Log
 import kotlinx.coroutines.flow.MutableStateFlow
 
 import kotlinx.coroutines.flow.StateFlow
@@ -77,6 +78,7 @@ data class DataProcessorState(
 class PotchDataProcessor(
     private val dataLogger: PotchDataLogger? = null
 ) {
+    private val TAG = "PotchDataProcessor"
 
     private val currentFrameErrors = mutableListOf<String>()
     private val currentFrameMissPacketNums = mutableListOf<Int>()
@@ -154,6 +156,7 @@ class PotchDataProcessor(
      */
     @Synchronized
     fun processIncomingData(data: ByteArray) {
+        Log.d(TAG, "Rcv length=${data.size}")
         updateLog("Rcv length: ${data.size}")
 
         _state.update {
@@ -391,6 +394,8 @@ class PotchDataProcessor(
         }
 
         val imuData = data.copyOfRange(612, 1212)
+
+        Log.d(TAG, "SuperFrame parsed timestamp=$timestamp")
 
         val parsed = SensorData(
             timestamp = timestamp,
