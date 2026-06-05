@@ -437,6 +437,7 @@ class PotchBleManager(
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
             // 서비스 탐색 실패 처리
             if (status != BluetoothGatt.GATT_SUCCESS) {
+                Log.d(TAG,"onServicesDiscovered: GATT Fail")
                 error("Service discovery failed: $status")
                 return
             }
@@ -609,6 +610,7 @@ class PotchBleManager(
         // 권한이 없으면 stopScan 호출도 보안 예외가 날 수 있으므로 중단
         if (!hasBlePermissions()) return
 
+        Log.d(TAG, "stopScan() Called.")
         // 실제 스캔 중지
         scanner?.stopScan(scanCallback)
 
@@ -692,6 +694,8 @@ class PotchBleManager(
         gatt?.disconnect()
         closeGatt()
 
+        Log.d(TAG,"disconnec() Called.")
+
         _state.update {
             it.copy(
                 isConnected = false,
@@ -734,6 +738,7 @@ class PotchBleManager(
         gatt: BluetoothGatt,
         characteristic: BluetoothGattCharacteristic
     ) {
+        Log.d(TAG,"enableNotification() Called")
         // Android 로컬 쪽에서 해당 characteristic notify를 받을 준비를 한다.
         val notificationSet = gatt.setCharacteristicNotification(characteristic, true)
         if (!notificationSet) {
@@ -774,6 +779,7 @@ class PotchBleManager(
     private fun closeGatt() {
         try {
             gatt?.close()
+            Log.d(TAG,"close GATT")
         } catch (_: Exception) {
             // close 중 예외가 나도 앱이 죽지 않게 무시
         } finally {
@@ -832,6 +838,7 @@ class PotchBleManager(
      * 이전 오류가 계속 표시되지 않게 한다.
      */
     private fun log(message: String) {
+        Log.d(TAG,"log: $message")
         _state.update {
             it.copy(lastLog = message, lastError = null)
         }
@@ -843,6 +850,7 @@ class PotchBleManager(
      * UI에서는 lastError를 보고 오류 색상으로 표시할 수 있다.
      */
     private fun error(message: String) {
+        Log.d(TAG,"error: $message")
         _state.update {
             it.copy(lastError = message, lastLog = message)
         }
@@ -859,6 +867,8 @@ class PotchBleManager(
         if (isReconnecting) return
 
         isReconnecting = true
+
+        Log.d(TAG,"scheduleReconnect() Called")
 
         _state.update {
             it.copy(
@@ -927,6 +937,8 @@ class PotchBleManager(
                     message = failMsg
                 )
 
+                Log.d(TAG, failMsg)
+
                 _state.update {
                     it.copy(
                         isReconnecting = false,
@@ -951,6 +963,8 @@ class PotchBleManager(
             error("Bluetooth adapter not available during reconnect scan")
             return
         }
+
+        Log.d(TAG, "startScanForReconnect() Called")
 
         if (!adapter.isEnabled) {
             _state.update {
@@ -1035,6 +1049,8 @@ class PotchBleManager(
         reconnectHandler.removeCallbacksAndMessages(null)
         isReconnecting = false
         reconnectAttempt = 0
+
+        Log.d(TAG,"stopReconnectOnly() Called")
 
         stopScan()
         gatt?.disconnect()
