@@ -21,44 +21,42 @@ data class InternalPotchLogFile(
     val lastModifiedMillis: Long
 )
 
-
 /**
- * Potch Super Frame 로그를 CSV 파일에 실시간 append로 저장하는 클래스.
+ * Potch Super Frame 로그와 디버그 로그를 내부 저장소에 실시간 append로 저장하는 클래스.
  *
- * 기존 방식:
- * - rows 리스트에 메모리로 쌓음
- * - 종료 시 한 번에 파일 저장
+ * 저장 파일:
+ * 1. potch_super_frame_log_yyyyMMdd_HHmmss.csv
+ *    - 실제 Potch Super Frame 데이터 저장
  *
- * 변경 방식:
- * - 로그 시작 시 앱 내부 저장소에 CSV 파일 생성
- * - Super Frame이 들어올 때마다 즉시 append
- * - 앱이 중간에 죽어도 이미 append된 데이터는 파일에 남음
- * - 종료 시 Downloads/PotchLogs로 복사해서 사용자가 확인 가능하게 함
+ * 2. potch_debug_log_yyyyMMdd_HHmmss.txt
+ *    - BLE 상태, Service 상태, 재연결 상태 같은 디버그 로그 저장
+ *
+ * 종료 및 저장 시:
+ * - 두 파일을 모두 Download/PotchLogs 폴더로 복사한다.
  */
 class PotchDataLogger(
     context: Context
 ) {
-    private var workingDebugLogFile: File? = null
     private val appContext = context.applicationContext
 
     // 현재 로그 기록 중인지 여부
     private var isLogging = false
 
-    // 실시간 append 대상 파일
+    // Super Frame CSV 로그 파일
     private var workingLogFile: File? = null
 
-    // 마지막으로 Downloads에 저장/복사된 경로
+    // TAG 기반 디버그 TXT 로그 파일
+    private var workingDebugLogFile: File? = null
+
+    // 마지막으로 Downloads에 저장/복사된 CSV 경로
     var lastSavedFilePath: String? = null
         private set
 
     /**
      * 새 로그 세션을 시작한다.
      *
-     * 주의:
-     * 이 함수는 항상 새 파일을 만들기 때문에,
-     * 재연결 때마다 호출하면 로그가 끊길 수 있다.
-     *
-     * 재연결 상황에서는 startIfNeeded()를 사용해야 한다.
+     * 이 함수는 항상 새 파일을 만든다.
+     * 재연결 상황에서는 새 파일을 만들지 않도록 startIfNeeded()를 사용해야 한다.
      */
     fun start() {
         isLogging = true
@@ -69,13 +67,12 @@ class PotchDataLogger(
             Locale.getDefault()
         ).format(Date())
 
-        val dir = File(appContext.filesDir, "PotchLogs")
+        val dir = File(appContext.filesDir, INTERNAL_LOG_DIR_NAME)
         if (!dir.exists()) {
             dir.mkdirs()
         }
 
         workingLogFile = File(dir, "potch_super_frame_log_$timestamp.csv")
-
         workingDebugLogFile = File(dir, "potch_debug_log_$timestamp.txt")
 
         workingDebugLogFile?.writeText(
@@ -98,11 +95,36 @@ class PotchDataLogger(
      * 이미 로깅 중이면 기존 파일에 이어서 쓰고,
      * 로깅 중이 아니면 새 로그 파일을 만든다.
      *
-     * 자동 재연결 시에는 반드시 이 함수를 써야 한다.
+     * 자동 재연결 시에는 반드시 이 함수를 써야 로그가 끊기지 않는다.
      */
     fun startIfNeeded() {
         if (isLogging && workingLogFile != null) return
         start()
+    }
+
+    /**
+     * Logcat에 찍던 주요 상태 로그를 내부 TXT 파일에도 저장한다.
+     *
+     * 저장 예:
+     * 2026-06-06 23:33:55.123 I/PotchBleManager: Found Potch again
+     */
+    fun logDebug(
+        tag: String,
+        message: String,
+        level: String = "D"
+    ) {
+        if (!isLogging) return
+
+        val file = workingDebugLogFile ?: return
+
+        val phoneTimeText = SimpleDateFormat(
+            "yyyy-MM-dd HH:mm:ss.SSS",
+            Locale.getDefault()
+        ).format(Date(System.currentTimeMillis()))
+
+        val line = "$phoneTimeText $level/$tag: $message"
+
+        file.appendText(line + "\n")
     }
 
     /**
@@ -145,10 +167,10 @@ class PotchDataLogger(
     }
 
     /**
-     * 연결 끊김, 종료 같은 이벤트를 CSV에 한 줄로 기록한다.
+     * 연결 끊김, 재연결, 종료 같은 이벤트를 Super Frame CSV에도 한 줄로 기록한다.
      *
      * 예:
-     * complete 컬럼에 disconnected / finished 같은 이벤트명을 기록
+     * complete 컬럼에 disconnected / reconnect_scan_attempt / finished 등을 기록한다.
      */
     fun logConnectionEvent(
         event: String,
@@ -176,10 +198,14 @@ class PotchDataLogger(
     }
 
     /**
-     * 로깅을 종료하고, 현재까지 append된 파일을 Downloads/PotchLogs로 복사한다.
+     * 로깅을 종료하고, 현재까지 append된 파일들을 Download/PotchLogs로 복사한다.
      *
-     * appContext.filesDir 내부 파일은 이미 실시간으로 저장되어 있고,
-     * 이 함수는 사용자가 파일 앱에서 쉽게 볼 수 있도록 Downloads로 내보내는 역할이다.
+     * 복사 대상:
+     * - Super Frame CSV
+     * - Debug TXT
+     *
+     * 반환값:
+     * - CSV 파일이 저장된 경로
      */
     fun stopAndSave(): String? {
         val sourceFile = workingLogFile ?: return null
@@ -191,22 +217,35 @@ class PotchDataLogger(
             return null
         }
 
-        val savedCsvPath = copyFileToDownloads(sourceFile)
+        val savedCsvPath = copyInternalFileToDownloads(
+            context = appContext,
+            sourceFile = sourceFile
+        )
 
         if (debugFile != null && debugFile.exists() && debugFile.length() > 0L) {
-            copyFileToDownloads(debugFile)
+            copyInternalFileToDownloads(
+                context = appContext,
+                sourceFile = debugFile
+            )
         }
+
+        lastSavedFilePath = savedCsvPath
 
         return savedCsvPath
     }
 
     /**
-     * 로그 파일 경로만 반환한다.
-     *
-     * 디버깅용으로 현재 작업 중인 내부 파일 위치를 확인하고 싶을 때 사용 가능.
+     * 현재 작업 중인 내부 CSV 파일 경로를 확인할 때 사용한다.
      */
     fun getWorkingLogPath(): String? {
         return workingLogFile?.absolutePath
+    }
+
+    /**
+     * 현재 작업 중인 내부 디버그 TXT 파일 경로를 확인할 때 사용한다.
+     */
+    fun getWorkingDebugLogPath(): String? {
+        return workingDebugLogFile?.absolutePath
     }
 
     /**
@@ -215,59 +254,9 @@ class PotchDataLogger(
     fun clear() {
         isLogging = false
         workingLogFile = null
+        workingDebugLogFile = null
         lastSavedFilePath = null
     }
-
-    /*
-    @RequiresApi(Build.VERSION_CODES.Q)
-    private fun copyToDownloadsApi29AndAbove(
-        fileName: String,
-        csvText: String
-    ): String? {
-        val resolver = appContext.contentResolver
-
-        val values = ContentValues().apply {
-            put(MediaStore.Downloads.DISPLAY_NAME, fileName)
-            put(MediaStore.Downloads.MIME_TYPE, "text/csv")
-            put(
-                MediaStore.Downloads.RELATIVE_PATH,
-                Environment.DIRECTORY_DOWNLOADS + "/PotchLogs"
-            )
-        }
-
-        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-            ?: return null
-
-        resolver.openOutputStream(uri)?.use { output ->
-            output.write(csvText.toByteArray())
-        }
-
-        val path = "Download/PotchLogs/$fileName"
-        lastSavedFilePath = path
-        return path
-    }
-
-    private fun copyToDownloadsBelowApi29(
-        fileName: String,
-        csvText: String
-    ): String? {
-        val downloadsDir = Environment.getExternalStoragePublicDirectory(
-            Environment.DIRECTORY_DOWNLOADS
-        )
-
-        val potchDir = File(downloadsDir, "PotchLogs")
-        if (!potchDir.exists()) {
-            potchDir.mkdirs()
-        }
-
-        val file = File(potchDir, fileName)
-        file.writeText(csvText)
-
-        lastSavedFilePath = file.absolutePath
-        return file.absolutePath
-    }
-
-     */
 
     private fun escapeCsv(value: String): String {
         return "\"" + value.replace("\"", "\"\"") + "\""
@@ -277,6 +266,11 @@ class PotchDataLogger(
         private const val INTERNAL_LOG_DIR_NAME = "PotchLogs"
         private const val DOWNLOAD_LOG_DIR_NAME = "PotchLogs"
 
+        /**
+         * 앱 내부 저장소에 남아 있는 Potch 로그 파일 목록을 가져온다.
+         *
+         * CSV와 TXT를 모두 보여준다.
+         */
         fun listInternalLogFiles(context: Context): List<InternalPotchLogFile> {
             val dir = File(context.applicationContext.filesDir, INTERNAL_LOG_DIR_NAME)
 
@@ -284,8 +278,7 @@ class PotchDataLogger(
 
             return dir.listFiles()
                 ?.filter { file ->
-                    file.extension.equals("csv", ignoreCase = true) ||
-                            file.extension.equals("txt", ignoreCase = true)
+                    file.isFile && isSupportedLogFile(file)
                 }
                 ?.sortedByDescending { it.lastModified() }
                 ?.map { file ->
@@ -299,6 +292,11 @@ class PotchDataLogger(
                 ?: emptyList()
         }
 
+        /**
+         * 내부 저장소의 선택된 로그 파일들을 Download/PotchLogs로 내보낸다.
+         *
+         * CSV와 TXT를 모두 내보낼 수 있다.
+         */
         fun exportInternalLogFilesToDownloads(
             context: Context,
             fileNames: List<String>
@@ -314,19 +312,12 @@ class PotchDataLogger(
                 val sourceFile = File(dir, fileName)
 
                 if (!sourceFile.exists() || !sourceFile.isFile) return@forEach
-                if (!sourceFile.extension.equals("csv", ignoreCase = true)) return@forEach
+                if (!isSupportedLogFile(sourceFile)) return@forEach
 
-                val exportedPath =
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        copyFileToDownloadsApi29AndAbove(
-                            context = appContext,
-                            sourceFile = sourceFile
-                        )
-                    } else {
-                        copyFileToDownloadsBelowApi29(
-                            sourceFile = sourceFile
-                        )
-                    }
+                val exportedPath = copyInternalFileToDownloads(
+                    context = appContext,
+                    sourceFile = sourceFile
+                )
 
                 if (exportedPath != null) {
                     exportedPaths.add(exportedPath)
@@ -335,6 +326,49 @@ class PotchDataLogger(
 
             return exportedPaths
         }
+
+        /**
+         * CSV / TXT 로그 파일만 허용한다.
+         */
+        private fun isSupportedLogFile(file: File): Boolean {
+            val ext = file.extension.lowercase(Locale.ROOT)
+            return ext == "csv" || ext == "txt"
+        }
+
+        /**
+         * 내부 파일을 Download/PotchLogs로 복사한다.
+         *
+         * Android 10 이상:
+         * - MediaStore 사용
+         *
+         * Android 9 이하:
+         * - public Downloads 폴더에 직접 파일 복사
+         */
+        private fun copyInternalFileToDownloads(
+            context: Context,
+            sourceFile: File
+        ): String? {
+            return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                copyFileToDownloadsApi29AndAbove(
+                    context = context,
+                    sourceFile = sourceFile
+                )
+            } else {
+                copyFileToDownloadsBelowApi29(
+                    sourceFile = sourceFile
+                )
+            }
+        }
+
+        /**
+         * Android 10 이상에서 MediaStore를 이용해 Downloads/PotchLogs로 복사한다.
+         *
+         * 중요:
+         * - CSV는 text/csv
+         * - TXT는 text/plain
+         *
+         * 이렇게 확장자별 MIME type을 맞춰야 debug txt가 txt.csv처럼 저장되는 문제를 줄일 수 있다.
+         */
         @RequiresApi(Build.VERSION_CODES.Q)
         private fun copyFileToDownloadsApi29AndAbove(
             context: Context,
@@ -343,9 +377,16 @@ class PotchDataLogger(
             val resolver = context.contentResolver
             val fileName = sourceFile.name
 
+            val mimeType =
+                when (sourceFile.extension.lowercase(Locale.ROOT)) {
+                    "csv" -> "text/csv"
+                    "txt" -> "text/plain"
+                    else -> "application/octet-stream"
+                }
+
             val values = ContentValues().apply {
                 put(MediaStore.Downloads.DISPLAY_NAME, fileName)
-                put(MediaStore.Downloads.MIME_TYPE, "text/csv")
+                put(MediaStore.Downloads.MIME_TYPE, mimeType)
                 put(
                     MediaStore.Downloads.RELATIVE_PATH,
                     Environment.DIRECTORY_DOWNLOADS + "/$DOWNLOAD_LOG_DIR_NAME"
@@ -364,6 +405,9 @@ class PotchDataLogger(
             return "Download/$DOWNLOAD_LOG_DIR_NAME/$fileName"
         }
 
+        /**
+         * Android 9 이하에서 Downloads/PotchLogs로 파일을 복사한다.
+         */
         private fun copyFileToDownloadsBelowApi29(
             sourceFile: File
         ): String? {
@@ -386,84 +430,5 @@ class PotchDataLogger(
 
             return targetFile.absolutePath
         }
-
     }
-
-    private fun copyFileToDownloads(sourceFile: File): String? {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            copyFileToDownloadsApi29AndAbove(sourceFile)
-        } else {
-            copyFileToDownloadsBelowApi29(sourceFile)
-        }
-    }
-
-    @RequiresApi(Build.VERSION_CODES.Q)
-    private fun copyFileToDownloadsApi29AndAbove(sourceFile: File): String? {
-        val resolver = appContext.contentResolver
-        val fileName = sourceFile.name
-
-        val values = ContentValues().apply {
-            put(MediaStore.Downloads.DISPLAY_NAME, fileName)
-            put(MediaStore.Downloads.MIME_TYPE, "text/csv")
-            put(
-                MediaStore.Downloads.RELATIVE_PATH,
-                Environment.DIRECTORY_DOWNLOADS + "/PotchLogs"
-            )
-        }
-
-        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-            ?: return null
-
-        resolver.openOutputStream(uri)?.use { output ->
-            FileInputStream(sourceFile).use { input ->
-                input.copyTo(output, bufferSize = 1024 * 1024)
-            }
-        }
-
-        val path = "Download/PotchLogs/$fileName"
-        lastSavedFilePath = path
-        return path
-    }
-
-    private fun copyFileToDownloadsBelowApi29(sourceFile: File): String? {
-        val downloadsDir = Environment.getExternalStoragePublicDirectory(
-            Environment.DIRECTORY_DOWNLOADS
-        )
-
-        val potchDir = File(downloadsDir, "PotchLogs")
-        if (!potchDir.exists()) {
-            potchDir.mkdirs()
-        }
-
-        val targetFile = File(potchDir, sourceFile.name)
-
-        FileInputStream(sourceFile).use { input ->
-            FileOutputStream(targetFile).use { output ->
-                input.copyTo(output, bufferSize = 1024 * 1024)
-            }
-        }
-
-        lastSavedFilePath = targetFile.absolutePath
-        return targetFile.absolutePath
-    }
-
-    fun logDebug(
-        tag: String,
-        message: String,
-        level: String = "D"
-    ) {
-        if (!isLogging) return
-
-        val file = workingDebugLogFile ?: return
-
-        val phoneTimeText = SimpleDateFormat(
-            "yyyy-MM-dd HH:mm:ss.SSS",
-            Locale.getDefault()
-        ).format(Date(System.currentTimeMillis()))
-
-        val line = "$phoneTimeText $level/$tag: $message"
-
-        file.appendText(line + "\n")
-    }
-
 }

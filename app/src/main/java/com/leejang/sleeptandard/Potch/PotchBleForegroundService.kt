@@ -298,14 +298,43 @@ class PotchBleForegroundService : Service() {
          *
          * 이 상태 역시 UI에서 확인할 수 있도록 StateHolder에 전달한다.
          */
+        var lastLoggedParsedCount = -1
+        var lastLoggedSeqErr = 0
+        var lastLoggedCrcErr = 0
+
         serviceScope.launch {
             processor.state.collect { state ->
-                Log.d(
-                    TAG,
-                    "Processor state: parsed=${state.parsedSuperFrameCount}, totalMini=${state.totalMiniPackets}, validMini=${state.validMiniPackets}, crcErr=${state.crcErrorCount}, seqErr=${state.missingSequenceErrors}, lastLog=${state.lastLog}"
-                )
-                dataLogger?.logDebug(TAG, "Processor state: parsed=${state.parsedSuperFrameCount}, totalMini=${state.totalMiniPackets}, validMini=${state.validMiniPackets}, crcErr=${state.crcErrorCount}, seqErr=${state.missingSequenceErrors}, lastLog=${state.lastLog}")
                 PotchServiceStateHolder.updateProcessorState(state)
+
+                val hasNewError =
+                    state.missingSequenceErrors != lastLoggedSeqErr ||
+                            state.crcErrorCount != lastLoggedCrcErr
+
+                val shouldLogPeriodic =
+                    state.parsedSuperFrameCount > 0 &&
+                            state.parsedSuperFrameCount != lastLoggedParsedCount &&
+                            state.parsedSuperFrameCount % 10 == 0
+
+                if (hasNewError || shouldLogPeriodic) {
+                    val msg =
+                        "Processor state: parsed=${state.parsedSuperFrameCount}, " +
+                                "totalMini=${state.totalMiniPackets}, " +
+                                "validMini=${state.validMiniPackets}, " +
+                                "crcErr=${state.crcErrorCount}, " +
+                                "seqErr=${state.missingSequenceErrors}, " +
+                                "lastLog=${state.lastLog}"
+
+                    Log.d(TAG, msg)
+                    dataLogger?.logDebug(
+                        TAG,
+                        msg,
+                        if (hasNewError) "E" else "D"
+                    )
+
+                    lastLoggedParsedCount = state.parsedSuperFrameCount
+                    lastLoggedSeqErr = state.missingSequenceErrors
+                    lastLoggedCrcErr = state.crcErrorCount
+                }
             }
         }
     }
@@ -322,11 +351,15 @@ class PotchBleForegroundService : Service() {
      */
     private fun startPotchReceiving() {
         Log.i(TAG, "startPotchReceiving() called")
+
+        initializePotchObjects()
+
+        dataLogger?.startIfNeeded()
         dataLogger?.logDebug(TAG, "startPotchReceiving() called", "I")
+
         if (!hasRequiredPermissions()) {
             Log.e(TAG, "startPotchReceiving() blocked - missing permissions")
             dataLogger?.logDebug(TAG, "startPotchReceiving() blocked - missing permissions", "E")
-            // 권한이 없으면 스캔을 시작하지 않고 알림만 갱신
             updateNotification("Potch 권한이 부족합니다")
             return
         }
@@ -334,9 +367,6 @@ class PotchBleForegroundService : Service() {
         Log.i(TAG, "Permissions OK. Starting BLE scan.")
         dataLogger?.logDebug(TAG, "Permissions OK. Starting BLE scan.", "I")
 
-        initializePotchObjects()
-
-        // 실제 BLE 스캔 시작
         bleManager?.startScan()
     }
 
