@@ -244,7 +244,10 @@ class PotchBleManager(
             val name = deviceName ?: advertisedName ?: "Unknown"
 
             Log.d(TAG, "Scan result: name=$name")
-            dataLogger.logDebug(TAG, "Scan result: name=$name")
+            if (name.contains(TARGET_NAME, ignoreCase = true)) {
+                dataLogger.logDebug(TAG, "Scan result target found: name=$name", "I")
+            }
+
 
             // 이름에 "Potch"가 포함된 기기를 찾으면 타겟으로 판단한다.
             if (name.contains(TARGET_NAME, ignoreCase = true)) {
