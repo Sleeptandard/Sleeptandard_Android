@@ -38,6 +38,7 @@ data class InternalPotchLogFile(
 class PotchDataLogger(
     context: Context
 ) {
+    private var workingDebugLogFile: File? = null
     private val appContext = context.applicationContext
 
     // 현재 로그 기록 중인지 여부
@@ -74,6 +75,12 @@ class PotchDataLogger(
         }
 
         workingLogFile = File(dir, "potch_super_frame_log_$timestamp.csv")
+
+        workingDebugLogFile = File(dir, "potch_debug_log_$timestamp.txt")
+
+        workingDebugLogFile?.writeText(
+            "Potch debug log started at $timestamp\n"
+        )
 
         workingLogFile?.writeText(
             listOf(
@@ -176,6 +183,7 @@ class PotchDataLogger(
      */
     fun stopAndSave(): String? {
         val sourceFile = workingLogFile ?: return null
+        val debugFile = workingDebugLogFile
 
         isLogging = false
 
@@ -183,7 +191,13 @@ class PotchDataLogger(
             return null
         }
 
-        return copyFileToDownloads(sourceFile)
+        val savedCsvPath = copyFileToDownloads(sourceFile)
+
+        if (debugFile != null && debugFile.exists() && debugFile.length() > 0L) {
+            copyFileToDownloads(debugFile)
+        }
+
+        return savedCsvPath
     }
 
     /**
@@ -270,7 +284,8 @@ class PotchDataLogger(
 
             return dir.listFiles()
                 ?.filter { file ->
-                    file.isFile && file.extension.equals("csv", ignoreCase = true)
+                    file.extension.equals("csv", ignoreCase = true) ||
+                            file.extension.equals("txt", ignoreCase = true)
                 }
                 ?.sortedByDescending { it.lastModified() }
                 ?.map { file ->
@@ -430,6 +445,25 @@ class PotchDataLogger(
 
         lastSavedFilePath = targetFile.absolutePath
         return targetFile.absolutePath
+    }
+
+    fun logDebug(
+        tag: String,
+        message: String,
+        level: String = "D"
+    ) {
+        if (!isLogging) return
+
+        val file = workingDebugLogFile ?: return
+
+        val phoneTimeText = SimpleDateFormat(
+            "yyyy-MM-dd HH:mm:ss.SSS",
+            Locale.getDefault()
+        ).format(Date(System.currentTimeMillis()))
+
+        val line = "$phoneTimeText $level/$tag: $message"
+
+        file.appendText(line + "\n")
     }
 
 }
