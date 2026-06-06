@@ -244,6 +244,7 @@ class PotchBleManager(
             val name = deviceName ?: advertisedName ?: "Unknown"
 
             Log.d(TAG, "Scan result: name=$name")
+            dataLogger.logDebug(TAG, "Scan result: name=$name")
 
             // 이름에 "Potch"가 포함된 기기를 찾으면 타겟으로 판단한다.
             if (name.contains(TARGET_NAME, ignoreCase = true)) {
@@ -303,6 +304,7 @@ class PotchBleManager(
                 TAG,
                 "onConnectionStateChange: status=$status, newState=$newState, manualDisconnect=$manualDisconnect, isReconnecting=$isReconnecting, attempt=$reconnectAttempt"
             )
+            dataLogger.logDebug(TAG, "onConnectionStateChange: status=$status, newState=$newState, manualDisconnect=$manualDisconnect, isReconnecting=$isReconnecting, attempt=$reconnectAttempt","E")
 
             // status가 GATT_SUCCESS가 아니면 연결 과정에서 오류가 발생한 것
             if (status != BluetoothGatt.GATT_SUCCESS) {
@@ -310,6 +312,7 @@ class PotchBleManager(
                     "GATT connection error: status=$status, newState=$newState, manual=$manualDisconnect, attempt=$reconnectAttempt"
 
                 Log.e(TAG, msg)
+                dataLogger.logDebug(TAG, msg,"E")
 
                 dataLogger.logConnectionEvent(
                     event = "gatt_error",
@@ -412,6 +415,7 @@ class PotchBleManager(
             val msg = "MTU changed: mtu=$mtu, status=$status"
 
             Log.i(TAG, msg)
+            dataLogger.logDebug(TAG, msg, "I")
 
             dataLogger.logConnectionEvent(
                 event = "mtu_changed",
@@ -438,6 +442,7 @@ class PotchBleManager(
             // 서비스 탐색 실패 처리
             if (status != BluetoothGatt.GATT_SUCCESS) {
                 Log.d(TAG,"onServicesDiscovered: GATT Fail")
+                dataLogger.logDebug(TAG, "onServicesDiscovered: GATT Fail")
                 error("Service discovery failed: $status")
                 return
             }
@@ -479,6 +484,7 @@ class PotchBleManager(
                     val msg = "Subscribed to characteristic: $CHAR_UUID"
 
                     Log.i(TAG, msg)
+                    dataLogger.logDebug(TAG, msg, "I")
 
                     dataLogger.logConnectionEvent(
                         event = "notify_subscribed",
@@ -490,6 +496,7 @@ class PotchBleManager(
                     val msg = "CCCD write failed: status=$status"
 
                     Log.e(TAG, msg)
+                    dataLogger.logDebug(TAG, msg, "E")
 
                     dataLogger.logConnectionEvent(
                         event = "notify_subscribe_failed",
@@ -556,6 +563,7 @@ class PotchBleManager(
     fun startScan() {
 
         Log.d(TAG, "startScan() called")
+        dataLogger.logDebug(TAG, "startScan() called")
 
         manualDisconnect = false
 
@@ -582,11 +590,13 @@ class PotchBleManager(
         // Android 버전에 맞는 BLE 권한이 없는 경우
         if (!hasBlePermissions()) {
             Log.e(TAG, "startScan blocked: missing BLE permissions")
+            dataLogger.logDebug(TAG, "startScan blocked: missing BLE permissions","E")
             error("Missing Bluetooth permissions")
             return
         }
 
         Log.d(TAG, "BLE scan started")
+        dataLogger.logDebug(TAG, "BLE scan started")
 
         // UI 상태를 스캔 중으로 변경
         _state.update {
@@ -611,6 +621,7 @@ class PotchBleManager(
         if (!hasBlePermissions()) return
 
         Log.d(TAG, "stopScan() Called.")
+        dataLogger.logDebug(TAG, "stopScan() Called.")
         // 실제 스캔 중지
         scanner?.stopScan(scanCallback)
 
@@ -695,6 +706,7 @@ class PotchBleManager(
         closeGatt()
 
         Log.d(TAG,"disconnec() Called.")
+        dataLogger.logDebug(TAG, "disconnec() Called.")
 
         _state.update {
             it.copy(
@@ -739,6 +751,7 @@ class PotchBleManager(
         characteristic: BluetoothGattCharacteristic
     ) {
         Log.d(TAG,"enableNotification() Called")
+        dataLogger.logDebug(TAG, "enableNotification() Called")
         // Android 로컬 쪽에서 해당 characteristic notify를 받을 준비를 한다.
         val notificationSet = gatt.setCharacteristicNotification(characteristic, true)
         if (!notificationSet) {
@@ -780,6 +793,7 @@ class PotchBleManager(
         try {
             gatt?.close()
             Log.d(TAG,"close GATT")
+            dataLogger.logDebug(TAG, "close GATT")
         } catch (_: Exception) {
             // close 중 예외가 나도 앱이 죽지 않게 무시
         } finally {
@@ -839,6 +853,7 @@ class PotchBleManager(
      */
     private fun log(message: String) {
         Log.d(TAG,"log: $message")
+        dataLogger.logDebug(TAG, "log: $message")
         _state.update {
             it.copy(lastLog = message, lastError = null)
         }
@@ -851,6 +866,7 @@ class PotchBleManager(
      */
     private fun error(message: String) {
         Log.d(TAG,"error: $message")
+        dataLogger.logDebug(TAG, "error: $message", "E")
         _state.update {
             it.copy(lastError = message, lastLog = message)
         }
@@ -869,6 +885,7 @@ class PotchBleManager(
         isReconnecting = true
 
         Log.d(TAG,"scheduleReconnect() Called")
+        dataLogger.logDebug(TAG, "scheduleReconnect() Called")
 
         _state.update {
             it.copy(
@@ -938,6 +955,7 @@ class PotchBleManager(
                 )
 
                 Log.d(TAG, failMsg)
+                dataLogger.logDebug(TAG, failMsg)
 
                 _state.update {
                     it.copy(
@@ -965,6 +983,7 @@ class PotchBleManager(
         }
 
         Log.d(TAG, "startScanForReconnect() Called")
+        dataLogger.logDebug(TAG, "startScanForReconnect() Called")
 
         if (!adapter.isEnabled) {
             _state.update {
@@ -1051,6 +1070,7 @@ class PotchBleManager(
         reconnectAttempt = 0
 
         Log.d(TAG,"stopReconnectOnly() Called")
+        dataLogger.logDebug(TAG, "stopReconnectOnly() Called")
 
         stopScan()
         gatt?.disconnect()

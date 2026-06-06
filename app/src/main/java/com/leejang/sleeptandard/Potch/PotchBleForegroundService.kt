@@ -124,6 +124,7 @@ class PotchBleForegroundService : Service() {
         super.onCreate()
 
         Log.i(TAG, "onCreate() - ForegroundService created")
+        dataLogger?.logDebug(TAG, "onCreate() - ForegroundService created", "I")
 
         // ForegroundService 알림을 표시하기 위한 채널 생성
         createNotificationChannel()
@@ -153,10 +154,12 @@ class PotchBleForegroundService : Service() {
             TAG,
             "onStartCommand() action=${intent?.action}, flags=$flags, startId=$startId, sessionRunning=${isSessionRunning()}"
         )
+        dataLogger?.logDebug(TAG, "onStartCommand() action=${intent?.action}, flags=$flags, startId=$startId, sessionRunning=${isSessionRunning()}", "I")
 
         when (intent?.action) {
             ACTION_START -> {
                 Log.i(TAG, "ACTION_START received")
+                dataLogger?.logDebug(TAG, "ACTION_START received", "I")
                 // "현재 Potch 수신 세션이 진행 중"이라는 표시를 저장한다.
                 // Service가 죽었다가 재시작될 때 복구 판단에 사용한다.
                 markSessionRunning(true)
@@ -167,6 +170,7 @@ class PotchBleForegroundService : Service() {
 
             ACTION_STOP_AND_SAVE -> {
                 Log.i(TAG, "ACTION_STOP_AND_SAVE received")
+                dataLogger?.logDebug(TAG, "ACTION_STOP_AND_SAVE received", "I")
                 // 사용자가 정상적으로 종료한 것이므로 세션 진행 상태를 false로 저장한다.
                 markSessionRunning(false)
 
@@ -176,6 +180,7 @@ class PotchBleForegroundService : Service() {
 
             null -> {
                 Log.w(TAG, "onStartCommand() intent is null. START_STICKY restart suspected.")
+                dataLogger?.logDebug(TAG, "onStartCommand() intent is null. START_STICKY restart suspected.", "W")
                 /**
                  * START_STICKY Service가 Android에 의해 재생성되면
                  * intent가 null로 들어올 수 있다.
@@ -186,8 +191,10 @@ class PotchBleForegroundService : Service() {
                 if (isSessionRunning()) {
                     startPotchReceiving()
                     Log.w(TAG, "session_running=true. Restarting Potch receiving.")
+                    dataLogger?.logDebug(TAG, "session_running=true. Restarting Potch receiving.", "W")
                 }else {
                     Log.w(TAG, "session_running=false. Service will not restart receiving.")
+                    dataLogger?.logDebug(TAG, "session_running=false. Service will not restart receiving.", "W")
                 }
             }
         }
@@ -215,10 +222,12 @@ class PotchBleForegroundService : Service() {
     private fun initializePotchObjects() {
         if (dataLogger != null && dataProcessor != null && bleManager != null) {
             Log.d(TAG, "initializePotchObjects() skipped - objects already initialized")
+            dataLogger?.logDebug(TAG, "initializePotchObjects() skipped - objects already initialized")
             return
         }
 
         Log.i(TAG, "initializePotchObjects() - creating Logger, Processor, BleManager")
+        dataLogger?.logDebug(TAG, "initializePotchObjects() - creating Logger, Processor, BleManager", "I")
 
         // CSV 로그 저장 담당
         val logger = PotchDataLogger(applicationContext)
@@ -238,6 +247,7 @@ class PotchBleForegroundService : Service() {
         bleManager = manager
 
         Log.i(TAG, "Potch objects initialized")
+        dataLogger?.logDebug(TAG, "Potch objects initialized", "I")
 
         /**
          * BLE 상태를 계속 관찰한다.
@@ -259,6 +269,7 @@ class PotchBleForegroundService : Service() {
                     TAG,
                     "BLE state: connected=${state.isConnected}, scanning=${state.isScanning}, reconnecting=${state.isReconnecting}, device=${state.deviceName}, log=${state.lastLog}, error=${state.lastError}"
                 )
+                dataLogger?.logDebug(TAG, "BLE state: connected=${state.isConnected}, scanning=${state.isScanning}, reconnecting=${state.isReconnecting}, device=${state.deviceName}, log=${state.lastLog}, error=${state.lastError}")
 
                 // Service 내부 상태를 UI에서 볼 수 있게 공용 StateHolder에 전달
                 PotchServiceStateHolder.updateBleState(state)
@@ -293,6 +304,7 @@ class PotchBleForegroundService : Service() {
                     TAG,
                     "Processor state: parsed=${state.parsedSuperFrameCount}, totalMini=${state.totalMiniPackets}, validMini=${state.validMiniPackets}, crcErr=${state.crcErrorCount}, seqErr=${state.missingSequenceErrors}, lastLog=${state.lastLog}"
                 )
+                dataLogger?.logDebug(TAG, "Processor state: parsed=${state.parsedSuperFrameCount}, totalMini=${state.totalMiniPackets}, validMini=${state.validMiniPackets}, crcErr=${state.crcErrorCount}, seqErr=${state.missingSequenceErrors}, lastLog=${state.lastLog}")
                 PotchServiceStateHolder.updateProcessorState(state)
             }
         }
@@ -310,14 +322,17 @@ class PotchBleForegroundService : Service() {
      */
     private fun startPotchReceiving() {
         Log.i(TAG, "startPotchReceiving() called")
+        dataLogger?.logDebug(TAG, "startPotchReceiving() called", "I")
         if (!hasRequiredPermissions()) {
             Log.e(TAG, "startPotchReceiving() blocked - missing permissions")
+            dataLogger?.logDebug(TAG, "startPotchReceiving() blocked - missing permissions", "E")
             // 권한이 없으면 스캔을 시작하지 않고 알림만 갱신
             updateNotification("Potch 권한이 부족합니다")
             return
         }
 
         Log.i(TAG, "Permissions OK. Starting BLE scan.")
+        dataLogger?.logDebug(TAG, "Permissions OK. Starting BLE scan.", "I")
 
         initializePotchObjects()
 
@@ -335,10 +350,12 @@ class PotchBleForegroundService : Service() {
      */
     private fun stopPotchReceivingAndSave() {
         Log.i(TAG, "stopPotchReceivingAndSave() called")
+        dataLogger?.logDebug(TAG, "stopPotchReceivingAndSave() called", "I")
         val manager = bleManager
 
         if (manager == null) {
             Log.w(TAG, "stopPotchReceivingAndSave() - manager is null. Stop service only.")
+            dataLogger?.logDebug(TAG, "stopPotchReceivingAndSave() - manager is null. Stop service only.", "W")
             stopForeground(STOP_FOREGROUND_DETACH)
             stopSelf()
             return
@@ -347,6 +364,7 @@ class PotchBleForegroundService : Service() {
         updateNotification("Potch 로그 저장 중...")
 
         Log.i(TAG, "Stopping BLE reconnect/scan/gatt before saving log")
+        dataLogger?.logDebug(TAG, "Stopping BLE reconnect/scan/gatt before saving log", "I")
 
         // BLE 연결, 스캔, 재연결 시도를 중지한다.
         // 이 함수는 파일 저장까지 하지 않고 BLE 정리만 먼저 한다.
@@ -356,6 +374,7 @@ class PotchBleForegroundService : Service() {
         serviceScope.launch {
 
             Log.i(TAG, "Saving log on Dispatchers.IO")
+            dataLogger?.logDebug(TAG, "Saving log on Dispatchers.IO", "I")
 
             val savedPath = kotlinx.coroutines.withContext(Dispatchers.IO) {
                 manager.saveCurrentLog()
@@ -373,6 +392,7 @@ class PotchBleForegroundService : Service() {
             )
 
             Log.i(TAG, "Stopping foreground service after save")
+            dataLogger?.logDebug(TAG, "Stopping foreground service after save", "I")
 
             // ForegroundService 알림 제거
             stopForeground(STOP_FOREGROUND_DETACH)
@@ -392,6 +412,7 @@ class PotchBleForegroundService : Service() {
      */
     override fun onDestroy() {
         Log.w(TAG, "onDestroy() - ForegroundService destroyed")
+        dataLogger?.logDebug(TAG, "onDestroy() - ForegroundService destroyed", "W")
         // BLE 스캔/연결/GATT 자원 정리
         bleManager?.close()
 
@@ -555,6 +576,7 @@ class PotchBleForegroundService : Service() {
             TAG,
             "Permission check: bluetooth=$hasBluetoothPermissions, notification=$hasNotificationPermission"
         )
+        dataLogger?.logDebug(TAG, "Permission check: bluetooth=$hasBluetoothPermissions, notification=$hasNotificationPermission")
 
         return hasBluetoothPermissions && hasNotificationPermission
     }
