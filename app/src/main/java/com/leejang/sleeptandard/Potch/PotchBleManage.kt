@@ -297,6 +297,7 @@ class PotchBleManager(
          * - 연결 해제
          * - 연결 오류
          */
+        /**시험용 재연결 로직 변경**/
         @SuppressLint("MissingPermission")
         override fun onConnectionStateChange(
             gatt: BluetoothGatt,
@@ -315,7 +316,6 @@ class PotchBleManager(
                     "GATT connection error: status=$status, newState=$newState, manual=$manualDisconnect, attempt=$reconnectAttempt"
 
                 Log.e(TAG, msg)
-                dataLogger.logDebug(TAG, msg,"E")
 
                 dataLogger.logConnectionEvent(
                     event = "gatt_error",
@@ -326,10 +326,14 @@ class PotchBleManager(
 
                 closeGatt()
 
-                startScan()
+                if (!manualDisconnect) {
+                    // 이전 재연결 시도가 실패했으므로 다음 시도를 예약할 수 있게 풀어준다.
+                    isReconnecting = false
+                    scheduleReconnect()
+                }
+
                 return
             }
-
             when (newState) {
                 BluetoothProfile.STATE_CONNECTED -> {
                     // 연결된 기기 이름을 가져온다.
@@ -876,6 +880,7 @@ class PotchBleManager(
     }
 
 
+    /**시험용 재연결 로직 수정**/
     @SuppressLint("MissingPermission")
     private fun scheduleReconnect() {
         if (!hasBlePermissions()) {
@@ -883,96 +888,136 @@ class PotchBleManager(
             return
         }
 
-        if (isReconnecting) return
+        if (manualDisconnect) {
+            Log.d(TAG, "scheduleReconnect canceled: manualDisconnect=true")
+            return
+        }
+
+        if (isReconnecting) {
+            Log.d(TAG, "scheduleReconnect ignored: already reconnecting")
+            return
+        }
+
+        val device = targetDevice
+
+        if (device == null) {
+            val msg = "Direct reconnect failed: targetDevice is null. Cannot reconnect without scan."
+
+            Log.e(TAG, msg)
+
+            dataLogger.logConnectionEvent(
+                event = "direct_reconnect_no_target",
+                message = msg
+            )
+
+            _state.update {
+                it.copy(
+                    isReconnecting = false,
+                    isScanning = false,
+                    lastLog = msg,
+                    lastError = msg
+                )
+            }
+
+            return
+        }
+
+        if (reconnectAttempt >= maxReconnectAttempts) {
+            reconnectAttempt = 0
+            isReconnecting = false
+
+            val failMsg = "Direct reconnect attempts exceeded. Waiting for user action."
+
+            Log.e(TAG, failMsg)
+
+            dataLogger.logConnectionEvent(
+                event = "direct_reconnect_failed",
+                message = failMsg
+            )
+
+            _state.update {
+                it.copy(
+                    isReconnecting = false,
+                    isScanning = false,
+                    lastLog = failMsg
+                )
+            }
+
+            return
+        }
 
         isReconnecting = true
 
-        Log.d(TAG,"scheduleReconnect() Called")
-        dataLogger.logDebug(TAG, "scheduleReconnect() Called")
+        val scheduleMsg =
+            "Direct reconnect scheduled. attempt=${reconnectAttempt + 1}/$maxReconnectAttempts"
+
+        Log.d(TAG, scheduleMsg)
+
+        dataLogger.logConnectionEvent(
+            event = "direct_reconnect_scheduled",
+            message = scheduleMsg
+        )
 
         _state.update {
             it.copy(
                 isReconnecting = true,
                 isScanning = false,
-                lastLog = "Reconnecting soon by scanning..."
+                lastLog = scheduleMsg
             )
         }
-
-        dataLogger.logConnectionEvent(
-            event = "reconnect_scheduled",
-            message = "Reconnect scheduled. Will close GATT, wait, then restart scan."
-        )
 
         reconnectHandler.postDelayed({
             if (manualDisconnect) {
                 isReconnecting = false
 
+                val cancelMsg = "Direct reconnect canceled by user."
+
+                Log.d(TAG, cancelMsg)
+
+                dataLogger.logConnectionEvent(
+                    event = "direct_reconnect_canceled",
+                    message = cancelMsg
+                )
+
                 _state.update {
                     it.copy(
                         isReconnecting = false,
-                        lastLog = "Reconnect canceled by user."
+                        lastLog = cancelMsg
                     )
                 }
-
-                dataLogger.logConnectionEvent(
-                    event = "reconnect_canceled",
-                    message = "Reconnect canceled by manual disconnect."
-                )
 
                 return@postDelayed
             }
 
             reconnectAttempt++
 
-            val msg =
-                "Reconnect scan attempt $reconnectAttempt/$maxReconnectAttempts"
+            val reconnectMsg =
+                "Direct reconnect attempt $reconnectAttempt/$maxReconnectAttempts to ${getDeviceName(device) ?: TARGET_NAME}"
+
+            Log.w(TAG, reconnectMsg)
 
             dataLogger.logConnectionEvent(
-                event = "reconnect_scan_attempt",
-                message = msg
+                event = "direct_reconnect_attempt",
+                message = reconnectMsg
             )
 
             _state.update {
                 it.copy(
                     isReconnecting = true,
                     isScanning = false,
-                    lastLog = msg
+                    lastLog = reconnectMsg
                 )
             }
 
-            // 기존 GATT 참조 완전히 정리
+            // 기존 GATT 자원을 정리한 뒤, 예전에 저장해둔 targetDevice에 바로 연결한다.
             closeGatt()
 
-            // 이전에 잡아둔 device를 계속 직접 연결하지 않도록 비움
-            targetDevice = null
-
-            if (reconnectAttempt > maxReconnectAttempts) {
-                reconnectAttempt = 0
-                isReconnecting = false
-
-                val failMsg = "Reconnect attempts exceeded. Waiting for user action."
-
-                dataLogger.logConnectionEvent(
-                    event = "reconnect_failed",
-                    message = failMsg
-                )
-
-                Log.d(TAG, failMsg)
-                dataLogger.logDebug(TAG, failMsg)
-
-                _state.update {
-                    it.copy(
-                        isReconnecting = false,
-                        isScanning = false,
-                        lastLog = failMsg
-                    )
-                }
-
-                return@postDelayed
+            gatt = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                device.connectGatt(appContext, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
+            } else {
+                device.connectGatt(appContext, false, gattCallback)
             }
 
-            // 핵심: 기존 device 직접 connect가 아니라 다시 scan 시작
-            startScanForReconnect()
         }, reconnectDelayMs)
     }
 
