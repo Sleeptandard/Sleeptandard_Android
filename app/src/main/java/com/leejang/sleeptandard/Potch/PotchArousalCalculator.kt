@@ -1,5 +1,6 @@
 package com.leejang.sleeptandard.Potch
 
+import android.util.Log
 import com.leejang.sleeptandard.Potch.PowerBin
 import kotlin.math.abs
 import kotlin.math.sqrt
@@ -17,6 +18,8 @@ data class ArousalState(
     val rrFromPpg: Double? = null,
     val rrFromImu: Double? = null,
     val rrFinal: Double? = null,
+    val rrScore: Double? = null,    // confidence 곱한 값
+    val rrRawScore: Double? = null, // confidence 곱하기 전
     val rrFusionSource: RrFusionSource = RrFusionSource.NONE,
     val rrFusionConfidence: Double = 0.0,
     val rrFusionLog: String? = null,
@@ -110,6 +113,34 @@ data class ArousalConfig(
     // quality가 이 값보다 낮으면 신뢰도 낮은 RR로 판단
     val rrFusionMinUsableQuality: Double = 0.35,
 
+    // RR Score
+    // 수면 중 호흡수가 이 값 이하이면 RR 자체만으로는 각성 신호로 거의 보지 않음
+    val rrScoreLowBpm: Double = 16.0,
+
+    // 이 값 이상이면 RR 절대값만으로는 높은 각성 신호로 봄
+    val rrScoreHighBpm: Double = 24.0,
+
+    // 최근 RR이 baseline보다 이 정도 이상 증가하면 높은 각성 신호로 봄
+    val rrRiseThresholdBpm: Double = 3.0,
+
+    // 최근 RR 변화량 계산용 window
+    val rrScoreWindowMillis: Long = 3 * 60 * 1000L,
+    val rrScoreMinWindowMillis: Long = 60 * 1000L,
+    val rrScoreMinSampleCount: Int = 5,
+
+    // RR buffer에 저장할 최소 신뢰도
+    val rrScoreMinUsableConfidence: Double = 0.35,
+
+    // RR 튐 제거 기준
+    val rrScoreOutlierToleranceBpm: Double = 5.0,
+
+    // raw RR score 조합 비율
+    val rrAbsoluteScoreWeight: Double = 0.4,
+    val rrRiseScoreWeight: Double = 0.6,
+
+    // RR history 보관 시간
+    val rrHistoryWindowMillis: Long = 10 * 60 * 1000L,
+
     // RRV
     val rrvMinIntervalCount: Int = 3,
     val rrvIntervalOutlierTolerance: Double = 0.40,
@@ -183,6 +214,16 @@ data class ArousalConfig(
 
     // Final score
     val finalWakeThreshold: Double = 0.65,
+    // 기본 각성 점수는 최대 0.8이 되도록 설계.
+    // micro + rr + rrv + hr + hrv weight 합 = 0.8
+    val mmScoreWeight: Double = 0.20,
+    val rrScoreWeight: Double = 0.15,
+    val rrvScoreWeight: Double = 0.15,
+    val hrScoreWeight: Double = 0.20,
+    val hrvScoreWeight: Double = 0.10,
+    // skin temperature는 더하는 지표가 아니라 multiplier로 사용.
+    // multiplier = 1.0 ~ 1.25
+    val tempScoreWeight: Double = 0.25,
 
     // PPG/IMU는 100Hz 기준으로 최근 60초 보관
     val ppgWindowSeconds: Int = 60,
@@ -307,6 +348,21 @@ data class RrFusionResult(
     val imuQuality: Double?,
     val diffBpm: Double?,
     val confidence: Double,
+    val log: String
+)
+
+data class RespiratoryRateArousalResult(
+    val currentRrBpm: Double,
+    val baselineRrBpm: Double?,
+    val recentRrBpm: Double?,
+    val riseBpm: Double?,
+    val absoluteScore: Double,
+    val riseScore: Double?,
+    val rawScore: Double,
+    val score: Double,
+    val confidence: Double,
+    val sampleCount: Int,
+    val windowSeconds: Double?,
     val log: String
 )
 
@@ -456,6 +512,16 @@ class PotchArousalCalculator(
      */
     private val ppgIrBuffer = ArrayDeque<Double>()
     private val ppgRedBuffer = ArrayDeque<Double>()
+
+    /**
+     * RR 각성 점수 계산용 rolling buffer.
+     *
+     * Pair<timestampMillis, rrBpm>
+     *
+     * rrFinal이 계산되고 confidence가 충분한 경우에만 저장한다.
+     */
+    private val respirationRateBuffer = ArrayDeque<Pair<Long, Double>>()
+
     /**
      * IMU G magnitude rolling buffer.
      *
@@ -541,6 +607,16 @@ class PotchArousalCalculator(
         val rrFromImu = imuRespiration?.rrBpm
         val rrFinal = rrFusion.rrBpm
 
+        if (rrFinal != null) {
+            appendRespirationRate(
+                timestampMillis = sensorData.timestamp,
+                rrBpm = rrFinal,
+                confidence = rrFusion.confidence
+            )
+        }
+
+        val rrArousalResult = calculateRespiratoryRateArousal(rrFusion)
+
         val rrvResult = calculateRrvRmssd(
             ppg = ppgRespiration,
             imu = imuRespiration,
@@ -560,12 +636,12 @@ class PotchArousalCalculator(
         val hrvLfHf = hrvFrequencyResult?.lfHfRatio
 
         val finalScore = calculateFinalWakeScore(
-            microVariance = microVariance,
-            rrFinal = rrFinal,
-            rrvRmssd = rrvRmssd,
-            hrGradient = hrGradient,
-            hrvLfHf = hrvLfHf,
-            tempGradient = tempGradient
+            microScore = microMovement?.score?.coerceIn(0.0, 1.0),
+            rrScore = rrArousalResult?.score,
+            rrvScore = rrvResult?.score,
+            hrScore = hrResult?.score,
+            hrvScore = hrvFrequencyResult?.score ?: hrvResult?.score,
+            tempScore = skinTempResult?.score
         )
 
         lastState = ArousalState(
@@ -575,6 +651,8 @@ class PotchArousalCalculator(
             rrFromPpg = rrFromPpg,
             rrFromImu = rrFromImu,
             rrFinal = rrFinal,
+            rrScore = rrArousalResult?.score,
+            rrRawScore = rrArousalResult?.rawScore,
             rrFusionSource = rrFusion.source,
             rrFusionConfidence = rrFusion.confidence,
             rrFusionLog = rrFusion.log,
@@ -606,7 +684,7 @@ class PotchArousalCalculator(
             isWakeTimingCandidate = finalScore >= config.finalWakeThreshold,
             lastLog = "Arousal score=$finalScore, " +
                     "micro=${microMovement?.level}, " +
-                    "rr=${rrFusion.log}, " +
+                    "rr=${rrFusion.log}, rrScore=${rrArousalResult?.log}, " +
                     "rrv=${rrvResult?.log}, " +
                     "hr=${hrResult?.log}, " +
                     "hrv=${hrvFrequencyResult?.log ?: hrvResult?.log}"+
@@ -614,6 +692,101 @@ class PotchArousalCalculator(
         )
 
         return lastState
+    }
+    /**
+     * 최종 기상 후보 점수를 계산한다.
+     *
+     * 설계 의도:
+     *
+     * 1. micro, RR, RRV, HR, HRV는 기본 각성 점수로 더한다.
+     *    이 기본 점수는 최대 0.8까지만 허용한다.
+     *
+     * 2. skin temperature는 단독으로 점수를 더하지 않고 multiplier로 사용한다.
+     *    체온 상승은 다른 각성 신호를 보조적으로 강화하는 역할이다.
+     *
+     * 3. 최종 점수는 항상 0.0 ~ 1.0 범위로 제한한다.
+     *
+     * 공식:
+     *
+     * baseScore =
+     *     microScore * w1 +
+     *     rrScore    * w2 +
+     *     rrvScore   * w3 +
+     *     hrScore    * w4 +
+     *     hrvScore   * w5
+     *
+     * skinMultiplier =
+     *     1.0 + tempScore * tempScoreWeight
+     *
+     * finalWakeScore =
+     *     baseScore * skinMultiplier
+     */
+    private fun calculateFinalWakeScore(
+        microScore: Double?,
+        rrScore: Double?,
+        rrvScore: Double?,
+        hrScore: Double?,
+        hrvScore: Double?,
+        tempScore: Double?
+    ): Double {
+        val micro = normalizeWakeScore(microScore)
+        val rr = normalizeWakeScore(rrScore)
+        val rrv = normalizeWakeScore(rrvScore)
+        val hr = normalizeWakeScore(hrScore)
+        val hrv = normalizeWakeScore(hrvScore)
+        val temp = normalizeWakeScore(tempScore)
+
+        val baseWeightSum =
+            config.mmScoreWeight +
+                    config.rrScoreWeight +
+                    config.rrvScoreWeight +
+                    config.hrScoreWeight +
+                    config.hrvScoreWeight
+
+        if (abs(baseWeightSum - 0.8) > 0.000001) {
+            Log.w(
+                "PotchArousalCalculator",
+                "Base score weight sum should be 0.8, but was $baseWeightSum"
+            )
+        }
+
+        val baseScoreRaw =
+            micro * config.mmScoreWeight +
+                    rr * config.rrScoreWeight +
+                    rrv * config.rrvScoreWeight +
+                    hr * config.hrScoreWeight +
+                    hrv * config.hrvScoreWeight
+
+        // 네 설계대로 기본 생체/움직임 점수는 최대 0.8까지만 허용.
+        val baseScore = baseScoreRaw.coerceIn(0.0, 0.8)
+
+        // temp = 0이면 multiplier 1.0
+        // temp = 1이면 multiplier 1.25
+        val skinTemperatureMultiplier =
+            (1.0 + temp * config.tempScoreWeight)
+                .coerceIn(1.0, 1.25)
+
+        val finalScore =
+            (baseScore * skinTemperatureMultiplier)
+                .coerceIn(0.0, 1.0)
+
+        return finalScore
+    }
+
+    /**
+     * 각 지표 점수를 final score 계산에 사용할 수 있도록 정규화한다.
+     *
+     * null, NaN, Infinity는 계산에 쓰지 않고 0점으로 처리한다.
+     * 1.0을 넘는 값은 1.0으로 자른다.
+     */
+    private fun normalizeWakeScore(
+        score: Double?
+    ): Double {
+        if (score == null) return 0.0
+        if (score.isNaN()) return 0.0
+        if (!score.isFinite()) return 0.0
+
+        return score.coerceIn(0.0, 1.0)
     }
 
     /**
@@ -723,6 +896,23 @@ class PotchArousalCalculator(
             buffer = heartRateBuffer,
             nowMillis = timestampMillis,
             windowMillis = config.heartRateWindowMillis
+        )
+    }
+
+    private fun appendRespirationRate(
+        timestampMillis: Long,
+        rrBpm: Double,
+        confidence: Double
+    ) {
+        if (rrBpm !in config.rrMinBpm..config.rrMaxBpm) return
+        if (confidence < config.rrScoreMinUsableConfidence) return
+
+        respirationRateBuffer.addLast(timestampMillis to rrBpm)
+
+        trimTimeBuffer(
+            buffer = respirationRateBuffer,
+            nowMillis = timestampMillis,
+            windowMillis = config.rrHistoryWindowMillis
         )
     }
 
@@ -858,7 +1048,7 @@ class PotchArousalCalculator(
         microFilteredBuffer.clear()
         temperatureBuffer.clear()
         heartRateBuffer.clear()
-
+        respirationRateBuffer.clear()
         hrvIbiBuffer.clear()
         lastAcceptedHrvIbiEndSampleIndex = Long.MIN_VALUE
 
@@ -1854,6 +2044,207 @@ class PotchArousalCalculator(
     }
 
     /********************* //Fusion RR data from PPG & IMU ********************/
+
+    /********************* RR Arousal Score ********************/
+
+    fun calculateRespiratoryRateArousal(
+        rrFusion: RrFusionResult
+    ): RespiratoryRateArousalResult? {
+        val currentRr = rrFusion.rrBpm ?: return null
+
+        if (currentRr !in config.rrMinBpm..config.rrMaxBpm) {
+            return null
+        }
+
+        val confidence = rrFusion.confidence.coerceIn(0.0, 1.0)
+
+        val absoluteScore = scoreRespiratoryRateAbsolute(currentRr)
+
+        val latestTime = respirationRateBuffer.lastOrNull()?.first
+
+        if (latestTime == null || respirationRateBuffer.size < config.rrScoreMinSampleCount) {
+            val rawScore = absoluteScore
+            val finalScore = rawScore * confidence
+
+            return RespiratoryRateArousalResult(
+                currentRrBpm = currentRr,
+                baselineRrBpm = null,
+                recentRrBpm = null,
+                riseBpm = null,
+                absoluteScore = absoluteScore,
+                riseScore = null,
+                rawScore = rawScore,
+                score = finalScore,
+                confidence = confidence,
+                sampleCount = respirationRateBuffer.size,
+                windowSeconds = null,
+                log = "RR Score: current=${"%.1f".format(currentRr)}, abs=${"%.2f".format(absoluteScore)}, conf=${"%.2f".format(confidence)}, score=${"%.2f".format(finalScore)}"
+            )
+        }
+
+        val windowValues = respirationRateBuffer
+            .filter { (timestamp, rrBpm) ->
+                latestTime - timestamp <= config.rrScoreWindowMillis &&
+                        rrBpm in config.rrMinBpm..config.rrMaxBpm
+            }
+
+        if (windowValues.size < config.rrScoreMinSampleCount) {
+            val rawScore = absoluteScore
+            val finalScore = rawScore * confidence
+
+            return RespiratoryRateArousalResult(
+                currentRrBpm = currentRr,
+                baselineRrBpm = null,
+                recentRrBpm = null,
+                riseBpm = null,
+                absoluteScore = absoluteScore,
+                riseScore = null,
+                rawScore = rawScore,
+                score = finalScore,
+                confidence = confidence,
+                sampleCount = windowValues.size,
+                windowSeconds = null,
+                log = "RR Score: current=${"%.1f".format(currentRr)}, abs=${"%.2f".format(absoluteScore)}, conf=${"%.2f".format(confidence)}, score=${"%.2f".format(finalScore)}"
+            )
+        }
+
+        val windowDurationMillis =
+            windowValues.last().first - windowValues.first().first
+
+        if (windowDurationMillis < config.rrScoreMinWindowMillis) {
+            val rawScore = absoluteScore
+            val finalScore = rawScore * confidence
+
+            return RespiratoryRateArousalResult(
+                currentRrBpm = currentRr,
+                baselineRrBpm = null,
+                recentRrBpm = null,
+                riseBpm = null,
+                absoluteScore = absoluteScore,
+                riseScore = null,
+                rawScore = rawScore,
+                score = finalScore,
+                confidence = confidence,
+                sampleCount = windowValues.size,
+                windowSeconds = windowDurationMillis / 1000.0,
+                log = "RR Score: current=${"%.1f".format(currentRr)}, abs=${"%.2f".format(absoluteScore)}, conf=${"%.2f".format(confidence)}, score=${"%.2f".format(finalScore)}"
+            )
+        }
+
+        val cleanedValues = removeRespiratoryRateOutliers(windowValues)
+
+        if (cleanedValues.size < config.rrScoreMinSampleCount) {
+            val rawScore = absoluteScore
+            val finalScore = rawScore * confidence
+
+            return RespiratoryRateArousalResult(
+                currentRrBpm = currentRr,
+                baselineRrBpm = null,
+                recentRrBpm = null,
+                riseBpm = null,
+                absoluteScore = absoluteScore,
+                riseScore = null,
+                rawScore = rawScore,
+                score = finalScore,
+                confidence = confidence,
+                sampleCount = cleanedValues.size,
+                windowSeconds = windowDurationMillis / 1000.0,
+                log = "RR Score: current=${"%.1f".format(currentRr)}, abs=${"%.2f".format(absoluteScore)}, conf=${"%.2f".format(confidence)}, score=${"%.2f".format(finalScore)}"
+            )
+        }
+
+        val splitSize = (cleanedValues.size / 3).coerceAtLeast(1)
+
+        val baselinePart = cleanedValues.take(splitSize)
+        val recentPart = cleanedValues.takeLast(splitSize)
+
+        val baselineRr = baselinePart.map { it.second }.average()
+        val recentRr = recentPart.map { it.second }.average()
+
+        val riseBpm = recentRr - baselineRr
+        val riseScore = scoreRespiratoryRateRise(riseBpm)
+
+        val rawScore =
+            (
+                    absoluteScore * config.rrAbsoluteScoreWeight +
+                            riseScore * config.rrRiseScoreWeight
+                    )
+                .coerceIn(0.0, 1.0)
+
+        val finalScore =
+            (rawScore * confidence).coerceIn(0.0, 1.0)
+
+        val windowSeconds =
+            (cleanedValues.last().first - cleanedValues.first().first) / 1000.0
+
+        return RespiratoryRateArousalResult(
+            currentRrBpm = currentRr,
+            baselineRrBpm = baselineRr,
+            recentRrBpm = recentRr,
+            riseBpm = riseBpm,
+            absoluteScore = absoluteScore,
+            riseScore = riseScore,
+            rawScore = rawScore,
+            score = finalScore,
+            confidence = confidence,
+            sampleCount = cleanedValues.size,
+            windowSeconds = windowSeconds,
+            log = "RR Score: current=${"%.1f".format(currentRr)}, " +
+                    "base=${"%.1f".format(baselineRr)}, " +
+                    "recent=${"%.1f".format(recentRr)}, " +
+                    "rise=${"%.1f".format(riseBpm)}, " +
+                    "abs=${"%.2f".format(absoluteScore)}, " +
+                    "riseScore=${"%.2f".format(riseScore)}, " +
+                    "raw=${"%.2f".format(rawScore)}, " +
+                    "conf=${"%.2f".format(confidence)}, " +
+                    "score=${"%.2f".format(finalScore)}"
+        )
+    }
+    private fun removeRespiratoryRateOutliers(
+        values: List<Pair<Long, Double>>
+    ): List<Pair<Long, Double>> {
+        if (values.size < 3) {
+            return values
+        }
+
+        val sortedRr = values.map { it.second }.sorted()
+        val median = sortedRr[sortedRr.size / 2]
+
+        val filtered = values.filter { (_, rrBpm) ->
+            abs(rrBpm - median) <= config.rrScoreOutlierToleranceBpm
+        }
+
+        return filtered.ifEmpty { values }
+    }
+
+    private fun scoreRespiratoryRateAbsolute(
+        rrBpm: Double
+    ): Double {
+        if (config.rrScoreHighBpm <= config.rrScoreLowBpm) {
+            return 0.0
+        }
+
+        return ((rrBpm - config.rrScoreLowBpm) /
+                (config.rrScoreHighBpm - config.rrScoreLowBpm))
+            .coerceIn(0.0, 1.0)
+    }
+
+    private fun scoreRespiratoryRateRise(
+        riseBpm: Double
+    ): Double {
+        if (riseBpm <= 0.0) {
+            return 0.0
+        }
+
+        if (config.rrRiseThresholdBpm <= 0.0) {
+            return 0.0
+        }
+
+        return (riseBpm / config.rrRiseThresholdBpm)
+            .coerceIn(0.0, 1.0)
+    }
+
+    /********************* //RR Arousal Score ********************/
 
     /********************* RRV from RR intervals ********************/
 
