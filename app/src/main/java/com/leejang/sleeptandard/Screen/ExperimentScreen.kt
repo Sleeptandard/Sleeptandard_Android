@@ -60,8 +60,8 @@ fun ExperimentScreen(
     val temperatureText =
         sensorData?.let { "%.1f°C".format(it.ntcCelsius) } ?: "--°C"
 
-    // 현재 Swift 로직에는 심박수 파싱이 없어서 아직 "-- bpm"으로 표시
-    val heartRateText = "-- bpm"
+    val heartRateText =
+        processorState.heartRateBpm?.let { "$it bpm" } ?: "-- bpm"
 
     val batteryPercent =
         sensorData?.batteryVoltage?.let { voltageToBatteryPercent(it) }
