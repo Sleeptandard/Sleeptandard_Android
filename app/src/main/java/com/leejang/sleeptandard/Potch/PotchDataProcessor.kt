@@ -168,7 +168,7 @@ class PotchDataProcessor(
     private var totalHeartRateSampleCount: Long = 0L
 
     /** HR 버퍼에 보관할 최대 샘플 수. 100Hz 기준 8초 = 800 샘플. */
-    private val heartRateBufferMaxSamples = 500
+    private val heartRateBufferMaxSamples = 800
 
     /** HR을 계산하기 위한 최소 누적 샘플 수. 100Hz 기준 3초 = 300 샘플. */
     private val heartRateMinSamples = 300

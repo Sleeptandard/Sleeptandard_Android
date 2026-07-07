@@ -1,6 +1,13 @@
 package com.leejang.sleeptandard.Screen
 
 import android.util.Log
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -40,7 +47,12 @@ import com.leejang.sleeptandard.Potch.PacketErrorLog
 import com.leejang.sleeptandard.Potch.PotchBleState
 import com.leejang.sleeptandard.Potch.PotchBleViewModel
 import kotlin.math.abs
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.PI
 import kotlin.math.roundToInt
+import kotlin.math.sin
+import kotlin.math.sqrt
 import androidx.compose.foundation.clickable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateListOf
@@ -86,6 +98,59 @@ fun ExperimentScreen(
 
     val selectedLogFileNames = remember {
         mutableStateListOf<String>()
+    }
+
+    val ppgIrSamples = remember {
+        mutableStateListOf<Int>()
+    }
+    val ppgRedSamples = remember {
+        mutableStateListOf<Int>()
+    }
+    var latestPpgFrameSummary by remember {
+        mutableStateOf(PpgFrameSummary.empty())
+    }
+
+    var latestImuPose by remember {
+        mutableStateOf(ImuPose.empty())
+    }
+
+    LaunchedEffect(sensorData?.timestamp) {
+        val ppgData = sensorData?.ppgData ?: return@LaunchedEffect
+        val frameSamples = extractPpgFrameSamples(ppgData)
+
+        if (frameSamples.ir.isNotEmpty()) {
+            ppgIrSamples.appendAndTrim(
+                values = frameSamples.ir,
+                maxSize = PPG_GRAPH_MAX_SAMPLES
+            )
+            ppgRedSamples.appendAndTrim(
+                values = frameSamples.red,
+                maxSize = PPG_GRAPH_MAX_SAMPLES
+            )
+            latestPpgFrameSummary = PpgFrameSummary.from(
+                ir = frameSamples.ir,
+                red = frameSamples.red
+            )
+        }
+
+        val imuData = sensorData?.imuData
+        if (imuData != null) {
+            val nextPose = calculateImuPose(imuData)
+            latestImuPose = if (latestImuPose.sampleCount == 0) {
+                nextPose
+            } else {
+                nextPose.smoothWith(previous = latestImuPose, alpha = 0.35)
+            }
+        }
+    }
+
+    LaunchedEffect(processorState.parsedSuperFrameCount) {
+        if (processorState.parsedSuperFrameCount == 0) {
+            ppgIrSamples.clear()
+            ppgRedSamples.clear()
+            latestPpgFrameSummary = PpgFrameSummary.empty()
+            latestImuPose = ImuPose.empty()
+        }
     }
 
     LaunchedEffect(Unit) {
@@ -147,6 +212,18 @@ fun ExperimentScreen(
                 value = batteryText
             )
         }
+
+        PpgRealtimeGraphCard(
+            irSamples = ppgIrSamples,
+            redSamples = ppgRedSamples,
+            frameSummary = latestPpgFrameSummary,
+            isConnected = bleState.isConnected
+        )
+
+        ImuRealtimeModelCard(
+            imuPose = latestImuPose,
+            isConnected = bleState.isConnected
+        )
 
         ArousalStateCard(
             arousalState = arousalState
@@ -306,6 +383,745 @@ private fun SensorCard(
             )
         }
     }
+}
+
+
+private const val PPG_SAMPLE_RATE_HZ = 100
+private const val PPG_GRAPH_WINDOW_SECONDS = 10
+private const val PPG_GRAPH_MAX_SAMPLES = PPG_SAMPLE_RATE_HZ * PPG_GRAPH_WINDOW_SECONDS
+
+private data class PpgFrameSamples(
+    val red: List<Int>,
+    val ir: List<Int>
+)
+
+private data class PpgFrameSummary(
+    val sampleCount: Int,
+    val irMin: Int?,
+    val irMax: Int?,
+    val redMin: Int?,
+    val redMax: Int?
+) {
+    companion object {
+        fun empty(): PpgFrameSummary = PpgFrameSummary(
+            sampleCount = 0,
+            irMin = null,
+            irMax = null,
+            redMin = null,
+            redMax = null
+        )
+
+        fun from(
+            ir: List<Int>,
+            red: List<Int>
+        ): PpgFrameSummary = PpgFrameSummary(
+            sampleCount = maxOf(ir.size, red.size),
+            irMin = ir.minOrNull(),
+            irMax = ir.maxOrNull(),
+            redMin = red.minOrNull(),
+            redMax = red.maxOrNull()
+        )
+    }
+}
+
+@Composable
+private fun PpgRealtimeGraphCard(
+    irSamples: List<Int>,
+    redSamples: List<Int>,
+    frameSummary: PpgFrameSummary,
+    isConnected: Boolean
+) {
+    val bufferedSeconds =
+        if (irSamples.isEmpty()) 0.0
+        else irSamples.size.toDouble() / PPG_SAMPLE_RATE_HZ
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(26.dp))
+            .background(Color(0xFF1E1E25))
+            .border(
+                width = 1.dp,
+                color = Color(0xFF4CD3FF).copy(alpha = 0.45f),
+                shape = RoundedCornerShape(26.dp)
+            )
+            .padding(18.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "📈 PPG 실시간 그래프",
+                color = Color(0xFF4CD3FF),
+                fontSize = 21.sp,
+                fontWeight = FontWeight.Bold
+            )
+
+            Spacer(Modifier.weight(1f))
+
+            Text(
+                text = if (isConnected) "LIVE" else "대기",
+                color = if (isConnected) Color(0xFF3DFF78) else Color.White.copy(alpha = 0.45f),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(100.dp))
+                    .background(Color.White.copy(alpha = 0.07f))
+                    .padding(horizontal = 10.dp, vertical = 5.dp)
+            )
+        }
+
+        Spacer(Modifier.height(10.dp))
+
+        Text(
+            text = "최근 ${"%.1f".format(bufferedSeconds)}초 / 최대 ${PPG_GRAPH_WINDOW_SECONDS}초 · IR/RED 채널별 정규화 표시",
+            color = Color.White.copy(alpha = 0.55f),
+            fontSize = 13.sp
+        )
+
+        Spacer(Modifier.height(12.dp))
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(210.dp)
+                .clip(RoundedCornerShape(18.dp))
+                .background(Color.Black.copy(alpha = 0.24f))
+                .border(
+                    width = 1.dp,
+                    color = Color.White.copy(alpha = 0.06f),
+                    shape = RoundedCornerShape(18.dp)
+                )
+                .padding(10.dp)
+        ) {
+            Canvas(
+                modifier = Modifier.fillMaxSize()
+            ) {
+                drawPpgGrid()
+
+                if (irSamples.size >= 2) {
+                    drawPpgPath(
+                        samples = irSamples,
+                        color = Color(0xFF4CD3FF),
+                        strokeWidthPx = 2.5f
+                    )
+                }
+
+                if (redSamples.size >= 2) {
+                    drawPpgPath(
+                        samples = redSamples,
+                        color = Color(0xFFFF4B55),
+                        strokeWidthPx = 2.0f
+                    )
+                }
+            }
+
+            if (irSamples.isEmpty()) {
+                Text(
+                    text = "PPG 데이터 수신 대기 중",
+                    color = Color.White.copy(alpha = 0.45f),
+                    fontSize = 14.sp,
+                    modifier = Modifier.align(Alignment.Center)
+                )
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            PpgLegendChip(
+                modifier = Modifier.weight(1f),
+                title = "IR",
+                value = ppgRangeText(frameSummary.irMin, frameSummary.irMax),
+                color = Color(0xFF4CD3FF)
+            )
+
+            PpgLegendChip(
+                modifier = Modifier.weight(1f),
+                title = "RED",
+                value = ppgRangeText(frameSummary.redMin, frameSummary.redMax),
+                color = Color(0xFFFF4B55)
+            )
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        Text(
+            text = "frame=${frameSummary.sampleCount} samples · buffer=${irSamples.size} samples",
+            color = Color.White.copy(alpha = 0.42f),
+            fontSize = 12.sp,
+            fontFamily = FontFamily.Monospace
+        )
+    }
+}
+
+@Composable
+private fun PpgLegendChip(
+    modifier: Modifier = Modifier,
+    title: String,
+    value: String,
+    color: Color
+) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(Color.White.copy(alpha = 0.055f))
+            .padding(horizontal = 12.dp, vertical = 10.dp)
+    ) {
+        Text(
+            text = title,
+            color = color,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
+            fontFamily = FontFamily.Monospace
+        )
+
+        Spacer(Modifier.height(3.dp))
+
+        Text(
+            text = value,
+            color = Color.White.copy(alpha = 0.75f),
+            fontSize = 12.sp,
+            fontFamily = FontFamily.Monospace
+        )
+    }
+}
+
+private fun DrawScope.drawPpgGrid() {
+    val gridColor = Color.White.copy(alpha = 0.08f)
+
+    for (i in 0..4) {
+        val y = size.height * i / 4f
+        drawLine(
+            color = gridColor,
+            start = Offset(0f, y),
+            end = Offset(size.width, y),
+            strokeWidth = 1f
+        )
+    }
+
+    for (i in 0..5) {
+        val x = size.width * i / 5f
+        drawLine(
+            color = gridColor,
+            start = Offset(x, 0f),
+            end = Offset(x, size.height),
+            strokeWidth = 1f
+        )
+    }
+}
+
+private fun DrawScope.drawPpgPath(
+    samples: List<Int>,
+    color: Color,
+    strokeWidthPx: Float
+) {
+    if (samples.size < 2) return
+
+    val minValue = samples.minOrNull() ?: return
+    val maxValue = samples.maxOrNull() ?: return
+    val range = (maxValue - minValue).takeIf { it > 0 } ?: 1
+
+    val path = Path()
+
+    samples.forEachIndexed { index, value ->
+        val x = size.width * index.toFloat() / (samples.size - 1).toFloat()
+        val normalized = (value - minValue).toFloat() / range.toFloat()
+        val y = size.height - normalized * size.height
+
+        if (index == 0) {
+            path.moveTo(x, y)
+        } else {
+            path.lineTo(x, y)
+        }
+    }
+
+    drawPath(
+        path = path,
+        color = color,
+        style = Stroke(width = strokeWidthPx)
+    )
+}
+
+private fun MutableList<Int>.appendAndTrim(
+    values: List<Int>,
+    maxSize: Int
+) {
+    addAll(values)
+
+    val overflow = size - maxSize
+    if (overflow > 0) {
+        repeat(overflow) {
+            removeAt(0)
+        }
+    }
+}
+
+private fun extractPpgFrameSamples(ppgData: ByteArray): PpgFrameSamples {
+    val sampleCount = ppgData.size / 6
+    if (sampleCount <= 0) {
+        return PpgFrameSamples(
+            red = emptyList(),
+            ir = emptyList()
+        )
+    }
+
+    val red = ArrayList<Int>(sampleCount)
+    val ir = ArrayList<Int>(sampleCount)
+
+    for (i in 0 until sampleCount) {
+        val base = i * 6
+
+        // PPG sample = RED 3 bytes + IR 3 bytes, each 18-bit unsigned.
+        val redSample = readPpg18Bit(ppgData, base)
+        val irSample = readPpg18Bit(ppgData, base + 3)
+
+        red.add(redSample)
+        ir.add(irSample)
+    }
+
+    return PpgFrameSamples(
+        red = red,
+        ir = ir
+    )
+}
+
+private fun readPpg18Bit(
+    data: ByteArray,
+    index: Int
+): Int {
+    if (index + 2 >= data.size) return 0
+
+    return ((data[index].toInt() and 0x03) shl 16) or
+            ((data[index + 1].toInt() and 0xFF) shl 8) or
+            (data[index + 2].toInt() and 0xFF)
+}
+
+private fun ppgRangeText(
+    minValue: Int?,
+    maxValue: Int?
+): String {
+    if (minValue == null || maxValue == null) return "-"
+    return "${"%,d".format(minValue)} ~ ${"%,d".format(maxValue)}"
+}
+
+
+private const val IMU_LSB_PER_G = 1024.0
+
+private data class ImuPose(
+    val sampleCount: Int,
+    val avgX: Double,
+    val avgY: Double,
+    val avgZ: Double,
+    val magnitudeG: Double,
+    val pitchDeg: Double,
+    val rollDeg: Double,
+    val movementScore: Double
+) {
+    companion object {
+        fun empty(): ImuPose = ImuPose(
+            sampleCount = 0,
+            avgX = 0.0,
+            avgY = 0.0,
+            avgZ = 0.0,
+            magnitudeG = 0.0,
+            pitchDeg = 0.0,
+            rollDeg = 0.0,
+            movementScore = 0.0
+        )
+    }
+
+    val movementLabel: String
+        get() = when {
+            sampleCount == 0 -> "--"
+            movementScore < 15.0 -> "안정적"
+            movementScore < 80.0 -> "약한 움직임"
+            movementScore < 220.0 -> "움직임"
+            else -> "큰 움직임"
+        }
+
+    fun smoothWith(
+        previous: ImuPose,
+        alpha: Double
+    ): ImuPose {
+        if (sampleCount == 0) return this
+        if (previous.sampleCount == 0) return this
+
+        fun lerp(old: Double, new: Double): Double = old + (new - old) * alpha
+
+        return copy(
+            avgX = lerp(previous.avgX, avgX),
+            avgY = lerp(previous.avgY, avgY),
+            avgZ = lerp(previous.avgZ, avgZ),
+            magnitudeG = lerp(previous.magnitudeG, magnitudeG),
+            pitchDeg = lerp(previous.pitchDeg, pitchDeg),
+            rollDeg = lerp(previous.rollDeg, rollDeg),
+            movementScore = lerp(previous.movementScore, movementScore)
+        )
+    }
+}
+
+private data class Vec3(
+    val x: Double,
+    val y: Double,
+    val z: Double
+)
+
+private data class Face3d(
+    val indices: List<Int>,
+    val color: Color,
+    val depth: Double
+)
+
+@Composable
+private fun ImuRealtimeModelCard(
+    imuPose: ImuPose,
+    isConnected: Boolean
+) {
+    val statusColor = when {
+        !isConnected -> Color(0xFFFF4B55)
+        imuPose.sampleCount == 0 -> Color(0xFFFFD166)
+        imuPose.movementScore >= 220.0 -> Color(0xFFFF922E)
+        else -> Color(0xFF3DFF78)
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(26.dp))
+            .background(Color(0xFF1E1E25))
+            .border(
+                width = 1.dp,
+                color = Color(0xFF3DFF78).copy(alpha = 0.35f),
+                shape = RoundedCornerShape(26.dp)
+            )
+            .padding(18.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "🧊 IMU 3D 움직임",
+                color = Color(0xFF3DFF78),
+                fontSize = 21.sp,
+                fontWeight = FontWeight.Bold
+            )
+
+            Spacer(Modifier.weight(1f))
+
+            Text(
+                text = imuPose.movementLabel,
+                color = statusColor,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(100.dp))
+                    .background(statusColor.copy(alpha = 0.14f))
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+            )
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        Text(
+            text = "가속도 평균 벡터로 pitch/roll을 추정해서 Potch 기울기를 보여줍니다. yaw/절대 위치는 IMU 가속도만으로는 정확히 알 수 없습니다.",
+            color = Color.White.copy(alpha = 0.55f),
+            fontSize = 13.sp,
+            lineHeight = 18.sp
+        )
+
+        Spacer(Modifier.height(14.dp))
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(260.dp)
+                .clip(RoundedCornerShape(22.dp))
+                .background(Color(0xFF121821))
+                .border(
+                    width = 1.dp,
+                    color = Color.White.copy(alpha = 0.06f),
+                    shape = RoundedCornerShape(22.dp)
+                )
+                .padding(8.dp)
+        ) {
+            Canvas(
+                modifier = Modifier.fillMaxSize()
+            ) {
+                drawImuModel(imuPose)
+            }
+        }
+
+        Spacer(Modifier.height(14.dp))
+        DividerLine()
+        Spacer(Modifier.height(12.dp))
+
+        DevRow(
+            label = "샘플 수",
+            value = "${imuPose.sampleCount}개"
+        )
+        DevRow(
+            label = "Pitch / Roll",
+            value = if (imuPose.sampleCount == 0) "-" else {
+                "${formatOneDecimal(imuPose.pitchDeg)}° / ${formatOneDecimal(imuPose.rollDeg)}°"
+            }
+        )
+        DevRow(
+            label = "가속도 크기",
+            value = if (imuPose.sampleCount == 0) "-" else "${formatOneDecimal(imuPose.magnitudeG)} g"
+        )
+        DevRow(
+            label = "평균 X / Y / Z",
+            value = if (imuPose.sampleCount == 0) "-" else {
+                "${imuPose.avgX.roundToInt()} / ${imuPose.avgY.roundToInt()} / ${imuPose.avgZ.roundToInt()}"
+            }
+        )
+        DevRow(
+            label = "움직임 score",
+            value = if (imuPose.sampleCount == 0) "-" else formatOneDecimal(imuPose.movementScore),
+            valueColor = statusColor
+        )
+    }
+}
+
+private fun DrawScope.drawImuModel(
+    imuPose: ImuPose
+) {
+    drawImuGrid()
+
+    val center = Offset(size.width / 2f, size.height / 2f)
+
+    if (imuPose.sampleCount == 0) {
+        drawLine(
+            color = Color.White.copy(alpha = 0.20f),
+            start = Offset(center.x - 70f, center.y),
+            end = Offset(center.x + 70f, center.y),
+            strokeWidth = 5f
+        )
+        drawLine(
+            color = Color.White.copy(alpha = 0.20f),
+            start = Offset(center.x, center.y - 45f),
+            end = Offset(center.x, center.y + 45f),
+            strokeWidth = 5f
+        )
+        return
+    }
+
+    val pitchRad = imuPose.pitchDeg * PI / 180.0
+    val rollRad = imuPose.rollDeg * PI / 180.0
+
+    val width = 1.45
+    val height = 0.52
+    val depth = 0.88
+
+    val vertices = listOf(
+        Vec3(-width, -height, -depth),
+        Vec3(width, -height, -depth),
+        Vec3(width, height, -depth),
+        Vec3(-width, height, -depth),
+        Vec3(-width, -height, depth),
+        Vec3(width, -height, depth),
+        Vec3(width, height, depth),
+        Vec3(-width, height, depth)
+    )
+
+    val rotated = vertices.map { vertex ->
+        rotateVec3(
+            v = vertex,
+            pitchRad = pitchRad,
+            rollRad = rollRad
+        )
+    }
+
+    val projected = rotated.map { projectVec3(it, center) }
+
+    val faces = listOf(
+        listOf(0, 1, 2, 3) to Color(0xFF4CD3FF),
+        listOf(4, 5, 6, 7) to Color(0xFF2F8CFF),
+        listOf(0, 1, 5, 4) to Color(0xFF3DFF78),
+        listOf(2, 3, 7, 6) to Color(0xFFFFD166),
+        listOf(1, 2, 6, 5) to Color(0xFFFF922E),
+        listOf(0, 3, 7, 4) to Color(0xFFFF4B55)
+    ).map { (indices, color) ->
+        Face3d(
+            indices = indices,
+            color = color,
+            depth = indices.map { rotated[it].z }.average()
+        )
+    }.sortedBy { it.depth }
+
+    faces.forEach { face ->
+        val path = Path().apply {
+            val first = projected[face.indices.first()]
+            moveTo(first.x, first.y)
+            face.indices.drop(1).forEach { index ->
+                val point = projected[index]
+                lineTo(point.x, point.y)
+            }
+            close()
+        }
+
+        drawPath(
+            path = path,
+            color = face.color.copy(alpha = 0.34f)
+        )
+        drawPath(
+            path = path,
+            color = Color.White.copy(alpha = 0.30f),
+            style = Stroke(width = 1.7f)
+        )
+    }
+
+    drawGravityVector(imuPose, center)
+}
+
+private fun DrawScope.drawImuGrid() {
+    val gridColor = Color.White.copy(alpha = 0.07f)
+
+    for (i in 0..4) {
+        val y = size.height * i / 4f
+        drawLine(
+            color = gridColor,
+            start = Offset(0f, y),
+            end = Offset(size.width, y),
+            strokeWidth = 1f
+        )
+    }
+
+    for (i in 0..4) {
+        val x = size.width * i / 4f
+        drawLine(
+            color = gridColor,
+            start = Offset(x, 0f),
+            end = Offset(x, size.height),
+            strokeWidth = 1f
+        )
+    }
+}
+
+private fun DrawScope.drawGravityVector(
+    imuPose: ImuPose,
+    center: Offset
+) {
+    val vectorLength = 72f
+    val mag = sqrt(
+        imuPose.avgX * imuPose.avgX +
+                imuPose.avgY * imuPose.avgY +
+                imuPose.avgZ * imuPose.avgZ
+    ).takeIf { it > 0.0 } ?: return
+
+    val nx = imuPose.avgX / mag
+    val ny = imuPose.avgY / mag
+
+    val end = Offset(
+        x = center.x + (nx * vectorLength).toFloat(),
+        y = center.y - (ny * vectorLength).toFloat()
+    )
+
+    drawLine(
+        color = Color.White.copy(alpha = 0.85f),
+        start = center,
+        end = end,
+        strokeWidth = 4f
+    )
+
+    drawCircle(
+        color = Color.White.copy(alpha = 0.90f),
+        radius = 6f,
+        center = end
+    )
+}
+
+private fun rotateVec3(
+    v: Vec3,
+    pitchRad: Double,
+    rollRad: Double
+): Vec3 {
+    // Roll around X axis.
+    val cosRoll = cos(rollRad)
+    val sinRoll = sin(rollRad)
+
+    val y1 = v.y * cosRoll - v.z * sinRoll
+    val z1 = v.y * sinRoll + v.z * cosRoll
+
+    // Pitch around Y axis.
+    val cosPitch = cos(pitchRad)
+    val sinPitch = sin(pitchRad)
+
+    val x2 = v.x * cosPitch + z1 * sinPitch
+    val z2 = -v.x * sinPitch + z1 * cosPitch
+
+    return Vec3(
+        x = x2,
+        y = y1,
+        z = z2
+    )
+}
+
+private fun DrawScope.projectVec3(
+    v: Vec3,
+    center: Offset
+): Offset {
+    val scale = minOf(size.width, size.height) * 0.28f
+
+    // Simple isometric-like projection. Enough for a live debugging model.
+    val x = center.x + ((v.x - v.z * 0.42) * scale).toFloat()
+    val y = center.y + ((v.y + v.z * 0.24) * scale).toFloat()
+
+    return Offset(x, y)
+}
+
+private fun calculateImuPose(
+    imuData: ByteArray
+): ImuPose {
+    val sampleCount = imuData.size / 6
+    if (sampleCount <= 0) return ImuPose.empty()
+
+    val xs = ArrayList<Int>(sampleCount)
+    val ys = ArrayList<Int>(sampleCount)
+    val zs = ArrayList<Int>(sampleCount)
+
+    for (i in 0 until sampleCount) {
+        val base = i * 6
+        xs.add(readInt16LittleEndian(imuData, base))
+        ys.add(readInt16LittleEndian(imuData, base + 2))
+        zs.add(readInt16LittleEndian(imuData, base + 4))
+    }
+
+    val avgX = xs.average()
+    val avgY = ys.average()
+    val avgZ = zs.average()
+
+    val magnitudeRaw = sqrt(avgX * avgX + avgY * avgY + avgZ * avgZ)
+    val magnitudeG = magnitudeRaw / IMU_LSB_PER_G
+
+    val pitchDeg = atan2(
+        -avgX,
+        sqrt(avgY * avgY + avgZ * avgZ)
+    ) * 180.0 / PI
+
+    val rollDeg = atan2(avgY, avgZ) * 180.0 / PI
+
+    val movementScore =
+        averageAbsDiff(xs) + averageAbsDiff(ys) + averageAbsDiff(zs)
+
+    return ImuPose(
+        sampleCount = sampleCount,
+        avgX = avgX,
+        avgY = avgY,
+        avgZ = avgZ,
+        magnitudeG = magnitudeG,
+        pitchDeg = pitchDeg,
+        rollDeg = rollDeg,
+        movementScore = movementScore
+    )
+}
+
+private fun formatOneDecimal(value: Double): String {
+    return "%.1f".format(value)
 }
 
 @Composable
