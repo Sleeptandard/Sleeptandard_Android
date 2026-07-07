@@ -35,6 +35,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.leejang.sleeptandard.Potch.ArousalState
 import com.leejang.sleeptandard.Potch.PacketErrorLog
 import com.leejang.sleeptandard.Potch.PotchBleState
 import com.leejang.sleeptandard.Potch.PotchBleViewModel
@@ -56,6 +57,7 @@ fun ExperimentScreen(
     val processorState by viewModel.processorState.collectAsState()
 
     val sensorData = processorState.lastParsedData
+    val arousalState = processorState.arousalState
 
     val temperatureText =
         sensorData?.let { "%.1f°C".format(it.ntcCelsius) } ?: "--°C"
@@ -145,6 +147,10 @@ fun ExperimentScreen(
                 value = batteryText
             )
         }
+
+        ArousalStateCard(
+            arousalState = arousalState
+        )
 
         DeveloperCard(
             timestamp = sensorData?.timestamp,
@@ -300,6 +306,239 @@ private fun SensorCard(
             )
         }
     }
+}
+
+@Composable
+private fun ArousalStateCard(
+    arousalState: ArousalState
+) {
+    val wakeCandidateColor =
+        if (arousalState.isWakeTimingCandidate) Color(0xFF3DFF78)
+        else Color(0xFFFFD166)
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(26.dp))
+            .background(Color(0xFF1E1E25))
+            .border(
+                width = 1.dp,
+                color = Color(0xFF8D7BFF).copy(alpha = 0.45f),
+                shape = RoundedCornerShape(26.dp)
+            )
+            .padding(18.dp)
+    ) {
+        Text(
+            text = "🧠 각성지표 상태",
+            color = Color(0xFFB7A7FF),
+            fontSize = 21.sp,
+            fontWeight = FontWeight.Bold
+        )
+
+        Spacer(Modifier.height(14.dp))
+        DividerLine()
+        Spacer(Modifier.height(12.dp))
+
+        DevRow(
+            label = "Final Wake Score",
+            value = formatArousalValue(arousalState.finalWakeScore, 3),
+            valueColor = wakeCandidateColor
+        )
+
+        DevRow(
+            label = "기상 후보",
+            value = if (arousalState.isWakeTimingCandidate) "YES" else "NO",
+            valueColor = wakeCandidateColor
+        )
+
+        Spacer(Modifier.height(10.dp))
+        DividerLine()
+        Spacer(Modifier.height(12.dp))
+
+        ArousalSectionTitle("1. Micro Movement")
+        DevRow(
+            label = "variance",
+            value = formatArousalValue(arousalState.microMovementVariance, 8)
+        )
+        DevRow(
+            label = "score",
+            value = formatArousalValue(arousalState.microMovementScore, 3)
+        )
+
+        Spacer(Modifier.height(10.dp))
+        DividerLine()
+        Spacer(Modifier.height(12.dp))
+
+        ArousalSectionTitle("2. Respiratory Rate")
+        DevRow(
+            label = "RR final",
+            value = arousalState.rrFinal?.let { "${formatArousalValue(it, 1)} bpm" } ?: "-"
+        )
+        DevRow(
+            label = "RR PPG / IMU",
+            value = "${formatArousalValue(arousalState.rrFromPpg, 1)} / ${formatArousalValue(arousalState.rrFromImu, 1)}"
+        )
+        DevRow(
+            label = "RR source",
+            value = arousalState.rrFusionSource.name
+        )
+        DevRow(
+            label = "RR confidence",
+            value = formatArousalValue(arousalState.rrFusionConfidence, 3)
+        )
+        DevRow(
+            label = "RR score / raw",
+            value = "${formatArousalValue(arousalState.rrScore, 3)} / ${formatArousalValue(arousalState.rrRawScore, 3)}"
+        )
+        ArousalLogBlock(
+            title = "RR fusion log",
+            value = arousalState.rrFusionLog
+        )
+
+        Spacer(Modifier.height(10.dp))
+        DividerLine()
+        Spacer(Modifier.height(12.dp))
+
+        ArousalSectionTitle("3. Respiratory Rate Variability")
+        DevRow(
+            label = "RRV RMSSD",
+            value = arousalState.rrvRmssdMs?.let { "${formatArousalValue(it, 1)} ms" }
+                ?: arousalState.rrvRmssd?.let { "${formatArousalValue(it, 3)} sec" }
+                ?: "-"
+        )
+        DevRow(
+            label = "RRV source",
+            value = arousalState.rrvSource.name
+        )
+        DevRow(
+            label = "RRV quality",
+            value = formatArousalValue(arousalState.rrvQuality, 3)
+        )
+        DevRow(
+            label = "RRV score",
+            value = formatArousalValue(arousalState.rrvScore, 3)
+        )
+
+        Spacer(Modifier.height(10.dp))
+        DividerLine()
+        Spacer(Modifier.height(12.dp))
+
+        ArousalSectionTitle("4. Heart Rate")
+        DevRow(
+            label = "HR bpm",
+            value = arousalState.hrBpm?.let { "$it bpm" } ?: "-"
+        )
+        DevRow(
+            label = "HR gradient",
+            value = arousalState.hrGradient?.let { "${formatArousalValue(it, 2)} bpm" } ?: "-"
+        )
+        DevRow(
+            label = "HR score",
+            value = formatArousalValue(arousalState.hrScore, 3)
+        )
+
+        Spacer(Modifier.height(10.dp))
+        DividerLine()
+        Spacer(Modifier.height(12.dp))
+
+        ArousalSectionTitle("5. Heart Rate Variability")
+        DevRow(
+            label = "HRV RMSSD",
+            value = arousalState.hrvRmssdMs?.let { "${formatArousalValue(it, 1)} ms" }
+                ?: arousalState.hrvRmssd?.let { "${formatArousalValue(it, 3)} sec" }
+                ?: "-"
+        )
+        DevRow(
+            label = "LF / HF",
+            value = "${formatArousalValue(arousalState.hrvLf, 3)} / ${formatArousalValue(arousalState.hrvHf, 3)}"
+        )
+        DevRow(
+            label = "LF/HF ratio",
+            value = formatArousalValue(arousalState.hrvLfHf, 3)
+        )
+        DevRow(
+            label = "HRV score",
+            value = formatArousalValue(arousalState.hrvScore, 3)
+        )
+        DevRow(
+            label = "HRV quality",
+            value = formatArousalValue(arousalState.hrvQuality, 3)
+        )
+        ArousalLogBlock(
+            title = "HRV log",
+            value = arousalState.hrvLog
+        )
+
+        Spacer(Modifier.height(10.dp))
+        DividerLine()
+        Spacer(Modifier.height(12.dp))
+
+        ArousalSectionTitle("6. Skin Temperature")
+        DevRow(
+            label = "skin temp",
+            value = arousalState.skinTemperatureCelsius?.let { "${formatArousalValue(it, 2)} °C" } ?: "-"
+        )
+        DevRow(
+            label = "temp gradient",
+            value = arousalState.skinTemperatureGradient?.let { "${formatArousalValue(it, 3)} °C" } ?: "-"
+        )
+        DevRow(
+            label = "temp score",
+            value = formatArousalValue(arousalState.skinTemperatureScore, 3)
+        )
+
+        Spacer(Modifier.height(10.dp))
+        DividerLine()
+        Spacer(Modifier.height(12.dp))
+
+        ArousalLogBlock(
+            title = "Arousal last log",
+            value = arousalState.lastLog
+        )
+    }
+}
+
+@Composable
+private fun ArousalSectionTitle(
+    title: String
+) {
+    Text(
+        text = title,
+        color = Color(0xFFB7A7FF),
+        fontSize = 17.sp,
+        fontWeight = FontWeight.Bold
+    )
+
+    Spacer(Modifier.height(8.dp))
+}
+
+@Composable
+private fun ArousalLogBlock(
+    title: String,
+    value: String?
+) {
+    Spacer(Modifier.height(6.dp))
+
+    Text(
+        text = title,
+        color = Color.White.copy(alpha = 0.55f),
+        fontSize = 14.sp
+    )
+
+    Spacer(Modifier.height(4.dp))
+
+    Text(
+        text = value ?: "-",
+        color = Color.White.copy(alpha = 0.75f),
+        fontSize = 12.sp,
+        lineHeight = 17.sp,
+        fontFamily = FontFamily.Monospace,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(Color.White.copy(alpha = 0.05f))
+            .padding(10.dp)
+    )
 }
 
 @Composable
@@ -1037,6 +1276,15 @@ private fun InternalLogFileRow(
             fontFamily = FontFamily.Monospace
         )
     }
+}
+
+private fun formatArousalValue(
+    value: Double?,
+    digits: Int
+): String {
+    return value?.let {
+        String.format(Locale.US, "%.${digits}f", it)
+    } ?: "-"
 }
 
 private fun formatFileSize(bytes: Long): String {
