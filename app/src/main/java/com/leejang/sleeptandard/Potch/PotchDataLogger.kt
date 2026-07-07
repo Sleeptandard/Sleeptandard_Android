@@ -31,8 +31,11 @@ data class InternalPotchLogFile(
  * 2. potch_debug_log_yyyyMMdd_HHmmss.txt
  *    - BLE 상태, Service 상태, 재연결 상태 같은 디버그 로그 저장
  *
+ * 3. potch_arousal_state_log_yyyyMMdd_HHmmss.csv
+ *    - 각 Super Frame마다 계산된 ArousalState 저장
+ *
  * 종료 및 저장 시:
- * - 두 파일을 모두 Download/PotchLogs 폴더로 복사한다.
+ * - 세 파일을 모두 Download/PotchLogs 폴더로 복사한다.
  */
 class PotchDataLogger(
     context: Context
@@ -47,6 +50,9 @@ class PotchDataLogger(
 
     // TAG 기반 디버그 TXT 로그 파일
     private var workingDebugLogFile: File? = null
+
+    // ArousalState 전용 CSV 로그 파일
+    private var workingArousalLogFile: File? = null
 
     // 마지막으로 Downloads에 저장/복사된 CSV 경로
     var lastSavedFilePath: String? = null
@@ -74,6 +80,7 @@ class PotchDataLogger(
 
         workingLogFile = File(dir, "potch_super_frame_log_$timestamp.csv")
         workingDebugLogFile = File(dir, "potch_debug_log_$timestamp.txt")
+        workingArousalLogFile = File(dir, "potch_arousal_state_log_$timestamp.csv")
 
         workingDebugLogFile?.writeText(
             "Potch debug log started at $timestamp\n"
@@ -87,6 +94,56 @@ class PotchDataLogger(
                 "complete",
                 "miss_packet_num",
                 "error_log"
+            ).joinToString(",") + "\n"
+        )
+
+        workingArousalLogFile?.writeText(
+            listOf(
+                "phone_time",
+                "timestamp",
+
+                "final_wake_score",
+                "is_wake_timing_candidate",
+
+                "micro_movement_variance",
+                "micro_movement_score",
+
+                "rr_from_ppg",
+                "rr_from_imu",
+                "rr_final",
+                "rr_score",
+                "rr_raw_score",
+                "rr_fusion_source",
+                "rr_fusion_confidence",
+                "rr_fusion_log",
+
+                "rrv_rmssd_sec",
+                "rrv_rmssd_ms",
+                "rrv_score",
+                "rrv_source",
+                "rrv_quality",
+
+                "hr_bpm",
+                "hr_gradient",
+                "hr_score",
+
+                "hrv_rmssd_sec",
+                "hrv_rmssd_ms",
+                "hrv_lf",
+                "hrv_hf",
+                "hrv_lf_hf",
+                "hrv_score",
+                "hrv_quality",
+                "hrv_log",
+
+                "skin_temperature_celsius",
+                "skin_temperature_gradient",
+                "skin_temperature_score",
+
+                "complete",
+                "miss_packet_num",
+                "error_log",
+                "last_log"
             ).joinToString(",") + "\n"
         )
     }
@@ -167,6 +224,80 @@ class PotchDataLogger(
     }
 
     /**
+     * 각성지표 연산 결과를 ArousalState 전용 CSV 파일에 즉시 append한다.
+     *
+     * Super Frame CSV와 같은 phone_time/timestamp를 사용하면,
+     * 나중에 raw frame 로그와 각성지표 로그를 쉽게 대조할 수 있다.
+     */
+    fun logArousalState(
+        phoneTimeMillis: Long,
+        timestamp: Long?,
+        arousalState: ArousalState,
+        complete: String,
+        missPacketNum: String,
+        errorLog: String
+    ) {
+        if (!isLogging) return
+
+        val file = workingArousalLogFile ?: return
+
+        val phoneTimeText = SimpleDateFormat(
+            "yyyy-MM-dd HH:mm:ss.SSS",
+            Locale.getDefault()
+        ).format(Date(phoneTimeMillis))
+
+        val row = listOf(
+            escapeCsv(phoneTimeText),
+            timestamp?.toString() ?: "",
+
+            formatDouble(arousalState.finalWakeScore),
+            arousalState.isWakeTimingCandidate.toString(),
+
+            formatDouble(arousalState.microMovementVariance, digits = 10),
+            formatDouble(arousalState.microMovementScore),
+
+            formatDouble(arousalState.rrFromPpg),
+            formatDouble(arousalState.rrFromImu),
+            formatDouble(arousalState.rrFinal),
+            formatDouble(arousalState.rrScore),
+            formatDouble(arousalState.rrRawScore),
+            escapeCsv(arousalState.rrFusionSource.name),
+            formatDouble(arousalState.rrFusionConfidence),
+            escapeCsv(arousalState.rrFusionLog.orEmpty()),
+
+            formatDouble(arousalState.rrvRmssd),
+            formatDouble(arousalState.rrvRmssdMs),
+            formatDouble(arousalState.rrvScore),
+            escapeCsv(arousalState.rrvSource.name),
+            formatDouble(arousalState.rrvQuality),
+
+            arousalState.hrBpm?.toString() ?: "",
+            formatDouble(arousalState.hrGradient),
+            formatDouble(arousalState.hrScore),
+
+            formatDouble(arousalState.hrvRmssd),
+            formatDouble(arousalState.hrvRmssdMs),
+            formatDouble(arousalState.hrvLf),
+            formatDouble(arousalState.hrvHf),
+            formatDouble(arousalState.hrvLfHf),
+            formatDouble(arousalState.hrvScore),
+            formatDouble(arousalState.hrvQuality),
+            escapeCsv(arousalState.hrvLog.orEmpty()),
+
+            formatDouble(arousalState.skinTemperatureCelsius),
+            formatDouble(arousalState.skinTemperatureGradient),
+            formatDouble(arousalState.skinTemperatureScore),
+
+            escapeCsv(complete),
+            escapeCsv(missPacketNum),
+            escapeCsv(errorLog),
+            escapeCsv(arousalState.lastLog)
+        ).joinToString(",")
+
+        file.appendText(row + "\n")
+    }
+
+    /**
      * 연결 끊김, 재연결, 종료 같은 이벤트를 Super Frame CSV에도 한 줄로 기록한다.
      *
      * 예:
@@ -210,6 +341,7 @@ class PotchDataLogger(
     fun stopAndSave(): String? {
         val sourceFile = workingLogFile ?: return null
         val debugFile = workingDebugLogFile
+        val arousalFile = workingArousalLogFile
 
         isLogging = false
 
@@ -226,6 +358,13 @@ class PotchDataLogger(
             copyInternalFileToDownloads(
                 context = appContext,
                 sourceFile = debugFile
+            )
+        }
+
+        if (arousalFile != null && arousalFile.exists() && arousalFile.length() > 0L) {
+            copyInternalFileToDownloads(
+                context = appContext,
+                sourceFile = arousalFile
             )
         }
 
@@ -249,13 +388,29 @@ class PotchDataLogger(
     }
 
     /**
+     * 현재 작업 중인 내부 ArousalState CSV 파일 경로를 확인할 때 사용한다.
+     */
+    fun getWorkingArousalLogPath(): String? {
+        return workingArousalLogFile?.absolutePath
+    }
+
+    /**
      * 저장하지 않고 현재 로그 상태를 초기화한다.
      */
     fun clear() {
         isLogging = false
         workingLogFile = null
         workingDebugLogFile = null
+        workingArousalLogFile = null
         lastSavedFilePath = null
+    }
+
+    private fun formatDouble(
+        value: Double?,
+        digits: Int = 6
+    ): String {
+        if (value == null) return ""
+        return String.format(Locale.US, "%.${digits}f", value)
     }
 
     private fun escapeCsv(value: String): String {

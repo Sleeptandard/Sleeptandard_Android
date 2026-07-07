@@ -533,13 +533,26 @@ class PotchDataProcessor(
         val completeText =
             if (frameComplete && allErrors.isEmpty()) "complete" else "miss"
 
+        val phoneTimeMillis = System.currentTimeMillis()
+        val missPacketNumText = allMissNums.joinToString("|")
+        val errorLogText = allErrors.joinToString(" / ")
+
         dataLogger?.logSuperFrame(
-            phoneTimeMillis = System.currentTimeMillis(),
+            phoneTimeMillis = phoneTimeMillis,
             timestamp = timestamp,
             superFrame = data,
             complete = completeText,
-            missPacketNum = allMissNums.joinToString("|"),
-            errorLog = allErrors.joinToString(" / ")
+            missPacketNum = missPacketNumText,
+            errorLog = errorLogText
+        )
+
+        dataLogger?.logArousalState(
+            phoneTimeMillis = phoneTimeMillis,
+            timestamp = timestamp,
+            arousalState = arousalState,
+            complete = completeText,
+            missPacketNum = missPacketNumText,
+            errorLog = errorLogText
         )
 
         currentFrameErrors.clear()
