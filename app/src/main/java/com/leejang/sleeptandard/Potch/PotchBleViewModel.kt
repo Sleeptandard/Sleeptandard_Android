@@ -16,6 +16,20 @@ import kotlinx.coroutines.withContext
 class PotchBleViewModel(
     application: Application
 ) : AndroidViewModel(application) {
+    fun updateMicroMovementBandPass(
+        lowCutHz: Double,
+        highCutHz: Double
+    ) {
+        val context = getApplication<Application>().applicationContext
+
+        val intent = Intent(context, PotchBleForegroundService::class.java).apply {
+            action = PotchBleForegroundService.ACTION_UPDATE_MICRO_BPF
+            putExtra(PotchBleForegroundService.EXTRA_MICRO_LOW_CUT, lowCutHz)
+            putExtra(PotchBleForegroundService.EXTRA_MICRO_HIGH_CUT, highCutHz)
+        }
+
+        ContextCompat.startForegroundService(context, intent)
+    }
 
     val bleState = PotchServiceStateHolder.bleState
     val processorState = PotchServiceStateHolder.processorState

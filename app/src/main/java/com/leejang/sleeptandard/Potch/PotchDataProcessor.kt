@@ -1069,5 +1069,26 @@ class PotchDataProcessor(
         currentFrameErrors.clear()
         currentFrameMissPacketNums.clear()
     }
+    @Synchronized
+    fun updateMicroMovementBandPass(
+        lowCutHz: Double,
+        highCutHz: Double
+    ) {
+        arousalCalculator.updateMicroMovementBandPass(
+            lowCutHz = lowCutHz,
+            highCutHz = highCutHz
+        )
+
+        _state.update {
+            it.copy(
+                lastLog = "Micro BPF updated: %.2f~%.2fHz".format(lowCutHz, highCutHz)
+            )
+        }
+
+        dataLogger?.logDebug(
+            TAG,
+            "Micro BPF updated: low=$lowCutHz, high=$highCutHz"
+        )
+    }
 
 }

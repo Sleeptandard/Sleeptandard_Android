@@ -62,8 +62,8 @@ data class ArousalConfig(
     val sampleRateHz: Double = 100.0,
 
     // Micro Movement
-    val microLowCutHz: Double = 0.5,
-    val microHighCutHz: Double = 5.0,
+    var microLowCutHz: Double = 0.5,
+    var microHighCutHz: Double = 5.0,
     val microWindowSeconds: Int = 5,
     val microMinWindowSeconds: Int = 3,
 
@@ -500,7 +500,7 @@ data class ArousalBufferSnapshot(
  * Micro Movement, RR, RRV, HR, HRV, Skin Temperature, final wake score를 계산한다.
  */
 class PotchArousalCalculator(
-    private val config: ArousalConfig = ArousalConfig()
+    private var config: ArousalConfig = ArousalConfig()
 ) {
     /**
      * PPG IR raw sample rolling buffer.
@@ -1057,11 +1057,53 @@ class PotchArousalCalculator(
 
     /************************** Micro Movement ****************************/
 
+    /*
     private val microBpf = SimpleBandPassFilter(
         sampleRateHz = config.sampleRateHz,
         lowCutHz = config.microLowCutHz,
         highCutHz = config.microHighCutHz
     )
+
+     */
+
+    private var microBpf = createMicroBandPassFilter()
+    private fun createMicroBandPassFilter(): SimpleBandPassFilter {
+        return SimpleBandPassFilter(
+            sampleRateHz = config.sampleRateHz,
+            lowCutHz = config.microLowCutHz,
+            highCutHz = config.microHighCutHz
+        )
+    }
+
+    fun updateMicroMovementBandPass(
+        lowCutHz: Double,
+        highCutHz: Double
+    ) {
+        if (lowCutHz <= 0.0) return
+        if (highCutHz <= lowCutHz) return
+        if (highCutHz >= config.sampleRateHz / 2.0) return
+
+        config = config.copy(
+            microLowCutHz = lowCutHz,
+            microHighCutHz = highCutHz
+        )
+
+        rebuildMicroFilteredBuffer()
+    }
+
+    private fun rebuildMicroFilteredBuffer() {
+        microBpf = createMicroBandPassFilter()
+        microFilteredBuffer.clear()
+
+        imuGBuffer.forEach { gMagnitude ->
+            val filtered = microBpf.filter(gMagnitude)
+            microFilteredBuffer.addLast(filtered)
+
+            if (microFilteredBuffer.size > maxImuSamples) {
+                microFilteredBuffer.removeFirst()
+            }
+        }
+    }
 
     /**
      * BPF를 통과한 micro movement 후보 신호.

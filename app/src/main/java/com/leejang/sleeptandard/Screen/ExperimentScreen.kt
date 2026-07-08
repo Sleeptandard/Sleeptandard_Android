@@ -54,8 +54,11 @@ import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
 import androidx.compose.foundation.clickable
+import androidx.compose.material3.Slider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import com.leejang.sleeptandard.Potch.InternalPotchLogFile
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -65,6 +68,19 @@ import java.util.Locale
 fun ExperimentScreen(
     viewModel: PotchBleViewModel = viewModel()
 ) {
+    var microLowCutHz by rememberSaveable { mutableFloatStateOf(0.5f) }
+    var microHighCutHz by rememberSaveable { mutableFloatStateOf(5.0f) }
+
+    LaunchedEffect(microLowCutHz, microHighCutHz) {
+        kotlinx.coroutines.delay(250)
+
+        if (microLowCutHz < microHighCutHz) {
+            viewModel.updateMicroMovementBandPass(
+                lowCutHz = microLowCutHz.toDouble(),
+                highCutHz = microHighCutHz.toDouble()
+            )
+        }
+    }
     val bleState by viewModel.bleState.collectAsState()
     val processorState by viewModel.processorState.collectAsState()
 
@@ -223,6 +239,39 @@ fun ExperimentScreen(
         ImuRealtimeModelCard(
             imuPose = latestImuPose,
             isConnected = bleState.isConnected
+        )
+
+        Text(
+            text = "Micro Movement BPF",
+            color = Color.White,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Bold
+        )
+
+        Text(
+            text = "Low Cut: %.2f Hz".format(microLowCutHz),
+            color = Color.White.copy(alpha = 0.75f)
+        )
+
+        Slider(
+            value = microLowCutHz,
+            onValueChange = { value ->
+                microLowCutHz = value.coerceAtMost(microHighCutHz - 0.1f)
+            },
+            valueRange = 0.1f..2.0f
+        )
+
+        Text(
+            text = "High Cut: %.2f Hz".format(microHighCutHz),
+            color = Color.White.copy(alpha = 0.75f)
+        )
+
+        Slider(
+            value = microHighCutHz,
+            onValueChange = { value ->
+                microHighCutHz = value.coerceAtLeast(microLowCutHz + 0.1f)
+            },
+            valueRange = 1.0f..10.0f
         )
 
         ArousalStateCard(
@@ -1172,6 +1221,7 @@ private fun ArousalStateCard(
         Spacer(Modifier.height(12.dp))
 
         ArousalSectionTitle("1. Micro Movement")
+
         DevRow(
             label = "variance",
             value = formatArousalValue(arousalState.microMovementVariance, 8)

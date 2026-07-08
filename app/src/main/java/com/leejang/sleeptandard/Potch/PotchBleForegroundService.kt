@@ -47,6 +47,11 @@ import androidx.core.content.edit
 class PotchBleForegroundService : Service() {
 
     companion object {
+        const val ACTION_UPDATE_MICRO_BPF =
+            "com.leejang.sleeptandard.Potch.ACTION_UPDATE_MICRO_BPF"
+
+        const val EXTRA_MICRO_LOW_CUT = "extra_micro_low_cut"
+        const val EXTRA_MICRO_HIGH_CUT = "extra_micro_high_cut"
         /**
          * Potch 수신 시작 명령.
          *
@@ -150,6 +155,7 @@ class PotchBleForegroundService : Service() {
      */
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
 
+
         Log.i(
             TAG,
             "onStartCommand() action=${intent?.action}, flags=$flags, startId=$startId, sessionRunning=${isSessionRunning()}"
@@ -157,6 +163,21 @@ class PotchBleForegroundService : Service() {
         dataLogger?.logDebug(TAG, "onStartCommand() action=${intent?.action}, flags=$flags, startId=$startId, sessionRunning=${isSessionRunning()}", "I")
 
         when (intent?.action) {
+            ACTION_UPDATE_MICRO_BPF -> {
+                val low = intent.getDoubleExtra(EXTRA_MICRO_LOW_CUT, 0.5)
+                val high = intent.getDoubleExtra(EXTRA_MICRO_HIGH_CUT, 5.0)
+
+                dataProcessor?.updateMicroMovementBandPass(
+                    lowCutHz = low,
+                    highCutHz = high
+                )
+
+                dataLogger?.logDebug(
+                    TAG,
+                    "ACTION_UPDATE_MICRO_BPF low=$low high=$high",
+                    "I"
+                )
+            }
             ACTION_START -> {
                 Log.i(TAG, "ACTION_START received")
                 dataLogger?.logDebug(TAG, "ACTION_START received", "I")
