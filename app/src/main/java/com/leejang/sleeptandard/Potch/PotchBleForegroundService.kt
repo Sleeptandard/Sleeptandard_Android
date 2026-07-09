@@ -119,6 +119,8 @@ class PotchBleForegroundService : Service() {
      */
     private var bleManager: PotchBleManager? = null
 
+    private var isStoppingService = false
+
     /**
      * Service가 처음 생성될 때 호출된다.
      *
@@ -179,6 +181,8 @@ class PotchBleForegroundService : Service() {
                 )
             }
             ACTION_START -> {
+                isStoppingService = false
+
                 Log.i(TAG, "ACTION_START received")
                 dataLogger?.logDebug(TAG, "ACTION_START received", "I")
                 // "현재 Potch 수신 세션이 진행 중"이라는 표시를 저장한다.
@@ -190,6 +194,8 @@ class PotchBleForegroundService : Service() {
             }
 
             ACTION_STOP_AND_SAVE -> {
+                isStoppingService = true
+
                 Log.i(TAG, "ACTION_STOP_AND_SAVE received")
                 dataLogger?.logDebug(TAG, "ACTION_STOP_AND_SAVE received", "I")
                 // 사용자가 정상적으로 종료한 것이므로 세션 진행 상태를 false로 저장한다.
@@ -303,7 +309,11 @@ class PotchBleForegroundService : Service() {
                     else -> "Potch 대기 중"
                 }
 
-                updateNotification(text)
+                if (!isStoppingService) {
+                    updateNotification(text)
+                } else {
+                    Log.d(TAG, "Skip notification update because service is stopping. text=$text")
+                }
             }
         }
 
@@ -407,7 +417,12 @@ class PotchBleForegroundService : Service() {
         if (manager == null) {
             Log.w(TAG, "stopPotchReceivingAndSave() - manager is null. Stop service only.")
             dataLogger?.logDebug(TAG, "stopPotchReceivingAndSave() - manager is null. Stop service only.", "W")
-            stopForeground(STOP_FOREGROUND_DETACH)
+            stopForeground(STOP_FOREGROUND_REMOVE)
+
+            val notificationManager =
+                getSystemService(NotificationManager::class.java)
+            notificationManager.cancel(NOTIFICATION_ID)
+
             stopSelf()
             return
         }
@@ -445,8 +460,12 @@ class PotchBleForegroundService : Service() {
             Log.i(TAG, "Stopping foreground service after save")
             dataLogger?.logDebug(TAG, "Stopping foreground service after save", "I")
 
-            // ForegroundService 알림 제거
-            stopForeground(STOP_FOREGROUND_DETACH)
+            // ForegroundService 알림까지 완전히 제거
+            stopForeground(STOP_FOREGROUND_REMOVE)
+
+            val notificationManager =
+                getSystemService(NotificationManager::class.java)
+            notificationManager.cancel(NOTIFICATION_ID)
 
             // Service 종료
             stopSelf()

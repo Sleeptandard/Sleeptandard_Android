@@ -42,9 +42,18 @@ data class DataProcessorState(
     // 아직 수신된 데이터가 없거나 파싱 전이면 null
     val lastParsedData: SensorData? = null,
 
-    // PPG IR 채널 기반으로 추정한 심박수 (bpm)
-    // 누적된 PPG 샘플이 충분하지 않으면 null
+    // 기존 심박수 표시/각성지표 입력용 값.
+    // 각성지표는 그대로 IR 기반 HeartRateEstimate를 사용한다.
     val heartRateBpm: Int? = null,
+
+    // 실험 화면에서 채널별 HR 비교를 위해 표시할 값들.
+    val heartRateIrBpm: Int? = null,
+    val heartRateRedBpm: Int? = null,
+    val heartRateAvgBpm: Int? = null,
+
+    val heartRateIrQuality: Double? = null,
+    val heartRateRedQuality: Double? = null,
+    val heartRateAvgQuality: Double? = null,
 
     // CRC 검증 실패 횟수
     // 패킷 데이터가 손상되었을 가능성을 확인하기 위한 누적 카운트
@@ -164,8 +173,12 @@ class PotchDataProcessor(
      * CRC가 정상인 프레임의 샘플만 누적한다 (손상된 프레임은 HR 추정에 사용하지 않음).
      */
     private val heartRateIrBuffer = ArrayDeque<Int>()
+    private val heartRateRedBuffer = ArrayDeque<Int>()
+    private val heartRateAvgBuffer = ArrayDeque<Int>()
 
     private var totalHeartRateSampleCount: Long = 0L
+    private var totalHeartRateRedSampleCount: Long = 0L
+    private var totalHeartRateAvgSampleCount: Long = 0L
 
     /** HR 버퍼에 보관할 최대 샘플 수. 100Hz 기준 8초 = 800 샘플. */
     private val heartRateBufferMaxSamples = 800
@@ -375,7 +388,11 @@ class PotchDataProcessor(
         expectedFragCounter = null
 
         heartRateIrBuffer.clear()
+        heartRateRedBuffer.clear()
+        heartRateAvgBuffer.clear()
         totalHeartRateSampleCount = 0L
+        totalHeartRateRedSampleCount = 0L
+        totalHeartRateAvgSampleCount = 0L
 
         arousalCalculator.reset()
 
@@ -475,21 +492,62 @@ class PotchDataProcessor(
         val imuData = data.copyOfRange(612, 1212)
 
         val irSamples = extractIrSamples(ppgData)
+        val redSamples = extractRedSamples(ppgData)
+        val avgSamples = buildAveragePpgSamples(
+            irSamples = irSamples,
+            redSamples = redSamples
+        )
+
         val frameIrMax = irSamples.maxOrNull()?.toDouble() ?: 0.0
 
         // CRC가 정상인 프레임만 심박수 계산에 사용
         if (receivedCrc == calculatedCrc) {
-            appendPpgSamplesToHrBuffer(irSamples)
+            appendPpgSamplesToHrBuffer(
+                buffer = heartRateIrBuffer,
+                samples = irSamples
+            ) {
+                totalHeartRateSampleCount += 1L
+            }
+
+            appendPpgSamplesToHrBuffer(
+                buffer = heartRateRedBuffer,
+                samples = redSamples
+            ) {
+                totalHeartRateRedSampleCount += 1L
+            }
+
+            appendPpgSamplesToHrBuffer(
+                buffer = heartRateAvgBuffer,
+                samples = avgSamples
+            ) {
+                totalHeartRateAvgSampleCount += 1L
+            }
         }
 
-        val heartRateEstimate = estimateHeartRate()
+        val irHeartRateEstimate = estimateHeartRate()
+        val redHeartRateEstimate = estimateHeartRateFromBuffer(
+            buffer = heartRateRedBuffer,
+            totalSampleCount = totalHeartRateRedSampleCount
+        )
+        val avgHeartRateEstimate = estimateHeartRateFromBuffer(
+            buffer = heartRateAvgBuffer,
+            totalSampleCount = totalHeartRateAvgSampleCount
+        )
+
+        // 각성지표는 기존 동작을 유지하기 위해 IR 기반 estimate만 넘긴다.
+        val heartRateEstimate = irHeartRateEstimate
         val estimatedHeartRate = heartRateEstimate?.bpm
 
         Log.d(
             TAG,
-            "SuperFrame parsed timestamp=$timestamp, irMax=$frameIrMax, bpm=$estimatedHeartRate, " +
-                    "ibiCount=${heartRateEstimate?.intervalCount}, " +
-                    "hrQuality=${heartRateEstimate?.qualityScore}"
+            "SuperFrame parsed timestamp=$timestamp, irMax=$frameIrMax, " +
+                    "bpmIR=${irHeartRateEstimate?.bpm}, " +
+                    "bpmRED=${redHeartRateEstimate?.bpm}, " +
+                    "bpmAVG=${avgHeartRateEstimate?.bpm}, " +
+                    "ibiIR=${irHeartRateEstimate?.intervalCount}, " +
+                    "qIR=${irHeartRateEstimate?.qualityScore}, " +
+                    "qRED=${redHeartRateEstimate?.qualityScore}, " +
+                    "qAVG=${avgHeartRateEstimate?.qualityScore}"
         )
 
         val parsed = SensorData(
@@ -563,7 +621,16 @@ class PotchDataProcessor(
                 lastParsedData = parsed,
 
                 // iOS처럼 계산 실패 시 기존 유효 심박수를 유지한다.
+                // heartRateBpm은 기존 동작 유지를 위해 IR 기반 값을 사용한다.
                 heartRateBpm = estimatedHeartRate ?: current.heartRateBpm,
+
+                heartRateIrBpm = irHeartRateEstimate?.bpm ?: current.heartRateIrBpm,
+                heartRateRedBpm = redHeartRateEstimate?.bpm ?: current.heartRateRedBpm,
+                heartRateAvgBpm = avgHeartRateEstimate?.bpm ?: current.heartRateAvgBpm,
+
+                heartRateIrQuality = irHeartRateEstimate?.qualityScore ?: current.heartRateIrQuality,
+                heartRateRedQuality = redHeartRateEstimate?.qualityScore ?: current.heartRateRedQuality,
+                heartRateAvgQuality = avgHeartRateEstimate?.qualityScore ?: current.heartRateAvgQuality,
 
                 arousalState = arousalState,
                 lastIrMax = frameIrMax,
@@ -615,6 +682,36 @@ class PotchDataProcessor(
     }
 
     /**
+     * PPG payload(600 bytes, 100Hz x 100 sample, [Red 3B + IR 3B] 구조)에서
+     * RED 채널 값만 18-bit로 복원한다.
+     */
+    private fun extractRedSamples(ppgData: ByteArray): IntArray {
+        val sampleCount = ppgData.size / 6
+        return IntArray(sampleCount) { i ->
+            val base = i * 6
+            ((ppgData[base].toInt() and 0x03) shl 16) or
+                    ((ppgData[base + 1].toInt() and 0xFF) shl 8) or
+                    (ppgData[base + 2].toInt() and 0xFF)
+        }
+    }
+
+    /**
+     * IR과 RED raw sample을 sample index 기준으로 평균낸 합성 PPG 신호를 만든다.
+     *
+     * 이 값은 실험 화면 비교용이며, 각성지표 계산에는 사용하지 않는다.
+     */
+    private fun buildAveragePpgSamples(
+        irSamples: IntArray,
+        redSamples: IntArray
+    ): IntArray {
+        val sampleCount = minOf(irSamples.size, redSamples.size)
+
+        return IntArray(sampleCount) { i ->
+            ((irSamples[i].toLong() + redSamples[i].toLong()) / 2L).toInt()
+        }
+    }
+
+    /**
      * 새로 들어온 PPG IR 샘플을 rolling buffer에 누적한다.
      *
      * Super Frame 한 개에는 1초(100 샘플)치 PPG만 들어있어서,
@@ -622,21 +719,50 @@ class PotchDataProcessor(
      * 그래서 최근 [heartRateBufferMaxSamples]개(최대 8초)를 누적해 두고
      * 그 위에서 심박수를 추정한다.
      */
-    private fun appendPpgSamplesToHrBuffer(samples: IntArray) {
+    private fun appendPpgSamplesToHrBuffer(
+        buffer: ArrayDeque<Int>,
+        samples: IntArray,
+        onSampleAdded: () -> Unit
+    ) {
         for (sample in samples) {
-            heartRateIrBuffer.addLast(sample)
-            totalHeartRateSampleCount += 1L
+            buffer.addLast(sample)
+            onSampleAdded()
 
-            if (heartRateIrBuffer.size > heartRateBufferMaxSamples) {
-                heartRateIrBuffer.removeFirst()
+            if (buffer.size > heartRateBufferMaxSamples) {
+                buffer.removeFirst()
             }
         }
     }
 
     private fun estimateHeartRate(): HeartRateEstimate? {
-        if (heartRateIrBuffer.size < heartRateMinSamples) return null
+        return estimateHeartRateFromBuffer(
+            buffer = heartRateIrBuffer,
+            totalSampleCount = totalHeartRateSampleCount
+        )
+    }
 
-        val signal = heartRateIrBuffer.map { it.toDouble() }
+    /**
+     * HeartPy filtering.py의 처리 흐름을 Android/Kotlin용으로 단순화한 HR 추정 함수.
+     *
+     * Python HeartPy 원본의 filter_signal()은 scipy.signal.filtfilt 기반 Butterworth filter를 쓰지만,
+     * Android 실시간 처리에서는 SciPy를 그대로 사용할 수 없으므로 아래처럼 재구성한다.
+     *
+     * raw PPG
+     * -> Hampel-style spike suppression
+     * -> forward-backward one-pole bandpass(0.75~3.5Hz)
+     * -> return_top처럼 양수 성분만 사용
+     * -> peak detection
+     * -> IBI 계산
+     * -> quotient filter + median outlier filter
+     * -> bpm 계산
+     */
+    private fun estimateHeartRateFromBuffer(
+        buffer: ArrayDeque<Int>,
+        totalSampleCount: Long
+    ): HeartRateEstimate? {
+        if (buffer.size < heartRateMinSamples) return null
+
+        val signal = buffer.map { it.toDouble() }
         val n = signal.size
 
         if (n < 200) return null
@@ -644,104 +770,38 @@ class PotchDataProcessor(
         val maxRaw = signal.maxOrNull() ?: 0.0
         if (maxRaw <= 10000.0) return null
 
-        val mean = signal.average()
-        val acSignal = DoubleArray(n) { i ->
-            signal[i] - mean
-        }
-
-        val halfWin = 7
-        val filtered = DoubleArray(n)
-
-        for (i in 0 until n) {
-            val lo = (i - halfWin).coerceAtLeast(0)
-            val hi = (i + halfWin).coerceAtMost(n - 1)
-
-            var sum = 0.0
-            for (j in lo..hi) {
-                sum += acSignal[j]
-            }
-
-            filtered[i] = sum / (hi - lo + 1)
-        }
+        val filtered = preprocessPpgForHeartRate(signal)
 
         val peakAmplitude = filtered.maxOrNull() ?: 0.0
+        if (peakAmplitude <= 80.0) return null
 
-        if (peakAmplitude <= 150.0) return null
+        val threshold = peakAmplitude * 0.35
+        val minPeakDistanceSamples = 35 // 100Hz 기준 0.35초, 약 171bpm보다 빠른 peak 중복 방지
 
-        val threshold = peakAmplitude * 0.30
-        val minPeakDistance = 35
-
-        val peakIndices = mutableListOf<Int>()
-        var lastPeakIdx = -minPeakDistance
-
-        for (i in 1 until n - 1) {
-            val isPeak =
-                filtered[i] > filtered[i - 1] &&
-                        filtered[i] > filtered[i + 1] &&
-                        filtered[i] > threshold
-
-            if (!isPeak) continue
-
-            val dist = i - lastPeakIdx
-
-            if (dist >= minPeakDistance) {
-                peakIndices.add(i)
-                lastPeakIdx = i
-            } else if (peakIndices.isNotEmpty()) {
-                val last = peakIndices.last()
-
-                if (filtered[i] > filtered[last]) {
-                    peakIndices[peakIndices.lastIndex] = i
-                    lastPeakIdx = i
-                }
-            }
-        }
+        val peakIndices = detectHeartRatePeaks(
+            signal = filtered,
+            threshold = threshold,
+            minPeakDistanceSamples = minPeakDistanceSamples
+        )
 
         if (peakIndices.size < 2) return null
 
-        val bufferStartSampleIndex =
-            totalHeartRateSampleCount - heartRateIrBuffer.size
+        val bufferStartSampleIndex = totalSampleCount - buffer.size
 
-        val intervals = mutableListOf<IbiInterval>()
-
-        for (i in 1 until peakIndices.size) {
-            val diffSamples = peakIndices[i] - peakIndices[i - 1]
-            val intervalSec = diffSamples / 100.0
-
-            if (intervalSec in 0.333..1.5) {
-                val endSampleIndex = bufferStartSampleIndex + peakIndices[i]
-
-                intervals.add(
-                    IbiInterval(
-                        intervalSec = intervalSec,
-                        endSampleIndex = endSampleIndex
-                    )
-                )
-            }
-        }
+        val intervals = buildHeartRateIntervals(
+            peakIndices = peakIndices,
+            bufferStartSampleIndex = bufferStartSampleIndex
+        )
 
         if (intervals.isEmpty()) return null
 
-        var usedIntervals = intervals
-
-        if (intervals.size >= 3) {
-            val sorted = intervals.map { it.intervalSec }.sorted()
-            val median = sorted[sorted.size / 2]
-
-            val within = intervals.filter {
-                abs(it.intervalSec - median) / median < 0.40
-            }
-
-            if (within.isNotEmpty()) {
-                usedIntervals = within.toMutableList()
-            }
-        }
+        val usedIntervals = filterHeartRateIntervals(intervals)
+        if (usedIntervals.isEmpty()) return null
 
         val avgInterval = usedIntervals.map { it.intervalSec }.average()
         if (avgInterval <= 0.0) return null
 
         val bpm = (60.0 / avgInterval).roundToInt()
-
         if (bpm !in 40..180) return null
 
         val qualityScore = calculateHeartRateEstimateQuality(
@@ -758,6 +818,300 @@ class PotchDataProcessor(
             qualityScore = qualityScore
         )
     }
+
+    private fun preprocessPpgForHeartRate(
+        rawSignal: List<Double>
+    ): DoubleArray {
+        val sampleRateHz = 100.0
+
+        // 1) DC 제거. raw 값 자체의 offset은 HR peak 검출에 필요 없다.
+        val mean = rawSignal.average()
+        val acSignal = DoubleArray(rawSignal.size) { i ->
+            rawSignal[i] - mean
+        }
+
+        // 2) HeartPy의 Hampel filter 아이디어: 순간적으로 튄 값을 주변 median으로 눌러준다.
+        //    원본 HeartPy는 median + 3*MAD보다 큰 값을 교정한다.
+        //    여기서는 PPG 착용 흔들림을 고려해 양/음 방향 모두 교정한다.
+        val spikeSuppressed = hampelFilterSymmetric(
+            data = acSignal,
+            halfWindowSamples = 3,
+            thresholdScale = 3.0
+        )
+
+        // 3) HeartPy filter_signal(..., cutoff=[0.75, 3.5], filtertype="bandpass")에 해당.
+        //    0.75~3.5Hz = 약 45~210bpm 대역만 남긴다.
+        //    scipy.filtfilt 대신 rolling buffer에 forward-backward one-pole bandpass를 적용한다.
+        val bandPassed = forwardBackwardBandPass(
+            data = spikeSuppressed,
+            sampleRateHz = sampleRateHz,
+            lowCutHz = 0.75,
+            highCutHz = 3.5
+        )
+
+        // 4) PPG 신호 극성이 뒤집혀 들어올 수 있으므로, 양수 peak와 음수 peak 중 더 강한 쪽을 선택한다.
+        //    HeartPy의 return_top=True처럼 peak 검출에 필요한 위쪽 성분만 남긴다.
+        val positiveTop = DoubleArray(bandPassed.size) { i ->
+            if (bandPassed[i] > 0.0) bandPassed[i] else 0.0
+        }
+        val negativeTop = DoubleArray(bandPassed.size) { i ->
+            val inverted = -bandPassed[i]
+            if (inverted > 0.0) inverted else 0.0
+        }
+
+        val positiveMax = positiveTop.maxOrNull() ?: 0.0
+        val negativeMax = negativeTop.maxOrNull() ?: 0.0
+
+        return if (positiveMax >= negativeMax) positiveTop else negativeTop
+    }
+
+    private fun hampelFilterSymmetric(
+        data: DoubleArray,
+        halfWindowSamples: Int,
+        thresholdScale: Double
+    ): DoubleArray {
+        if (data.isEmpty()) return data
+
+        val output = data.copyOf()
+
+        for (i in data.indices) {
+            val from = (i - halfWindowSamples).coerceAtLeast(0)
+            val toExclusive = (i + halfWindowSamples + 1).coerceAtMost(data.size)
+            val window = data.copyOfRange(from, toExclusive)
+
+            val median = median(window.toList())
+            val deviations = DoubleArray(window.size) { idx ->
+                abs(window[idx] - median)
+            }
+            val mad = median(deviations.toList())
+
+            // MAD가 0이면 주변 값이 거의 같은 것이므로 교정하지 않는다.
+            if (mad <= 0.0) continue
+
+            // 1.4826은 MAD를 표준편차에 가깝게 보정하는 계수.
+            val threshold = thresholdScale * 1.4826 * mad
+
+            if (abs(data[i] - median) > threshold) {
+                output[i] = median
+            }
+        }
+
+        return output
+    }
+
+    private fun forwardBackwardBandPass(
+        data: DoubleArray,
+        sampleRateHz: Double,
+        lowCutHz: Double,
+        highCutHz: Double
+    ): DoubleArray {
+        if (data.isEmpty()) return data
+
+        val forward = onePoleBandPass(
+            data = data,
+            sampleRateHz = sampleRateHz,
+            lowCutHz = lowCutHz,
+            highCutHz = highCutHz
+        )
+
+        val backward = onePoleBandPass(
+            data = forward.reversedArray(),
+            sampleRateHz = sampleRateHz,
+            lowCutHz = lowCutHz,
+            highCutHz = highCutHz
+        )
+
+        return backward.reversedArray()
+    }
+
+    private fun onePoleBandPass(
+        data: DoubleArray,
+        sampleRateHz: Double,
+        lowCutHz: Double,
+        highCutHz: Double
+    ): DoubleArray {
+        val highPassed = onePoleHighPass(
+            data = data,
+            sampleRateHz = sampleRateHz,
+            cutoffHz = lowCutHz
+        )
+
+        return onePoleLowPass(
+            data = highPassed,
+            sampleRateHz = sampleRateHz,
+            cutoffHz = highCutHz
+        )
+    }
+
+    private fun onePoleHighPass(
+        data: DoubleArray,
+        sampleRateHz: Double,
+        cutoffHz: Double
+    ): DoubleArray {
+        if (data.isEmpty()) return data
+
+        val output = DoubleArray(data.size)
+        val dt = 1.0 / sampleRateHz
+        val rc = 1.0 / (2.0 * Math.PI * cutoffHz)
+        val alpha = rc / (rc + dt)
+
+        output[0] = 0.0
+
+        for (i in 1 until data.size) {
+            output[i] = alpha * (output[i - 1] + data[i] - data[i - 1])
+        }
+
+        return output
+    }
+
+    private fun onePoleLowPass(
+        data: DoubleArray,
+        sampleRateHz: Double,
+        cutoffHz: Double
+    ): DoubleArray {
+        if (data.isEmpty()) return data
+
+        val output = DoubleArray(data.size)
+        val dt = 1.0 / sampleRateHz
+        val rc = 1.0 / (2.0 * Math.PI * cutoffHz)
+        val alpha = dt / (rc + dt)
+
+        output[0] = data[0]
+
+        for (i in 1 until data.size) {
+            output[i] = output[i - 1] + alpha * (data[i] - output[i - 1])
+        }
+
+        return output
+    }
+
+    private fun detectHeartRatePeaks(
+        signal: DoubleArray,
+        threshold: Double,
+        minPeakDistanceSamples: Int
+    ): MutableList<Int> {
+        val peakIndices = mutableListOf<Int>()
+        var lastPeakIdx = -minPeakDistanceSamples
+
+        for (i in 1 until signal.size - 1) {
+            val isPeak =
+                signal[i] > signal[i - 1] &&
+                        signal[i] > signal[i + 1] &&
+                        signal[i] > threshold
+
+            if (!isPeak) continue
+
+            val dist = i - lastPeakIdx
+
+            if (dist >= minPeakDistanceSamples) {
+                peakIndices.add(i)
+                lastPeakIdx = i
+            } else if (peakIndices.isNotEmpty()) {
+                val last = peakIndices.last()
+
+                if (signal[i] > signal[last]) {
+                    peakIndices[peakIndices.lastIndex] = i
+                    lastPeakIdx = i
+                }
+            }
+        }
+
+        return peakIndices
+    }
+
+    private fun buildHeartRateIntervals(
+        peakIndices: List<Int>,
+        bufferStartSampleIndex: Long
+    ): MutableList<IbiInterval> {
+        val intervals = mutableListOf<IbiInterval>()
+
+        for (i in 1 until peakIndices.size) {
+            val diffSamples = peakIndices[i] - peakIndices[i - 1]
+            val intervalSec = diffSamples / 100.0
+
+            // 0.333~1.5초 = 약 40~180bpm 범위.
+            if (intervalSec in 0.333..1.5) {
+                intervals.add(
+                    IbiInterval(
+                        intervalSec = intervalSec,
+                        endSampleIndex = bufferStartSampleIndex + peakIndices[i]
+                    )
+                )
+            }
+        }
+
+        return intervals
+    }
+
+    private fun filterHeartRateIntervals(
+        intervals: MutableList<IbiInterval>
+    ): List<IbiInterval> {
+        if (intervals.size < 2) return intervals
+
+        // HeartPy quotient_filter 아이디어:
+        // 연속 RR interval의 비율이 0.8~1.2 범위를 벗어나면 튄 interval로 본다.
+        var quotientFiltered = intervals.toList()
+
+        repeat(2) {
+            if (quotientFiltered.size < 2) return@repeat
+
+            val reject = BooleanArray(quotientFiltered.size)
+
+            for (i in 0 until quotientFiltered.size - 1) {
+                val current = quotientFiltered[i].intervalSec
+                val next = quotientFiltered[i + 1].intervalSec
+
+                if (current <= 0.0 || next <= 0.0) {
+                    reject[i] = true
+                    continue
+                }
+
+                val ratio = current / next
+
+                if (ratio < 0.8 || ratio > 1.2) {
+                    reject[i] = true
+                }
+            }
+
+            val nextFiltered = quotientFiltered.filterIndexed { index, _ ->
+                !reject[index]
+            }
+
+            // 너무 많이 버리면 원래 interval을 유지한다.
+            if (nextFiltered.size >= 2) {
+                quotientFiltered = nextFiltered
+            }
+        }
+
+        // 기존 코드의 median 40% outlier filter도 유지한다.
+        if (quotientFiltered.size >= 3) {
+            val median = median(quotientFiltered.map { it.intervalSec })
+
+            val medianFiltered = quotientFiltered.filter {
+                median > 0.0 && abs(it.intervalSec - median) / median < 0.40
+            }
+
+            if (medianFiltered.size >= 2) {
+                return medianFiltered
+            }
+        }
+
+        return quotientFiltered
+    }
+
+    private fun median(values: List<Double>): Double {
+        if (values.isEmpty()) return 0.0
+
+        val sorted = values.sorted()
+        val mid = sorted.size / 2
+
+        return if (sorted.size % 2 == 1) {
+            sorted[mid]
+        } else {
+            (sorted[mid - 1] + sorted[mid]) / 2.0
+        }
+    }
+
     private fun calculateHeartRateEstimateQuality(
         intervals: List<IbiInterval>,
         peakAmplitude: Double

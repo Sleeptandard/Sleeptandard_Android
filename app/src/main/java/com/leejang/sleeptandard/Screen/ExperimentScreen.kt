@@ -71,7 +71,12 @@ fun ExperimentScreen(
     var microLowCutHz by rememberSaveable { mutableFloatStateOf(0.5f) }
     var microHighCutHz by rememberSaveable { mutableFloatStateOf(5.0f) }
 
-    LaunchedEffect(microLowCutHz, microHighCutHz) {
+    val bleState by viewModel.bleState.collectAsState()
+    val processorState by viewModel.processorState.collectAsState()
+
+    LaunchedEffect(microLowCutHz, microHighCutHz, bleState.isConnected) {
+        if (!bleState.isConnected) return@LaunchedEffect
+
         kotlinx.coroutines.delay(250)
 
         if (microLowCutHz < microHighCutHz) {
@@ -81,8 +86,6 @@ fun ExperimentScreen(
             )
         }
     }
-    val bleState by viewModel.bleState.collectAsState()
-    val processorState by viewModel.processorState.collectAsState()
 
     val sensorData = processorState.lastParsedData
     val arousalState = processorState.arousalState
@@ -91,7 +94,9 @@ fun ExperimentScreen(
         sensorData?.let { "%.1f°C".format(it.ntcCelsius) } ?: "--°C"
 
     val heartRateText =
-        processorState.heartRateBpm?.let { "$it bpm" } ?: "-- bpm"
+        processorState.heartRateIrBpm?.let { "$it bpm" }
+            ?: processorState.heartRateBpm?.let { "$it bpm" }
+            ?: "-- bpm"
 
     val batteryPercent =
         sensorData?.batteryVoltage?.let { voltageToBatteryPercent(it) }
@@ -236,6 +241,23 @@ fun ExperimentScreen(
             isConnected = bleState.isConnected
         )
 
+        HeartRateComparisonCard(
+            irBpm = processorState.heartRateIrBpm ?: processorState.heartRateBpm,
+            redBpm = processorState.heartRateRedBpm,
+            avgBpm = processorState.heartRateAvgBpm,
+            irQuality = processorState.heartRateIrQuality,
+            redQuality = processorState.heartRateRedQuality,
+            avgQuality = processorState.heartRateAvgQuality
+        )
+
+
+
+        /*
+        HeartRateFilteredPpgGraphCard(
+            filteredIrSamples = buildHeartRateFilteredIrSamples(ppgIrSamples),
+            isConnected = bleState.isConnected
+        )
+*/
         ImuRealtimeModelCard(
             imuPose = latestImuPose,
             isConnected = bleState.isConnected
@@ -435,6 +457,132 @@ private fun SensorCard(
 }
 
 
+@Composable
+private fun HeartRateComparisonCard(
+    irBpm: Int?,
+    redBpm: Int?,
+    avgBpm: Int?,
+    irQuality: Double?,
+    redQuality: Double?,
+    avgQuality: Double?
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(26.dp))
+            .background(Color(0xFF1E1E25))
+            .border(
+                width = 1.dp,
+                color = Color(0xFFFF4B55).copy(alpha = 0.38f),
+                shape = RoundedCornerShape(26.dp)
+            )
+            .padding(18.dp)
+    ) {
+        Text(
+            text = "♥ PPG 심박수 비교",
+            color = Color(0xFFFF4B55),
+            fontSize = 21.sp,
+            fontWeight = FontWeight.Bold
+        )
+
+        Spacer(Modifier.height(8.dp))
+
+        Text(
+            text = "IR, RED, IR/RED raw 평균 신호를 각각 같은 peak 검출 로직으로 계산합니다. 각성지표 입력은 기존처럼 IR 기준을 유지합니다.",
+            color = Color.White.copy(alpha = 0.55f),
+            fontSize = 13.sp,
+            lineHeight = 18.sp
+        )
+
+        Spacer(Modifier.height(14.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            HeartRateMetricBox(
+                modifier = Modifier.weight(1f),
+                title = "IR",
+                bpm = irBpm,
+                quality = irQuality,
+                color = Color(0xFF4CD3FF)
+            )
+
+            HeartRateMetricBox(
+                modifier = Modifier.weight(1f),
+                title = "RED",
+                bpm = redBpm,
+                quality = redQuality,
+                color = Color(0xFFFF4B55)
+            )
+
+            HeartRateMetricBox(
+                modifier = Modifier.weight(1f),
+                title = "AVG",
+                bpm = avgBpm,
+                quality = avgQuality,
+                color = Color(0xFFFFD166)
+            )
+        }
+    }
+}
+
+@Composable
+private fun HeartRateMetricBox(
+    modifier: Modifier = Modifier,
+    title: String,
+    bpm: Int?,
+    quality: Double?,
+    color: Color
+) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(18.dp))
+            .background(Color.White.copy(alpha = 0.055f))
+            .border(
+                width = 1.dp,
+                color = color.copy(alpha = 0.28f),
+                shape = RoundedCornerShape(18.dp)
+            )
+            .padding(horizontal = 10.dp, vertical = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = title,
+            color = color,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
+            fontFamily = FontFamily.Monospace
+        )
+
+        Spacer(Modifier.height(8.dp))
+
+        Text(
+            text = bpm?.let { "$it" } ?: "--",
+            color = Color.White,
+            fontSize = 28.sp,
+            fontWeight = FontWeight.ExtraBold,
+            fontFamily = FontFamily.Monospace
+        )
+
+        Text(
+            text = "bpm",
+            color = Color.White.copy(alpha = 0.50f),
+            fontSize = 11.sp,
+            fontFamily = FontFamily.Monospace
+        )
+
+        Spacer(Modifier.height(6.dp))
+
+        Text(
+            text = quality?.let { "q=%.2f".format(it) } ?: "q=--",
+            color = Color.White.copy(alpha = 0.58f),
+            fontSize = 11.sp,
+            fontFamily = FontFamily.Monospace
+        )
+    }
+}
+
 private const val PPG_SAMPLE_RATE_HZ = 100
 private const val PPG_GRAPH_WINDOW_SECONDS = 10
 private const val PPG_GRAPH_MAX_SAMPLES = PPG_SAMPLE_RATE_HZ * PPG_GRAPH_WINDOW_SECONDS
@@ -555,6 +703,7 @@ private fun PpgRealtimeGraphCard(
                         strokeWidthPx = 2.5f
                     )
                 }
+
 
                 if (redSamples.size >= 2) {
                     drawPpgPath(
@@ -2167,4 +2316,166 @@ private fun formatFileSize(bytes: Long): String {
             "$bytes B"
         }
     }
+}
+
+private fun buildHeartRateFilteredIrSamples(
+    rawIrSamples: List<Int>
+): List<Double> {
+    if (rawIrSamples.size < 2) return emptyList()
+
+    val signal = rawIrSamples.map { it.toDouble() }
+    val mean = signal.average()
+
+    val acSignal = DoubleArray(signal.size) { i ->
+        signal[i] - mean
+    }
+
+    val halfWin = 7
+    val filtered = ArrayList<Double>(signal.size)
+
+    for (i in acSignal.indices) {
+        val lo = (i - halfWin).coerceAtLeast(0)
+        val hi = (i + halfWin).coerceAtMost(acSignal.lastIndex)
+
+        var sum = 0.0
+        for (j in lo..hi) {
+            sum += acSignal[j]
+        }
+
+        filtered.add(sum / (hi - lo + 1))
+    }
+
+    return filtered
+}
+
+@Composable
+private fun HeartRateFilteredPpgGraphCard(
+    filteredIrSamples: List<Double>,
+    isConnected: Boolean
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(26.dp))
+            .background(Color(0xFF1E1E25))
+            .border(
+                width = 1.dp,
+                color = Color(0xFFFFD166).copy(alpha = 0.45f),
+                shape = RoundedCornerShape(26.dp)
+            )
+            .padding(18.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "💓 HR 계산용 필터링 PPG",
+                color = Color(0xFFFFD166),
+                fontSize = 21.sp,
+                fontWeight = FontWeight.Bold
+            )
+
+            Spacer(Modifier.weight(1f))
+
+            Text(
+                text = if (isConnected) "FILTERED" else "대기",
+                color = if (isConnected) Color(0xFF3DFF78) else Color.White.copy(alpha = 0.45f),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(100.dp))
+                    .background(Color.White.copy(alpha = 0.07f))
+                    .padding(horizontal = 10.dp, vertical = 5.dp)
+            )
+        }
+
+        Spacer(Modifier.height(10.dp))
+
+        Text(
+            text = "IR raw 평균 제거 + halfWin=7 이동평균 smoothing. 심박 peak 검출에 들어가는 형태와 유사한 파형입니다.",
+            color = Color.White.copy(alpha = 0.55f),
+            fontSize = 13.sp,
+            lineHeight = 18.sp
+        )
+
+        Spacer(Modifier.height(12.dp))
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(210.dp)
+                .clip(RoundedCornerShape(18.dp))
+                .background(Color.Black.copy(alpha = 0.24f))
+                .border(
+                    width = 1.dp,
+                    color = Color.White.copy(alpha = 0.06f),
+                    shape = RoundedCornerShape(18.dp)
+                )
+                .padding(10.dp)
+        ) {
+            Canvas(
+                modifier = Modifier.fillMaxSize()
+            ) {
+                drawPpgGrid()
+
+                if (filteredIrSamples.size >= 2) {
+                    drawDoublePpgPath(
+                        samples = filteredIrSamples,
+                        color = Color(0xFFFFD166),
+                        strokeWidthPx = 2.5f
+                    )
+                }
+            }
+
+            if (filteredIrSamples.isEmpty()) {
+                Text(
+                    text = "필터링된 PPG 데이터 대기 중",
+                    color = Color.White.copy(alpha = 0.45f),
+                    fontSize = 14.sp,
+                    modifier = Modifier.align(Alignment.Center)
+                )
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        Text(
+            text = "buffer=${filteredIrSamples.size} samples",
+            color = Color.White.copy(alpha = 0.42f),
+            fontSize = 12.sp,
+            fontFamily = FontFamily.Monospace
+        )
+    }
+}
+
+private fun DrawScope.drawDoublePpgPath(
+    samples: List<Double>,
+    color: Color,
+    strokeWidthPx: Float
+) {
+    if (samples.size < 2) return
+
+    val minValue = samples.minOrNull() ?: return
+    val maxValue = samples.maxOrNull() ?: return
+    val range = (maxValue - minValue).takeIf { it > 0.0 } ?: 1.0
+
+    val path = Path()
+
+    samples.forEachIndexed { index, value ->
+        val x = size.width * index.toFloat() / (samples.size - 1).toFloat()
+        val normalized = ((value - minValue) / range).toFloat()
+        val y = size.height - normalized * size.height
+
+        if (index == 0) {
+            path.moveTo(x, y)
+        } else {
+            path.lineTo(x, y)
+        }
+    }
+
+    drawPath(
+        path = path,
+        color = color,
+        style = Stroke(width = strokeWidthPx)
+    )
 }
