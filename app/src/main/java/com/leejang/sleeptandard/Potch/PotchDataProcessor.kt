@@ -1,9 +1,13 @@
 package com.leejang.sleeptandard.Potch
 
+import android.util.Log
 import kotlinx.coroutines.flow.MutableStateFlow
 
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
+import kotlin.math.abs
+import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 /**
  * PotchDataProcessor가 현재까지 처리한 데이터 상태를 담는 데이터 클래스.
@@ -19,10 +23,28 @@ data class PacketErrorLog(
     val timestampMs: Long = System.currentTimeMillis()
 )
 
+data class IbiInterval(
+    val intervalSec: Double,
+    val endSampleIndex: Long
+)
+
+data class HeartRateEstimate(
+    val bpm: Int,
+    val ibiIntervals: List<IbiInterval>,
+    val peakCount: Int,
+    val intervalCount: Int,
+    val averageIntervalSec: Double,
+    val qualityScore: Double
+)
+
 data class DataProcessorState(
     // 마지막으로 정상 파싱된 센서 데이터
     // 아직 수신된 데이터가 없거나 파싱 전이면 null
     val lastParsedData: SensorData? = null,
+
+    // PPG IR 채널 기반으로 추정한 심박수 (bpm)
+    // 누적된 PPG 샘플이 충분하지 않으면 null
+    val heartRateBpm: Int? = null,
 
     // CRC 검증 실패 횟수
     // 패킷 데이터가 손상되었을 가능성을 확인하기 위한 누적 카운트
@@ -58,7 +80,18 @@ data class DataProcessorState(
     val lastFragCounter: Int? = null,
 
     // 다음에 기대하는 fragment counter
-    val expectedFragCounter: Int? = null
+    val expectedFragCounter: Int? = null,
+
+    // 가장 최근 프레임의 IR 최댓값.
+    // 손가락/피부 접촉이 있으면 보통 10000 이상, 강하면 50000 이상.
+    // 0이면 PPG 데이터가 안 들어오거나 sleep mode에서 0으로 채워졌을 가능성이 큼.
+    val lastIrMax: Double = 0.0,
+
+    // INT2 비동기 이벤트 수신 여부
+    val int2EventReceived: Boolean = false,
+
+    // 각성지표 state
+    val arousalState: ArousalState = ArousalState(),
 )
 /**
  * Potch BLE 기기에서 들어오는 raw byte 데이터를 실제 센서 데이터로 변환하는 클래스.
@@ -77,6 +110,10 @@ data class DataProcessorState(
 class PotchDataProcessor(
     private val dataLogger: PotchDataLogger? = null
 ) {
+    private val TAG = "PotchDataProcessor"
+
+    // 각성지표 연산기
+    private val arousalCalculator = PotchArousalCalculator()
 
     private val currentFrameErrors = mutableListOf<String>()
     private val currentFrameMissPacketNums = mutableListOf<Int>()
@@ -118,6 +155,25 @@ class PotchDataProcessor(
     private var expectedFragCounter: Int? = null
 
     /**
+     * 심박수 추정을 위한 PPG IR 샘플 누적 버퍼.
+     *
+     * 한 Super Frame에는 1초(100 샘플)치 PPG 데이터만 들어있어서
+     * 그 안에서 피크 검출을 하면 비트 수가 너무 적어 (60bpm 기준 1개) 불안정하다.
+     * 그래서 최근 몇 초 분량을 rolling buffer로 누적한 뒤 그 위에서 피크를 검출한다.
+     *
+     * CRC가 정상인 프레임의 샘플만 누적한다 (손상된 프레임은 HR 추정에 사용하지 않음).
+     */
+    private val heartRateIrBuffer = ArrayDeque<Int>()
+
+    private var totalHeartRateSampleCount: Long = 0L
+
+    /** HR 버퍼에 보관할 최대 샘플 수. 100Hz 기준 8초 = 800 샘플. */
+    private val heartRateBufferMaxSamples = 800
+
+    /** HR을 계산하기 위한 최소 누적 샘플 수. 100Hz 기준 3초 = 300 샘플. */
+    private val heartRateMinSamples = 300
+
+    /**
      * Potch 기기에서 한 번에 보내는 BLE Fragment 크기.
      *
      * 구조:
@@ -154,6 +210,7 @@ class PotchDataProcessor(
      */
     @Synchronized
     fun processIncomingData(data: ByteArray) {
+        Log.d(TAG, "Rcv length=${data.size}")
         updateLog("Rcv length: ${data.size}")
 
         _state.update {
@@ -185,6 +242,28 @@ class PotchDataProcessor(
                     (data[1].toInt() and 0xFF)
 
         val headerPrefix = (miniHeader shr 12) and 0xF
+
+        // 비동기 INT2 이벤트 처리.
+        // 펌웨어 ble_send_int2_signal()은 prefix 0xE, eventType 0x001로 보냄.
+        if (headerPrefix == 0xE) {
+            val eventType = miniHeader and 0x0FFF
+
+            if (eventType == 0x001) {
+                val msg = "Asynchronous INT2 Event Received!"
+
+                Log.i(TAG, msg)
+                dataLogger?.logDebug(TAG, msg, "I")
+
+                _state.update {
+                    it.copy(
+                        int2EventReceived = true,
+                        lastLog = msg
+                    )
+                }
+            }
+
+            return
+        }
 
         if (headerPrefix != 0x5) {
             val msg = "Header Prefix Drop: expected 0x5, got 0x${headerPrefix.toString(16)}"
@@ -292,25 +371,27 @@ class PotchDataProcessor(
      */
     @Synchronized
     fun reset() {
-        // 누적 중이던 payload 제거
         buffer.clear()
-
-        // fragment counter 기준 초기화
         expectedFragCounter = null
 
-        // UI 상태도 초기값으로 되돌림
+        heartRateIrBuffer.clear()
+        totalHeartRateSampleCount = 0L
+
+        arousalCalculator.reset()
+
         _state.value = DataProcessorState()
     }
 
     /**
      * 1212 bytes짜리 Super Frame을 실제 센서 데이터로 파싱한다.
      *
-     * Super Frame 구조:
+     * Super Frame 구조 (firmware main.c의 struct super_frame과 동일):
      * - [0..1]    : Super Header, 0xAA 0xAA
      * - [2..3]    : NTC raw
      * - [4..7]    : Timestamp, little endian
      * - [8..9]    : Battery raw
      * - [10..11]  : CRC
+     * - [12..611] : PPG data, 600 bytes (RED/IR, 6 bytes/sample x 100 sample)
      * - [612..1211]: IMU data, 600 bytes
      */
     private fun parseSuperFrame(data: ByteArray) {
@@ -390,13 +471,58 @@ class PotchDataProcessor(
             updateLog("CRC OK!")
         }
 
+        val ppgData = data.copyOfRange(12, 612)
         val imuData = data.copyOfRange(612, 1212)
+
+        val irSamples = extractIrSamples(ppgData)
+        val frameIrMax = irSamples.maxOrNull()?.toDouble() ?: 0.0
+
+        // CRC가 정상인 프레임만 심박수 계산에 사용
+        if (receivedCrc == calculatedCrc) {
+            appendPpgSamplesToHrBuffer(irSamples)
+        }
+
+        val heartRateEstimate = estimateHeartRate()
+        val estimatedHeartRate = heartRateEstimate?.bpm
+
+        Log.d(
+            TAG,
+            "SuperFrame parsed timestamp=$timestamp, irMax=$frameIrMax, bpm=$estimatedHeartRate, " +
+                    "ibiCount=${heartRateEstimate?.intervalCount}, " +
+                    "hrQuality=${heartRateEstimate?.qualityScore}"
+        )
 
         val parsed = SensorData(
             timestamp = timestamp,
             ntcRaw = ntcRaw,
             batteryRaw = batteryRaw,
+            ppgData = ppgData,
             imuData = imuData
+        )
+
+
+
+        val arousalBufferSnapshot = arousalCalculator.getBufferSnapshot()
+
+        Log.d(
+            TAG,
+            "ArousalBuffer: ppg=${arousalBufferSnapshot.ppgIrSampleCount}, " +
+                    "imu=${arousalBufferSnapshot.imuGSampleCount}, " +
+                    "temp=${arousalBufferSnapshot.temperatureSampleCount}, " +
+                    "hr=${arousalBufferSnapshot.heartRateSampleCount}"
+        )
+
+        dataLogger?.logDebug(
+            TAG,
+            "ArousalBuffer: ppg=${arousalBufferSnapshot.ppgIrSampleCount}, " +
+                    "imu=${arousalBufferSnapshot.imuGSampleCount}, " +
+                    "temp=${arousalBufferSnapshot.temperatureSampleCount}, " +
+                    "hr=${arousalBufferSnapshot.heartRateSampleCount}"
+        )
+
+        val arousalState = arousalCalculator.process(
+            sensorData = parsed,
+            heartRateEstimate = heartRateEstimate,
         )
 
         val allErrors = currentFrameErrors + frameErrors
@@ -407,24 +533,266 @@ class PotchDataProcessor(
         val completeText =
             if (frameComplete && allErrors.isEmpty()) "complete" else "miss"
 
+        val phoneTimeMillis = System.currentTimeMillis()
+        val missPacketNumText = allMissNums.joinToString("|")
+        val errorLogText = allErrors.joinToString(" / ")
+
         dataLogger?.logSuperFrame(
-            phoneTimeMillis = System.currentTimeMillis(),
+            phoneTimeMillis = phoneTimeMillis,
             timestamp = timestamp,
             superFrame = data,
             complete = completeText,
-            missPacketNum = allMissNums.joinToString("|"),
-            errorLog = allErrors.joinToString(" / ")
+            missPacketNum = missPacketNumText,
+            errorLog = errorLogText
+        )
+
+        dataLogger?.logArousalState(
+            phoneTimeMillis = phoneTimeMillis,
+            timestamp = timestamp,
+            arousalState = arousalState,
+            complete = completeText,
+            missPacketNum = missPacketNumText,
+            errorLog = errorLogText
         )
 
         currentFrameErrors.clear()
         currentFrameMissPacketNums.clear()
 
-        _state.update {
-            it.copy(
+        _state.update { current ->
+            current.copy(
                 lastParsedData = parsed,
-                parsedSuperFrameCount = it.parsedSuperFrameCount + 1
+
+                // iOS처럼 계산 실패 시 기존 유효 심박수를 유지한다.
+                heartRateBpm = estimatedHeartRate ?: current.heartRateBpm,
+
+                arousalState = arousalState,
+                lastIrMax = frameIrMax,
+                parsedSuperFrameCount = current.parsedSuperFrameCount + 1
             )
         }
+
+        /********************* Micro Movement ********************/
+
+        val microMovement = arousalCalculator.calculateMicroMovement()
+
+        if (microMovement != null) {
+            Log.d(
+                "MicroMovement",
+                "MicroMovement: " +
+                        "rms=${"%.6f".format(microMovement.rmsG)}g, " +
+                        "var=${"%.8f".format(microMovement.varianceG)}, " +
+                        "score=${"%.2f".format(microMovement.score)}, " +
+                        "level=${microMovement.level}"
+            )
+
+            dataLogger?.logDebug(
+                "MicroMovement",
+                "MicroMovement: " +
+                        "rms=${"%.6f".format(microMovement.rmsG)}g, " +
+                        "var=${"%.8f".format(microMovement.varianceG)}, " +
+                        "score=${"%.2f".format(microMovement.score)}, " +
+                        "level=${microMovement.level}"
+            )
+        }
+        /********************* //Micro Movement ********************/
+    }
+
+    /**
+     * PPG payload(600 bytes, 100Hz x 100 sample, [Red 3B + IR 3B] 구조, Data Packet.md 참조)에서
+     * IR 채널 값만 18-bit로 복원한다.
+     *
+     * firmware ppg.c의 FIFO 저장 형식과 동일:
+     *   byte[3] = IR[17:16] (하위 2bit만 유효), byte[4] = IR[15:8], byte[5] = IR[7:0]
+     */
+    private fun extractIrSamples(ppgData: ByteArray): IntArray {
+        val sampleCount = ppgData.size / 6
+        return IntArray(sampleCount) { i ->
+            val base = i * 6
+            ((ppgData[base + 3].toInt() and 0x03) shl 16) or
+                    ((ppgData[base + 4].toInt() and 0xFF) shl 8) or
+                    (ppgData[base + 5].toInt() and 0xFF)
+        }
+    }
+
+    /**
+     * 새로 들어온 PPG IR 샘플을 rolling buffer에 누적한다.
+     *
+     * Super Frame 한 개에는 1초(100 샘플)치 PPG만 들어있어서,
+     * 그 안에서만 피크를 찾으면 60bpm 기준 피크가 1개뿐이라 추정이 매우 불안정하다.
+     * 그래서 최근 [heartRateBufferMaxSamples]개(최대 8초)를 누적해 두고
+     * 그 위에서 심박수를 추정한다.
+     */
+    private fun appendPpgSamplesToHrBuffer(samples: IntArray) {
+        for (sample in samples) {
+            heartRateIrBuffer.addLast(sample)
+            totalHeartRateSampleCount += 1L
+
+            if (heartRateIrBuffer.size > heartRateBufferMaxSamples) {
+                heartRateIrBuffer.removeFirst()
+            }
+        }
+    }
+
+    private fun estimateHeartRate(): HeartRateEstimate? {
+        if (heartRateIrBuffer.size < heartRateMinSamples) return null
+
+        val signal = heartRateIrBuffer.map { it.toDouble() }
+        val n = signal.size
+
+        if (n < 200) return null
+
+        val maxRaw = signal.maxOrNull() ?: 0.0
+        if (maxRaw <= 10000.0) return null
+
+        val mean = signal.average()
+        val acSignal = DoubleArray(n) { i ->
+            signal[i] - mean
+        }
+
+        val halfWin = 7
+        val filtered = DoubleArray(n)
+
+        for (i in 0 until n) {
+            val lo = (i - halfWin).coerceAtLeast(0)
+            val hi = (i + halfWin).coerceAtMost(n - 1)
+
+            var sum = 0.0
+            for (j in lo..hi) {
+                sum += acSignal[j]
+            }
+
+            filtered[i] = sum / (hi - lo + 1)
+        }
+
+        val peakAmplitude = filtered.maxOrNull() ?: 0.0
+
+        if (peakAmplitude <= 150.0) return null
+
+        val threshold = peakAmplitude * 0.30
+        val minPeakDistance = 35
+
+        val peakIndices = mutableListOf<Int>()
+        var lastPeakIdx = -minPeakDistance
+
+        for (i in 1 until n - 1) {
+            val isPeak =
+                filtered[i] > filtered[i - 1] &&
+                        filtered[i] > filtered[i + 1] &&
+                        filtered[i] > threshold
+
+            if (!isPeak) continue
+
+            val dist = i - lastPeakIdx
+
+            if (dist >= minPeakDistance) {
+                peakIndices.add(i)
+                lastPeakIdx = i
+            } else if (peakIndices.isNotEmpty()) {
+                val last = peakIndices.last()
+
+                if (filtered[i] > filtered[last]) {
+                    peakIndices[peakIndices.lastIndex] = i
+                    lastPeakIdx = i
+                }
+            }
+        }
+
+        if (peakIndices.size < 2) return null
+
+        val bufferStartSampleIndex =
+            totalHeartRateSampleCount - heartRateIrBuffer.size
+
+        val intervals = mutableListOf<IbiInterval>()
+
+        for (i in 1 until peakIndices.size) {
+            val diffSamples = peakIndices[i] - peakIndices[i - 1]
+            val intervalSec = diffSamples / 100.0
+
+            if (intervalSec in 0.333..1.5) {
+                val endSampleIndex = bufferStartSampleIndex + peakIndices[i]
+
+                intervals.add(
+                    IbiInterval(
+                        intervalSec = intervalSec,
+                        endSampleIndex = endSampleIndex
+                    )
+                )
+            }
+        }
+
+        if (intervals.isEmpty()) return null
+
+        var usedIntervals = intervals
+
+        if (intervals.size >= 3) {
+            val sorted = intervals.map { it.intervalSec }.sorted()
+            val median = sorted[sorted.size / 2]
+
+            val within = intervals.filter {
+                abs(it.intervalSec - median) / median < 0.40
+            }
+
+            if (within.isNotEmpty()) {
+                usedIntervals = within.toMutableList()
+            }
+        }
+
+        val avgInterval = usedIntervals.map { it.intervalSec }.average()
+        if (avgInterval <= 0.0) return null
+
+        val bpm = (60.0 / avgInterval).roundToInt()
+
+        if (bpm !in 40..180) return null
+
+        val qualityScore = calculateHeartRateEstimateQuality(
+            intervals = usedIntervals,
+            peakAmplitude = peakAmplitude
+        )
+
+        return HeartRateEstimate(
+            bpm = bpm,
+            ibiIntervals = usedIntervals,
+            peakCount = peakIndices.size,
+            intervalCount = usedIntervals.size,
+            averageIntervalSec = avgInterval,
+            qualityScore = qualityScore
+        )
+    }
+    private fun calculateHeartRateEstimateQuality(
+        intervals: List<IbiInterval>,
+        peakAmplitude: Double
+    ): Double {
+        if (intervals.size < 2) return 0.0
+
+        val intervalValues = intervals.map { it.intervalSec }
+        val mean = intervalValues.average()
+
+        if (mean <= 0.0) return 0.0
+
+        var sumSquaredDiff = 0.0
+
+        for (interval in intervalValues) {
+            val diff = interval - mean
+            sumSquaredDiff += diff * diff
+        }
+
+        val std = sqrt(sumSquaredDiff / intervalValues.size)
+        val cv = std / mean
+
+        val regularityScore =
+            (1.0 - cv).coerceIn(0.0, 1.0)
+
+        val intervalCountScore =
+            (intervals.size / 6.0).coerceIn(0.0, 1.0)
+
+        val amplitudeScore =
+            (peakAmplitude / 1500.0).coerceIn(0.0, 1.0)
+
+        return (
+                regularityScore * 0.60 +
+                        intervalCountScore * 0.25 +
+                        amplitudeScore * 0.15
+                ).coerceIn(0.0, 1.0)
     }
 
     /**
@@ -700,6 +1068,27 @@ class PotchDataProcessor(
         buffer.clear()
         currentFrameErrors.clear()
         currentFrameMissPacketNums.clear()
+    }
+    @Synchronized
+    fun updateMicroMovementBandPass(
+        lowCutHz: Double,
+        highCutHz: Double
+    ) {
+        arousalCalculator.updateMicroMovementBandPass(
+            lowCutHz = lowCutHz,
+            highCutHz = highCutHz
+        )
+
+        _state.update {
+            it.copy(
+                lastLog = "Micro BPF updated: %.2f~%.2fHz".format(lowCutHz, highCutHz)
+            )
+        }
+
+        dataLogger?.logDebug(
+            TAG,
+            "Micro BPF updated: low=$lowCutHz, high=$highCutHz"
+        )
     }
 
 }
