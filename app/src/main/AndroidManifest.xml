@@ -105,11 +105,6 @@
             </intent-filter>
         </service>
 
-        <service
-            android:name=".Potch.PotchBleForegroundService"
-            android:exported="false"
-            android:foregroundServiceType="connectedDevice|dataSync" />
-
         <!-- FileProvider for sharing log files -->
         <provider
             android:name="androidx.core.content.FileProvider"
