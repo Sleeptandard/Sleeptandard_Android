@@ -129,9 +129,9 @@ data class ArousalConfig(
     val rrFusionAgreeDiffBpm: Double = 3.0,
     val rrFusionStrongDisagreeDiffBpm: Double = 6.0,
 
-    // 기본적으로 IMU를 더 신뢰
-    val rrFusionImuBaseWeight: Double = 0.7,
-    val rrFusionPpgBaseWeight: Double = 0.3,
+    // 기본적으로 PPG를 더 신뢰
+    val rrFusionImuBaseWeight: Double = 0.3,
+    val rrFusionPpgBaseWeight: Double = 0.7,
 
     // quality가 이 값보다 낮으면 신뢰도 낮은 RR로 판단
     val rrFusionMinUsableQuality: Double = 0.35,
@@ -2359,8 +2359,8 @@ class PotchArousalCalculator(
     /**
      * PPG RR과 IMU RR을 합성해 최종 RR을 결정한다.
      *
-     * 두 센서가 비슷하면 품질 기반 가중 평균을 사용하고,
-     * 한쪽만 유효하거나 서로 크게 다르면 IMU 우선 정책과 quality를 기준으로 선택한다.
+     * 두 센서가 비슷하면 PPG 가중치를 더 크게 둔 품질 기반 가중 평균을 사용하고,
+     * 한쪽만 유효하거나 서로 크게 다르면 PPG 우선 정책과 quality를 기준으로 선택한다.
      */
     fun fuseRespiration(
         ppg: PpgRespirationResult?,
@@ -2392,8 +2392,8 @@ class PotchArousalCalculator(
                 ppgQuality = ppg?.qualityScore,
                 imuQuality = imu.qualityScore,
                 diffBpm = null,
-                confidence = imu.qualityScore.coerceIn(0.0, 1.0),
-                log = "RR fusion: IMU only"
+                confidence = (imu.qualityScore * 0.8).coerceIn(0.0, 1.0),
+                log = "RR fusion: IMU only (PPG unavailable)"
             )
         }
 
@@ -2406,7 +2406,7 @@ class PotchArousalCalculator(
                 ppgQuality = ppg.qualityScore,
                 imuQuality = imu?.qualityScore,
                 diffBpm = null,
-                confidence = (ppg.qualityScore * 0.8).coerceIn(0.0, 1.0),
+                confidence = ppg.qualityScore.coerceIn(0.0, 1.0),
                 log = "RR fusion: PPG only"
             )
         }
@@ -2430,7 +2430,7 @@ class PotchArousalCalculator(
 
             val fusedRr =
                 if (totalWeight <= 0.0) {
-                    imuRr
+                    ppgRr
                 } else {
                     (imuRr * imuWeight + ppgRr * ppgWeight) / totalWeight
                 }
@@ -2441,8 +2441,8 @@ class PotchArousalCalculator(
 
             val confidence =
                 (agreementScore * 0.5 +
-                        imuQuality * 0.35 +
-                        ppgQuality * 0.15)
+                        ppgQuality * 0.35 +
+                        imuQuality * 0.15)
                     .coerceIn(0.0, 1.0)
 
             return RrFusionResult(
@@ -2458,35 +2458,35 @@ class PotchArousalCalculator(
             )
         }
 
-        // 2. 차이가 크면 기본적으로 IMU 우선
-        // 단, IMU quality가 낮고 PPG quality가 높으면 PPG 사용
+        // 2. 차이가 크면 기본적으로 PPG 우선
+        // 단, PPG quality가 낮고 IMU quality가 충분하면 IMU를 백업으로 사용
         val imuUsable = imuQuality >= config.rrFusionMinUsableQuality
         val ppgUsable = ppgQuality >= config.rrFusionMinUsableQuality
 
-        if (!imuUsable && ppgUsable) {
+        if (!ppgUsable && imuUsable) {
             return RrFusionResult(
-                rrBpm = ppgRr,
-                source = RrFusionSource.PPG_PREFERRED_DISAGREE,
+                rrBpm = imuRr,
+                source = RrFusionSource.IMU_PREFERRED_DISAGREE,
                 ppgRrBpm = ppgRr,
                 imuRrBpm = imuRr,
                 ppgQuality = ppgQuality,
                 imuQuality = imuQuality,
                 diffBpm = diff,
-                confidence = (ppgQuality * 0.7).coerceIn(0.0, 1.0),
-                log = "RR fusion: disagree, PPG preferred because IMU quality is low"
+                confidence = (imuQuality * 0.7).coerceIn(0.0, 1.0),
+                log = "RR fusion: disagree, IMU used because PPG quality is low"
             )
         }
 
         return RrFusionResult(
-            rrBpm = imuRr,
-            source = RrFusionSource.IMU_PREFERRED_DISAGREE,
+            rrBpm = ppgRr,
+            source = RrFusionSource.PPG_PREFERRED_DISAGREE,
             ppgRrBpm = ppgRr,
             imuRrBpm = imuRr,
             ppgQuality = ppgQuality,
             imuQuality = imuQuality,
             diffBpm = diff,
-            confidence = (imuQuality * 0.8).coerceIn(0.0, 1.0),
-            log = "RR fusion: disagree, IMU preferred"
+            confidence = (ppgQuality * 0.8).coerceIn(0.0, 1.0),
+            log = "RR fusion: disagree, PPG preferred"
         )
     }
 
@@ -2727,14 +2727,14 @@ class PotchArousalCalculator(
 
         return when (rrFusion.source) {
             RrFusionSource.BOTH_WEIGHTED,
-            RrFusionSource.IMU_ONLY,
-            RrFusionSource.IMU_PREFERRED_DISAGREE -> {
-                imuRrv ?: ppgRrv
-            }
-
             RrFusionSource.PPG_ONLY,
             RrFusionSource.PPG_PREFERRED_DISAGREE -> {
                 ppgRrv ?: imuRrv
+            }
+
+            RrFusionSource.IMU_ONLY,
+            RrFusionSource.IMU_PREFERRED_DISAGREE -> {
+                imuRrv ?: ppgRrv
             }
 
             RrFusionSource.NONE -> {
