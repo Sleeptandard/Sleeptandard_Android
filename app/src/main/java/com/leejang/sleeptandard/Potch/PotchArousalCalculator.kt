@@ -8,6 +8,25 @@ import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
 
+
+/**
+ * 각 지표의 현재 계산 가능 상태.
+ *
+ * VALID: 현재 유효한 결과가 계산됨
+ * COLLECTING: 최소 window/sample/interval을 모으는 중
+ * REJECTED: 데이터는 충분하지만 품질, 진폭, 이상치 필터 등의 이유로 계산 결과가 거부됨
+ */
+enum class MetricCalculationState {
+    VALID,
+    COLLECTING,
+    REJECTED
+}
+
+data class MetricCalculationStatus(
+    val state: MetricCalculationState = MetricCalculationState.COLLECTING,
+    val message: String = "데이터 수집 중"
+)
+
 // 계산 결과 상태
 data class ArousalState(
     // 1. Micro Movement
@@ -23,6 +42,7 @@ data class ArousalState(
     val rrFusionSource: RrFusionSource = RrFusionSource.NONE,
     val rrFusionConfidence: Double = 0.0,
     val rrFusionLog: String? = null,
+    val rrCalculationStatus: MetricCalculationStatus = MetricCalculationStatus(),
 
     // 3. Respiratory Rate Variability
     val rrvRmssd: Double? = null,        // seconds 기준 RMSSD
@@ -30,11 +50,13 @@ data class ArousalState(
     val rrvScore: Double? = null,
     val rrvSource: RrvSource = RrvSource.NONE,
     val rrvQuality: Double = 0.0,
+    val rrvCalculationStatus: MetricCalculationStatus = MetricCalculationStatus(),
 
     // 4. Heart Rate
     val hrBpm: Int? = null,
     val hrGradient: Double? = null,
     val hrScore: Double? = null,
+    val hrCalculationStatus: MetricCalculationStatus = MetricCalculationStatus(),
 
     // 5. Heart Rate Variability
     val hrvRmssd: Double? = null,
@@ -45,6 +67,7 @@ data class ArousalState(
     val hrvScore: Double? = null,
     val hrvQuality: Double = 0.0,
     val hrvLog: String? = null,
+    val hrvCalculationStatus: MetricCalculationStatus = MetricCalculationStatus(),
 
     // 6. Skin Temperature
     val skinTemperatureCelsius: Double? = null,
@@ -141,6 +164,9 @@ data class ArousalConfig(
     // RR history 보관 시간
     val rrHistoryWindowMillis: Long = 10 * 60 * 1000L,
 
+    // 신뢰 가능한 RR이 이 시간 동안 새로 들어오지 않으면 과거 RR history를 폐기한다.
+    val rrFreshnessTimeoutMillis: Long = 30 * 1000L,
+
     // RRV
     val rrvMinIntervalCount: Int = 3,
     val rrvIntervalOutlierTolerance: Double = 0.40,
@@ -165,13 +191,19 @@ data class ArousalConfig(
     val hrMinReasonableBpm: Int = 30,
     val hrOutlierToleranceBpm: Double = 25.0,
 
+    // 유효 HR이 이 시간 동안 새로 들어오지 않으면 과거 HR history를 폐기한다.
+    val hrFreshnessTimeoutMillis: Long = 10 * 1000L,
+
     // HRV
     val hrvWindowSeconds: Int = 60,
     val hrvMinIbiCount: Int = 8,
     val hrvIbiOutlierTolerance: Double = 0.30,
     val hrvMinEstimateQuality: Double = 0.35,
 
-    // TODO: 임시 score 기준. 나중에는 개인 baseline 기반으로 바꾸는 게 좋음.
+    // 새 유효 IBI가 이 시간 동안 없으면 과거 HRV IBI buffer를 폐기한다.
+    val hrvFreshnessTimeoutMillis: Long = 10 * 1000L,
+
+    // 임시 score 기준. 나중에는 개인 baseline 기반으로 바꾸는 게 좋음.
     val hrvRmssdScoreThresholdMs: Double = 80.0,
 
     // HRV LF/HF
@@ -212,15 +244,18 @@ data class ArousalConfig(
     // 센서 접촉/환경 변화로 보기 어려운 1회성 급변 제거용
     val skinTempMaxSingleJumpCelsius: Double = 1.0,
 
+    // 유효 피부온도가 이 시간 동안 새로 들어오지 않으면 과거 온도 history를 폐기한다.
+    val skinTempFreshnessTimeoutMillis: Long = 30 * 1000L,
+
     // Final score
     val finalWakeThreshold: Double = 0.65,
     // 기본 각성 점수는 최대 0.8이 되도록 설계.
     // micro + rr + rrv + hr + hrv weight 합 = 0.8
-    val mmScoreWeight: Double = 0.10,
-    val rrScoreWeight: Double = 0.20,
+    val mmScoreWeight: Double = 0.20,
+    val rrScoreWeight: Double = 0.15,
     val rrvScoreWeight: Double = 0.15,
     val hrScoreWeight: Double = 0.20,
-    val hrvScoreWeight: Double = 0.15,
+    val hrvScoreWeight: Double = 0.10,
     // skin temperature는 더하는 지표가 아니라 multiplier로 사용.
     // multiplier = 1.0 ~ 1.25
     val tempScoreWeight: Double = 0.25,
@@ -237,7 +272,7 @@ data class ArousalConfig(
     // 실제 펌웨어 설정이 다르면 이 값은 나중에 수정해야 함.
     val imuLsbPerG: Double = 1024.0,
 
-)
+    )
 
 /**
  * Micro Movement 계산 결과를 사람이 이해하기 쉬운 단계로 분류한다.
@@ -538,7 +573,7 @@ class PotchArousalCalculator(
      * 용도:
      * - 직전 n분간 체온 변화량 계산
      *
-     * 지금 temperatureBuffer는 timestampMillis = sensorData.timestamp를 기준으로 window를 자르고 있어. 만약 펌웨어 timestamp가 밀리초가 아니라 초 단위거나 tick 단위라면 5 * 60 * 1000L 같은 window 계산이 틀어져.
+     * 시간 기준은 휴대폰의 System.currentTimeMillis()를 사용한다.
      */
     private val temperatureBuffer = ArrayDeque<Pair<Long, Double>>()
     /**
@@ -561,6 +596,18 @@ class PotchArousalCalculator(
 
     private var lastAcceptedHrvIbiEndSampleIndex: Long = Long.MIN_VALUE
 
+    // 각 계산 버퍼에 마지막으로 유효한 값이 들어온 휴대폰 시각.
+    private var lastValidHeartRateTimestampMillis: Long? = null
+    private var lastValidHrvTimestampMillis: Long? = null
+    private var lastValidRespirationTimestampMillis: Long? = null
+    private var lastValidTemperatureTimestampMillis: Long? = null
+
+    // 긴 품질 불량 구간 뒤 과거 데이터와 새 데이터를 섞지 않기 위한 상태.
+    private var heartRateBufferExpiredByGap: Boolean = false
+    private var hrvBufferExpiredByGap: Boolean = false
+    private var respirationBufferExpiredByGap: Boolean = false
+    private var temperatureBufferExpiredByGap: Boolean = false
+
     private val maxPpgSamples =
         (config.sampleRateHz * config.ppgWindowSeconds).toInt()
 
@@ -578,23 +625,38 @@ class PotchArousalCalculator(
      */
     fun process(
         sensorData: SensorData,
-        heartRateEstimate: HeartRateEstimate?
+        heartRateEstimate: HeartRateEstimate?,
+        heartRateSignalStatus: MetricCalculationStatus = MetricCalculationStatus(
+            state = MetricCalculationState.COLLECTING,
+            message = "합산 PPG 심박 신호 수집 중"
+        )
     ): ArousalState {
+        // 펌웨어 timestamp 단위와 무관하게 stale/rolling window를 안정적으로 관리하기 위해
+        // 계산 버퍼의 시간 기준은 휴대폰 수신 시각을 사용한다.
+        val nowMillis = System.currentTimeMillis()
+
+        // 새 정상값이 없어도 매 프레임 오래된 값을 제거하고,
+        // 품질 불량 구간이 timeout을 넘으면 해당 history를 완전히 비운다.
+        expireStaleMetricBuffers(nowMillis)
+        trimMetricBuffersNow(nowMillis)
+
         appendPpg(sensorData.ppgData)
         appendImu(sensorData.imuData)
-        appendTemperature(sensorData.timestamp, sensorData.ntcCelsius)
+        appendTemperature(nowMillis, sensorData.ntcCelsius)
 
         if (heartRateEstimate != null) {
             appendHeartRate(
-                timestampMillis = sensorData.timestamp,
+                timestampMillis = nowMillis,
                 bpm = heartRateEstimate.bpm
             )
 
-            appendHeartRateEstimateToHrvBuffer(heartRateEstimate)
+            appendHeartRateEstimateToHrvBuffer(
+                estimate = heartRateEstimate,
+                acceptedAtMillis = nowMillis
+            )
         }
 
         val microMovement = calculateMicroMovement()
-        val microVariance = microMovement?.varianceG
 
         val ppgRespiration = calculatePpgRespiration()
         val imuRespiration = calculateImuRespiration()
@@ -609,7 +671,7 @@ class PotchArousalCalculator(
 
         if (rrFinal != null) {
             appendRespirationRate(
-                timestampMillis = sensorData.timestamp,
+                timestampMillis = nowMillis,
                 rrBpm = rrFinal,
                 confidence = rrFusion.confidence
             )
@@ -617,23 +679,82 @@ class PotchArousalCalculator(
 
         val rrArousalResult = calculateRespiratoryRateArousal(rrFusion)
 
+        // RRV는 현재 프레임에서 얻은 호흡 interval만 사용하므로 과거 결과를 유지하지 않는다.
         val rrvResult = calculateRrvRmssd(
             ppg = ppgRespiration,
             imu = imuRespiration,
             rrFusion = rrFusion
         )
-        val rrvRmssd = rrvResult?.rmssdSec
 
-        val hrResult = calculateHeartRateArousal()
-        val hrGradient = hrResult?.gradientBpm
+        val heartRateIsFresh = isFresh(
+            lastValidTimestampMillis = lastValidHeartRateTimestampMillis,
+            nowMillis = nowMillis,
+            timeoutMillis = config.hrFreshnessTimeoutMillis
+        )
 
-        val skinTempResult = calculateSkinTemperatureArousal()
-        val tempGradient = skinTempResult?.gradientCelsius
+        val hrvIsFresh = isFresh(
+            lastValidTimestampMillis = lastValidHrvTimestampMillis,
+            nowMillis = nowMillis,
+            timeoutMillis = config.hrvFreshnessTimeoutMillis
+        )
 
-        val hrvResult = calculateHeartRateVariability()
-        val hrvFrequencyResult = calculateHrvFrequencyDomain()
+        val temperatureIsFresh = isFresh(
+            lastValidTimestampMillis = lastValidTemperatureTimestampMillis,
+            nowMillis = nowMillis,
+            timeoutMillis = config.skinTempFreshnessTimeoutMillis
+        )
 
-        val hrvLfHf = hrvFrequencyResult?.lfHfRatio
+        val hrResult = if (heartRateIsFresh) {
+            calculateHeartRateArousal()
+        } else {
+            null
+        }
+
+        val skinTempResult = if (temperatureIsFresh) {
+            calculateSkinTemperatureArousal()
+        } else {
+            null
+        }
+
+        val hrvResult = if (hrvIsFresh) {
+            calculateHeartRateVariability()
+        } else {
+            null
+        }
+
+        val hrvFrequencyResult = if (hrvIsFresh) {
+            calculateHrvFrequencyDomain()
+        } else {
+            null
+        }
+
+        val rrCalculationStatus = buildRrCalculationStatus(
+            ppg = ppgRespiration,
+            imu = imuRespiration,
+            fusion = rrFusion
+        )
+
+        val rrvCalculationStatus = buildRrvCalculationStatus(
+            result = rrvResult,
+            ppg = ppgRespiration,
+            imu = imuRespiration,
+            rrStatus = rrCalculationStatus
+        )
+
+        val hrCalculationStatus = buildHrCalculationStatus(
+            heartRateEstimate = heartRateEstimate,
+            heartRateSignalStatus = heartRateSignalStatus,
+            result = hrResult,
+            isFresh = heartRateIsFresh
+        )
+
+        val hrvCalculationStatus = buildHrvCalculationStatus(
+            heartRateEstimate = heartRateEstimate,
+            heartRateSignalStatus = heartRateSignalStatus,
+            timeDomainResult = hrvResult,
+            frequencyResult = hrvFrequencyResult,
+            isFresh = hrvIsFresh
+        )
 
         val finalScore = calculateFinalWakeScore(
             microScore = microMovement?.score?.coerceIn(0.0, 1.0),
@@ -656,16 +777,24 @@ class PotchArousalCalculator(
             rrFusionSource = rrFusion.source,
             rrFusionConfidence = rrFusion.confidence,
             rrFusionLog = rrFusion.log,
+            rrCalculationStatus = rrCalculationStatus,
 
             rrvRmssd = rrvResult?.rmssdSec,
             rrvRmssdMs = rrvResult?.rmssdMs,
             rrvScore = rrvResult?.score,
             rrvSource = rrvResult?.source ?: RrvSource.NONE,
             rrvQuality = rrvResult?.qualityScore ?: 0.0,
+            rrvCalculationStatus = rrvCalculationStatus,
 
-            hrBpm = hrResult?.currentBpm ?: heartRateEstimate?.bpm ?: lastState.hrBpm,
-            hrGradient = hrGradient,
+            // stale 상태에서는 마지막 정상값을 유지하지 않고 null로 내린다.
+            hrBpm = if (heartRateIsFresh) {
+                hrResult?.currentBpm ?: heartRateEstimate?.bpm ?: heartRateBuffer.lastOrNull()?.second
+            } else {
+                null
+            },
+            hrGradient = hrResult?.gradientBpm,
             hrScore = hrResult?.score,
+            hrCalculationStatus = hrCalculationStatus,
 
             hrvRmssd = hrvResult?.rmssdSec,
             hrvRmssdMs = hrvResult?.rmssdMs,
@@ -675,9 +804,14 @@ class PotchArousalCalculator(
             hrvScore = hrvFrequencyResult?.score ?: hrvResult?.score,
             hrvQuality = hrvFrequencyResult?.qualityScore ?: hrvResult?.qualityScore ?: 0.0,
             hrvLog = hrvFrequencyResult?.log ?: hrvResult?.log,
+            hrvCalculationStatus = hrvCalculationStatus,
 
-            skinTemperatureCelsius = skinTempResult?.currentCelsius ?: sensorData.ntcCelsius,
-            skinTemperatureGradient = tempGradient,
+            skinTemperatureCelsius = if (temperatureIsFresh) {
+                skinTempResult?.currentCelsius ?: temperatureBuffer.lastOrNull()?.second
+            } else {
+                null
+            },
+            skinTemperatureGradient = skinTempResult?.gradientCelsius,
             skinTemperatureScore = skinTempResult?.score,
 
             finalWakeScore = finalScore,
@@ -687,12 +821,217 @@ class PotchArousalCalculator(
                     "rr=${rrFusion.log}, rrScore=${rrArousalResult?.log}, " +
                     "rrv=${rrvResult?.log}, " +
                     "hr=${hrResult?.log}, " +
-                    "hrv=${hrvFrequencyResult?.log ?: hrvResult?.log}"+
+                    "hrv=${hrvFrequencyResult?.log ?: hrvResult?.log}, " +
                     "skin=${skinTempResult?.log}"
         )
 
         return lastState
     }
+
+    private fun buildRrCalculationStatus(
+        ppg: PpgRespirationResult?,
+        imu: ImuRespirationResult?,
+        fusion: RrFusionResult
+    ): MetricCalculationStatus {
+        if (fusion.rrBpm != null) {
+            return MetricCalculationStatus(
+                state = MetricCalculationState.VALID,
+                message = "정상 계산 중 (${fusion.source.name}, confidence=${"%.2f".format(fusion.confidence)})"
+            )
+        }
+
+        if (respirationBufferExpiredByGap) {
+            return MetricCalculationStatus(
+                state = MetricCalculationState.REJECTED,
+                message = "신뢰 가능한 RR이 ${config.rrFreshnessTimeoutMillis / 1000}초 이상 없어 " +
+                        "과거 RR history를 초기화했습니다"
+            )
+        }
+
+        val ppgMinSamples =
+            (config.sampleRateHz * config.ppgRespMinWindowSeconds).toInt()
+        val imuMinSamples =
+            (config.sampleRateHz * config.imuRespMinWindowSeconds).toInt()
+
+        val ppgSampleCount = maxOf(ppgIrBuffer.size, ppgRedBuffer.size)
+        val imuSampleCount = imuGBuffer.size
+
+        val hasEnoughPpg = ppgSampleCount >= ppgMinSamples
+        val hasEnoughImu = imuSampleCount >= imuMinSamples
+
+        if (!hasEnoughPpg && !hasEnoughImu) {
+            val ppgSeconds = ppgSampleCount / config.sampleRateHz
+            val imuSeconds = imuSampleCount / config.sampleRateHz
+
+            return MetricCalculationStatus(
+                state = MetricCalculationState.COLLECTING,
+                message = "호흡 파형 수집 중: PPG ${"%.1f".format(ppgSeconds)}초, " +
+                        "IMU ${"%.1f".format(imuSeconds)}초 / 최소 ${config.ppgRespMinWindowSeconds}초"
+            )
+        }
+
+        val sourceHint = when {
+            ppg == null && imu == null -> "PPG/IMU 모두"
+            ppg == null -> "PPG"
+            imu == null -> "IMU"
+            else -> "fusion"
+        }
+
+        return MetricCalculationStatus(
+            state = MetricCalculationState.REJECTED,
+            message = "$sourceHint 유효 호흡 파형 없음: 접촉 불량, 움직임 잡음, " +
+                    "낮은 진폭 또는 interval 이상치 필터링 가능"
+        )
+    }
+
+    private fun buildRrvCalculationStatus(
+        result: RrvResult?,
+        ppg: PpgRespirationResult?,
+        imu: ImuRespirationResult?,
+        rrStatus: MetricCalculationStatus
+    ): MetricCalculationStatus {
+        if (result != null) {
+            return MetricCalculationStatus(
+                state = MetricCalculationState.VALID,
+                message = "정상 계산 중 (${result.source.name}, interval=${result.intervalCount}, " +
+                        "quality=${"%.2f".format(result.qualityScore)})"
+            )
+        }
+
+        if (rrStatus.state == MetricCalculationState.COLLECTING) {
+            return MetricCalculationStatus(
+                state = MetricCalculationState.COLLECTING,
+                message = "RRV 계산에 사용할 호흡 interval을 수집 중"
+            )
+        }
+
+        if (rrStatus.state == MetricCalculationState.REJECTED) {
+            return MetricCalculationStatus(
+                state = MetricCalculationState.REJECTED,
+                message = "RR 계산 실패로 RRV 계산 불가: 호흡 파형 품질을 확인하세요"
+            )
+        }
+
+        val ppgCount = ppg?.intervalsSec?.size ?: 0
+        val imuCount = imu?.intervalsSec?.size ?: 0
+        val maxCount = maxOf(ppgCount, imuCount)
+
+        return if (maxCount < config.rrvMinIntervalCount) {
+            MetricCalculationStatus(
+                state = MetricCalculationState.COLLECTING,
+                message = "유효 호흡 interval 수집 중: PPG=$ppgCount, IMU=$imuCount / " +
+                        "최소 ${config.rrvMinIntervalCount}개"
+            )
+        } else {
+            MetricCalculationStatus(
+                state = MetricCalculationState.REJECTED,
+                message = "호흡 interval이 quality 또는 이상치 필터에서 제외되어 RRV 계산 불가"
+            )
+        }
+    }
+
+    private fun buildHrCalculationStatus(
+        heartRateEstimate: HeartRateEstimate?,
+        heartRateSignalStatus: MetricCalculationStatus,
+        result: HeartRateArousalResult?,
+        isFresh: Boolean
+    ): MetricCalculationStatus {
+        if (!isFresh && heartRateBufferExpiredByGap) {
+            return MetricCalculationStatus(
+                state = MetricCalculationState.REJECTED,
+                message = "유효 HR이 ${config.hrFreshnessTimeoutMillis / 1000}초 이상 없어 " +
+                        "과거 HR history를 초기화했습니다"
+            )
+        }
+
+        if (result != null && isFresh) {
+            return MetricCalculationStatus(
+                state = MetricCalculationState.VALID,
+                message = "정상 계산 중: 합산 PPG HR 추세 window ${"%.0f".format(result.windowSeconds)}초"
+            )
+        }
+
+        if (heartRateEstimate == null) {
+            return heartRateSignalStatus
+        }
+
+        if (heartRateBuffer.size < config.hrMinSampleCount) {
+            return MetricCalculationStatus(
+                state = MetricCalculationState.COLLECTING,
+                message = "합산 PPG HR은 검출됨. 각성 추세용 HR sample 수집 중: " +
+                        "${heartRateBuffer.size}/${config.hrMinSampleCount}"
+            )
+        }
+
+        val durationMillis =
+            heartRateBuffer.last().first - heartRateBuffer.first().first
+
+        if (durationMillis < config.hrGradientMinWindowMillis) {
+            return MetricCalculationStatus(
+                state = MetricCalculationState.COLLECTING,
+                message = "합산 PPG HR은 검출됨. HR 추세 계산용 최소 1분 수집 중: " +
+                        "${durationMillis / 1000}초/60초"
+            )
+        }
+
+        return MetricCalculationStatus(
+            state = MetricCalculationState.REJECTED,
+            message = "HR history의 이상치 제거 후 유효 sample이 부족해 각성 추세 계산 불가"
+        )
+    }
+
+    private fun buildHrvCalculationStatus(
+        heartRateEstimate: HeartRateEstimate?,
+        heartRateSignalStatus: MetricCalculationStatus,
+        timeDomainResult: HeartRateVariabilityResult?,
+        frequencyResult: HrvFrequencyResult?,
+        isFresh: Boolean
+    ): MetricCalculationStatus {
+        if (!isFresh && hrvBufferExpiredByGap) {
+            return MetricCalculationStatus(
+                state = MetricCalculationState.REJECTED,
+                message = "새 유효 IBI가 ${config.hrvFreshnessTimeoutMillis / 1000}초 이상 없어 " +
+                        "과거 HRV buffer를 초기화했습니다"
+            )
+        }
+
+        if (timeDomainResult != null && isFresh) {
+            val message = if (frequencyResult != null) {
+                "RMSSD와 LF/HF 정상 계산 중 (IBI=${timeDomainResult.ibiCount})"
+            } else {
+                "RMSSD 정상 계산 중. LF/HF용 IBI 수집 중: " +
+                        "${hrvIbiBuffer.size}/${config.hrvSpectralMinIbiCount}"
+            }
+
+            return MetricCalculationStatus(
+                state = MetricCalculationState.VALID,
+                message = message
+            )
+        }
+
+        if (hrvIbiBuffer.size < config.hrvMinIbiCount) {
+            if (heartRateEstimate == null &&
+                heartRateSignalStatus.state == MetricCalculationState.REJECTED
+            ) {
+                return MetricCalculationStatus(
+                    state = MetricCalculationState.REJECTED,
+                    message = "PPG peak/IBI 추출 실패로 HRV 계산 불가: " +
+                            heartRateSignalStatus.message
+                )
+            }
+
+            return MetricCalculationStatus(
+                state = MetricCalculationState.COLLECTING,
+                message = "유효 IBI 수집 중: ${hrvIbiBuffer.size}/${config.hrvMinIbiCount}"
+            )
+        }
+
+        return MetricCalculationStatus(
+            state = MetricCalculationState.REJECTED,
+            message = "IBI가 품질 또는 중앙값 이상치 필터에서 제외되어 HRV 계산 불가"
+        )
+    }
+
     /**
      * 최종 기상 후보 점수를 계산한다.
      *
@@ -867,18 +1206,21 @@ class PotchArousalCalculator(
     private fun appendTemperature(
         timestampMillis: Long,
         celsius: Double
-    ) {
-        if (celsius == -999.0) return
-        if (celsius.isNaN()) return
-        if (celsius < 0.0 || celsius > 60.0) return
+    ): Boolean {
+        if (celsius == -999.0) return false
+        if (!celsius.isFinite()) return false
+        if (celsius < 0.0 || celsius > 60.0) return false
 
         temperatureBuffer.addLast(timestampMillis to celsius)
+        lastValidTemperatureTimestampMillis = timestampMillis
+        temperatureBufferExpiredByGap = false
 
         trimTimeBuffer(
             buffer = temperatureBuffer,
             nowMillis = timestampMillis,
             windowMillis = config.temperatureWindowMillis
         )
+        return true
     }
 
     /**
@@ -887,33 +1229,92 @@ class PotchArousalCalculator(
     private fun appendHeartRate(
         timestampMillis: Long,
         bpm: Int
-    ) {
-        if (bpm !in 30..220) return
+    ): Boolean {
+        if (bpm !in config.hrMinReasonableBpm..config.hrMaxReasonableBpm) return false
 
         heartRateBuffer.addLast(timestampMillis to bpm)
+        lastValidHeartRateTimestampMillis = timestampMillis
+        heartRateBufferExpiredByGap = false
 
         trimTimeBuffer(
             buffer = heartRateBuffer,
             nowMillis = timestampMillis,
             windowMillis = config.heartRateWindowMillis
         )
+        return true
     }
 
     private fun appendRespirationRate(
         timestampMillis: Long,
         rrBpm: Double,
         confidence: Double
-    ) {
-        if (rrBpm !in config.rrMinBpm..config.rrMaxBpm) return
-        if (confidence < config.rrScoreMinUsableConfidence) return
+    ): Boolean {
+        if (rrBpm !in config.rrMinBpm..config.rrMaxBpm) return false
+        if (confidence < config.rrScoreMinUsableConfidence) return false
 
         respirationRateBuffer.addLast(timestampMillis to rrBpm)
+        lastValidRespirationTimestampMillis = timestampMillis
+        respirationBufferExpiredByGap = false
 
         trimTimeBuffer(
             buffer = respirationRateBuffer,
             nowMillis = timestampMillis,
             windowMillis = config.rrHistoryWindowMillis
         )
+        return true
+    }
+
+    /** 현재 시각 기준으로 시간형 rolling buffer를 매 프레임 정리한다. */
+    private fun trimMetricBuffersNow(nowMillis: Long) {
+        trimTimeBuffer(heartRateBuffer, nowMillis, config.heartRateWindowMillis)
+        trimTimeBuffer(respirationRateBuffer, nowMillis, config.rrHistoryWindowMillis)
+        trimTimeBuffer(temperatureBuffer, nowMillis, config.temperatureWindowMillis)
+    }
+
+    /** 마지막 유효값 이후 허용 시간을 넘긴 history는 전부 폐기한다. */
+    private fun expireStaleMetricBuffers(nowMillis: Long) {
+        if (hasExpired(lastValidHeartRateTimestampMillis, nowMillis, config.hrFreshnessTimeoutMillis)) {
+            heartRateBuffer.clear()
+            lastValidHeartRateTimestampMillis = null
+            heartRateBufferExpiredByGap = true
+        }
+
+        if (hasExpired(lastValidHrvTimestampMillis, nowMillis, config.hrvFreshnessTimeoutMillis)) {
+            hrvIbiBuffer.clear()
+            lastAcceptedHrvIbiEndSampleIndex = Long.MIN_VALUE
+            lastValidHrvTimestampMillis = null
+            hrvBufferExpiredByGap = true
+        }
+
+        if (hasExpired(lastValidRespirationTimestampMillis, nowMillis, config.rrFreshnessTimeoutMillis)) {
+            respirationRateBuffer.clear()
+            lastValidRespirationTimestampMillis = null
+            respirationBufferExpiredByGap = true
+        }
+
+        if (hasExpired(lastValidTemperatureTimestampMillis, nowMillis, config.skinTempFreshnessTimeoutMillis)) {
+            temperatureBuffer.clear()
+            lastValidTemperatureTimestampMillis = null
+            temperatureBufferExpiredByGap = true
+        }
+    }
+
+    private fun hasExpired(
+        lastValidTimestampMillis: Long?,
+        nowMillis: Long,
+        timeoutMillis: Long
+    ): Boolean {
+        if (lastValidTimestampMillis == null) return false
+        return nowMillis - lastValidTimestampMillis > timeoutMillis
+    }
+
+    private fun isFresh(
+        lastValidTimestampMillis: Long?,
+        nowMillis: Long,
+        timeoutMillis: Long
+    ): Boolean {
+        if (lastValidTimestampMillis == null) return false
+        return nowMillis - lastValidTimestampMillis <= timeoutMillis
     }
 
     /**
@@ -1052,6 +1453,17 @@ class PotchArousalCalculator(
         hrvIbiBuffer.clear()
         lastAcceptedHrvIbiEndSampleIndex = Long.MIN_VALUE
 
+        lastValidHeartRateTimestampMillis = null
+        lastValidHrvTimestampMillis = null
+        lastValidRespirationTimestampMillis = null
+        lastValidTemperatureTimestampMillis = null
+
+        heartRateBufferExpiredByGap = false
+        hrvBufferExpiredByGap = false
+        respirationBufferExpiredByGap = false
+        temperatureBufferExpiredByGap = false
+
+        lastState = ArousalState()
         microBpf.reset()
     }
 
@@ -2597,12 +3009,14 @@ class PotchArousalCalculator(
      * endSampleIndex를 이용해 이미 저장한 interval은 건너뛴다.
      */
     private fun appendHeartRateEstimateToHrvBuffer(
-        estimate: HeartRateEstimate
-    ) {
+        estimate: HeartRateEstimate,
+        acceptedAtMillis: Long
+    ): Int {
         if (estimate.qualityScore < config.hrvMinEstimateQuality) {
-            return
+            return 0
         }
 
+        var acceptedCount = 0
         val sortedIntervals = estimate.ibiIntervals
             .sortedBy { it.endSampleIndex }
 
@@ -2617,9 +3031,16 @@ class PotchArousalCalculator(
 
             hrvIbiBuffer.addLast(ibi)
             lastAcceptedHrvIbiEndSampleIndex = ibi.endSampleIndex
+            acceptedCount += 1
+        }
+
+        if (acceptedCount > 0) {
+            lastValidHrvTimestampMillis = acceptedAtMillis
+            hrvBufferExpiredByGap = false
         }
 
         trimHrvIbiBuffer()
+        return acceptedCount
     }
 
     /**

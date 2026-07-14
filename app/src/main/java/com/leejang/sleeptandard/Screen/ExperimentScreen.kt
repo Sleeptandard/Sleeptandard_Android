@@ -43,6 +43,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.leejang.sleeptandard.Potch.ArousalState
+import com.leejang.sleeptandard.Potch.MetricCalculationState
+import com.leejang.sleeptandard.Potch.MetricCalculationStatus
 import com.leejang.sleeptandard.Potch.PacketErrorLog
 import com.leejang.sleeptandard.Potch.PotchBleState
 import com.leejang.sleeptandard.Potch.PotchBleViewModel
@@ -281,6 +283,10 @@ fun ExperimentScreen(
                 microHighCutHz = value.coerceAtLeast(microLowCutHz + 0.1f)
             },
             valueRange = 1.0f..10.0f
+        )
+
+        ArousalCalculationStatusCard(
+            arousalState = arousalState
         )
 
         ArousalStateCard(
@@ -1185,6 +1191,120 @@ private fun calculateImuPose(
 
 private fun formatOneDecimal(value: Double): String {
     return "%.1f".format(value)
+}
+
+@Composable
+private fun ArousalCalculationStatusCard(
+    arousalState: ArousalState
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(26.dp))
+            .background(Color(0xFF1E1E25))
+            .border(
+                width = 1.dp,
+                color = Color(0xFFFFB74D).copy(alpha = 0.42f),
+                shape = RoundedCornerShape(26.dp)
+            )
+            .padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Text(
+            text = "📡 생체지표 계산 상태",
+            color = Color(0xFFFFC46B),
+            fontSize = 21.sp,
+            fontWeight = FontWeight.Bold
+        )
+
+        Text(
+            text = "데이터가 부족하거나 접촉·움직임 잡음으로 값이 필터링되면 계산 불가 이유를 표시합니다.",
+            color = Color.White.copy(alpha = 0.58f),
+            fontSize = 13.sp,
+            lineHeight = 18.sp
+        )
+
+        Spacer(Modifier.height(2.dp))
+
+        CalculationStatusItem(
+            label = "RR",
+            status = arousalState.rrCalculationStatus
+        )
+        CalculationStatusItem(
+            label = "RRV",
+            status = arousalState.rrvCalculationStatus
+        )
+        CalculationStatusItem(
+            label = "HR",
+            status = arousalState.hrCalculationStatus
+        )
+        CalculationStatusItem(
+            label = "HRV",
+            status = arousalState.hrvCalculationStatus
+        )
+    }
+}
+
+@Composable
+private fun CalculationStatusItem(
+    label: String,
+    status: MetricCalculationStatus
+) {
+    val stateColor = when (status.state) {
+        MetricCalculationState.VALID -> Color(0xFF3DFF78)
+        MetricCalculationState.COLLECTING -> Color(0xFFFFD166)
+        MetricCalculationState.REJECTED -> Color(0xFFFF5C68)
+    }
+
+    val stateText = when (status.state) {
+        MetricCalculationState.VALID -> "정상"
+        MetricCalculationState.COLLECTING -> "수집 중"
+        MetricCalculationState.REJECTED -> "계산 불가"
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color.White.copy(alpha = 0.055f))
+            .border(
+                width = 1.dp,
+                color = stateColor.copy(alpha = 0.28f),
+                shape = RoundedCornerShape(16.dp)
+            )
+            .padding(horizontal = 14.dp, vertical = 11.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = label,
+                color = Color.White,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace
+            )
+
+            Spacer(Modifier.weight(1f))
+
+            Text(
+                text = stateText,
+                color = stateColor,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+
+        Spacer(Modifier.height(5.dp))
+
+        Text(
+            text = status.message,
+            color = Color.White.copy(alpha = 0.68f),
+            fontSize = 12.sp,
+            lineHeight = 17.sp
+        )
+    }
 }
 
 @Composable

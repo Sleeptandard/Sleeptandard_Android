@@ -49,6 +49,12 @@ data class DataProcessorState(
     // 현재 심박수 추정의 품질 점수. 0.0~1.0, 값이 클수록 peak 간격이 안정적이다.
     val heartRateQuality: Double? = null,
 
+    // 현재 프레임에서 합산 PPG 심박수 추출이 가능한지와 실패 이유.
+    val heartRateCalculationStatus: MetricCalculationStatus = MetricCalculationStatus(
+        state = MetricCalculationState.COLLECTING,
+        message = "합산 PPG 심박 신호 수집 중"
+    ),
+
     // CRC 검증 실패 횟수
     // 패킷 데이터가 손상되었을 가능성을 확인하기 위한 누적 카운트
     val crcErrorCount: Int = 0,
@@ -176,6 +182,16 @@ class PotchDataProcessor(
 
     /** HR을 계산하기 위한 최소 누적 샘플 수. 100Hz 기준 3초 = 300 샘플. */
     private val heartRateMinSamples = 300
+
+    // CRC 정상 PPG 입력과 유효 HR 결과의 마지막 휴대폰 시각.
+    private var lastValidHeartRateInputTimestampMillis: Long? = null
+    private var lastValidHeartRateEstimateTimestampMillis: Long? = null
+
+    // CRC 정상 PPG가 끊긴 채 과거 raw buffer를 반복 계산하지 않도록 하는 제한.
+    private val heartRateInputStaleTimeoutMillis = 3 * 1000L
+
+    // 화면에서 마지막 정상 BPM을 잠깐 유지할 수 있는 최대 시간. 이후에는 null로 내린다.
+    private val heartRateDisplayStaleTimeoutMillis = 10 * 1000L
 
     /**
      * Potch 기기에서 한 번에 보내는 BLE Fragment 크기.
@@ -380,6 +396,8 @@ class PotchDataProcessor(
 
         heartRateCombinedBuffer.clear()
         totalHeartRateCombinedSampleCount = 0L
+        lastValidHeartRateInputTimestampMillis = null
+        lastValidHeartRateEstimateTimestampMillis = null
 
         arousalCalculator.reset()
 
@@ -487,19 +505,51 @@ class PotchDataProcessor(
 
         val frameIrMax = irSamples.maxOrNull()?.toDouble() ?: 0.0
 
-        // CRC가 정상인 프레임만 심박수 계산에 사용한다.
-        // 심박수는 IR과 RED raw sample을 평균낸 합산 PPG 신호만 사용한다.
-        if (receivedCrc == calculatedCrc) {
+        val phoneTimeMillis = System.currentTimeMillis()
+        val isCrcValid = receivedCrc == calculatedCrc
+
+        // CRC가 정상인 현재 프레임만 심박수 계산에 사용한다.
+        // CRC 오류 프레임에서는 과거 8초 buffer를 다시 계산해 같은 HR을 재삽입하지 않는다.
+        if (isCrcValid) {
             appendPpgSamplesToHrBuffer(
                 buffer = heartRateCombinedBuffer,
                 samples = avgSamples
             ) {
                 totalHeartRateCombinedSampleCount += 1L
             }
+            lastValidHeartRateInputTimestampMillis = phoneTimeMillis
+        } else if (hasTimestampExpired(
+                lastTimestampMillis = lastValidHeartRateInputTimestampMillis,
+                nowMillis = phoneTimeMillis,
+                timeoutMillis = heartRateInputStaleTimeoutMillis
+            )
+        ) {
+            heartRateCombinedBuffer.clear()
+            lastValidHeartRateInputTimestampMillis = null
         }
 
-        val heartRateEstimate = estimateHeartRate()
+        val heartRateEstimate = if (isCrcValid) {
+            estimateHeartRate()
+        } else {
+            null
+        }
+
+        if (heartRateEstimate != null) {
+            lastValidHeartRateEstimateTimestampMillis = phoneTimeMillis
+        }
+
         val estimatedHeartRate = heartRateEstimate?.bpm
+        val isDisplayedHeartRateFresh = isTimestampFresh(
+            lastTimestampMillis = lastValidHeartRateEstimateTimestampMillis,
+            nowMillis = phoneTimeMillis,
+            timeoutMillis = heartRateDisplayStaleTimeoutMillis
+        )
+
+        val heartRateCalculationStatus = buildHeartRateCalculationStatus(
+            estimate = heartRateEstimate,
+            isCurrentFrameCrcValid = isCrcValid,
+            nowMillis = phoneTimeMillis
+        )
 
         Log.d(
             TAG,
@@ -540,6 +590,7 @@ class PotchDataProcessor(
         val arousalState = arousalCalculator.process(
             sensorData = parsed,
             heartRateEstimate = heartRateEstimate,
+            heartRateSignalStatus = heartRateCalculationStatus
         )
 
         val allErrors = currentFrameErrors + frameErrors
@@ -550,7 +601,6 @@ class PotchDataProcessor(
         val completeText =
             if (frameComplete && allErrors.isEmpty()) "complete" else "miss"
 
-        val phoneTimeMillis = System.currentTimeMillis()
         val missPacketNumText = allMissNums.joinToString("|")
         val errorLogText = allErrors.joinToString(" / ")
 
@@ -579,10 +629,19 @@ class PotchDataProcessor(
             current.copy(
                 lastParsedData = parsed,
 
-                // iOS처럼 계산 실패 시 기존 유효 심박수를 유지한다.
+                // 마지막 정상값은 최대 10초까지만 유지하고, 그 뒤에는 stale 값 대신 null을 표시한다.
                 // heartRateBpm은 IR/RED 평균 합산 PPG 기반 값을 사용한다.
-                heartRateBpm = estimatedHeartRate ?: current.heartRateBpm,
-                heartRateQuality = heartRateEstimate?.qualityScore ?: current.heartRateQuality,
+                heartRateBpm = when {
+                    estimatedHeartRate != null -> estimatedHeartRate
+                    isDisplayedHeartRateFresh -> current.heartRateBpm
+                    else -> null
+                },
+                heartRateQuality = when {
+                    heartRateEstimate != null -> heartRateEstimate.qualityScore
+                    isDisplayedHeartRateFresh -> current.heartRateQuality
+                    else -> null
+                },
+                heartRateCalculationStatus = heartRateCalculationStatus,
 
                 arousalState = arousalState,
                 lastIrMax = frameIrMax,
@@ -684,6 +743,79 @@ class PotchDataProcessor(
                 buffer.removeFirst()
             }
         }
+    }
+
+    private fun buildHeartRateCalculationStatus(
+        estimate: HeartRateEstimate?,
+        isCurrentFrameCrcValid: Boolean,
+        nowMillis: Long
+    ): MetricCalculationStatus {
+        if (!isCurrentFrameCrcValid) {
+            val rawInputIsStale = !isTimestampFresh(
+                lastTimestampMillis = lastValidHeartRateInputTimestampMillis,
+                nowMillis = nowMillis,
+                timeoutMillis = heartRateInputStaleTimeoutMillis
+            )
+
+            return MetricCalculationStatus(
+                state = MetricCalculationState.REJECTED,
+                message = if (rawInputIsStale) {
+                    "CRC 정상 PPG가 ${heartRateInputStaleTimeoutMillis / 1000}초 이상 없어 " +
+                            "과거 HR raw buffer를 초기화했습니다"
+                } else {
+                    "현재 SuperFrame CRC 오류: 이 프레임은 HR/HRV 계산에 사용하지 않습니다"
+                }
+            )
+        }
+
+        if (estimate != null) {
+            return MetricCalculationStatus(
+                state = MetricCalculationState.VALID,
+                message = "합산 PPG 심박수 정상 검출: ${estimate.bpm} bpm, " +
+                        "quality=${"%.2f".format(estimate.qualityScore)}"
+            )
+        }
+
+        if (heartRateCombinedBuffer.size < heartRateMinSamples) {
+            return MetricCalculationStatus(
+                state = MetricCalculationState.COLLECTING,
+                message = "합산 PPG 심박 신호 수집 중: " +
+                        "${heartRateCombinedBuffer.size}/$heartRateMinSamples samples"
+            )
+        }
+
+        val maxRaw = heartRateCombinedBuffer.maxOrNull()?.toDouble() ?: 0.0
+
+        if (maxRaw <= 10000.0) {
+            return MetricCalculationStatus(
+                state = MetricCalculationState.REJECTED,
+                message = "PPG 접촉 신호가 약함: 합산 raw 최대값=${maxRaw.toInt()} " +
+                        "(접촉 불량 또는 센서 이탈 가능)"
+            )
+        }
+
+        return MetricCalculationStatus(
+            state = MetricCalculationState.REJECTED,
+            message = "유효 peak/IBI 부족: 움직임 잡음, 파형 왜곡 또는 이상치 필터링 가능"
+        )
+    }
+
+    private fun isTimestampFresh(
+        lastTimestampMillis: Long?,
+        nowMillis: Long,
+        timeoutMillis: Long
+    ): Boolean {
+        if (lastTimestampMillis == null) return false
+        return nowMillis - lastTimestampMillis <= timeoutMillis
+    }
+
+    private fun hasTimestampExpired(
+        lastTimestampMillis: Long?,
+        nowMillis: Long,
+        timeoutMillis: Long
+    ): Boolean {
+        if (lastTimestampMillis == null) return false
+        return nowMillis - lastTimestampMillis > timeoutMillis
     }
 
     private fun estimateHeartRate(): HeartRateEstimate? {
