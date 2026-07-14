@@ -171,7 +171,7 @@ data class ArousalConfig(
     val hrvIbiOutlierTolerance: Double = 0.30,
     val hrvMinEstimateQuality: Double = 0.35,
 
-    // 임시 score 기준. 나중에는 개인 baseline 기반으로 바꾸는 게 좋음.
+    // TODO: 임시 score 기준. 나중에는 개인 baseline 기반으로 바꾸는 게 좋음.
     val hrvRmssdScoreThresholdMs: Double = 80.0,
 
     // HRV LF/HF
@@ -216,11 +216,11 @@ data class ArousalConfig(
     val finalWakeThreshold: Double = 0.65,
     // 기본 각성 점수는 최대 0.8이 되도록 설계.
     // micro + rr + rrv + hr + hrv weight 합 = 0.8
-    val mmScoreWeight: Double = 0.20,
-    val rrScoreWeight: Double = 0.15,
+    val mmScoreWeight: Double = 0.10,
+    val rrScoreWeight: Double = 0.20,
     val rrvScoreWeight: Double = 0.15,
     val hrScoreWeight: Double = 0.20,
-    val hrvScoreWeight: Double = 0.10,
+    val hrvScoreWeight: Double = 0.15,
     // skin temperature는 더하는 지표가 아니라 multiplier로 사용.
     // multiplier = 1.0 ~ 1.25
     val tempScoreWeight: Double = 0.25,

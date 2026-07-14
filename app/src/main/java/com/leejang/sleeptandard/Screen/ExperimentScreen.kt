@@ -336,6 +336,10 @@ fun ExperimentScreen(
             onExportSelected = {
                 viewModel.exportSelectedInternalLogFiles(selectedLogFileNames.toList())
                 selectedLogFileNames.clear()
+            },
+            onDeleteLogs = {
+                viewModel.deleteInternalLogFiles(selectedLogFileNames.toList())
+                selectedLogFileNames.clear()
             }
         )
 
@@ -1970,7 +1974,8 @@ private fun InternalLogFileExportCard(
     lastExportMessage: String?,
     onRefresh: () -> Unit,
     onToggleSelect: (String) -> Unit,
-    onExportSelected: () -> Unit
+    onExportSelected: () -> Unit,
+    onDeleteLogs: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -2067,6 +2072,39 @@ private fun InternalLogFileExportCard(
                     "내보낼 파일 선택"
                 } else {
                     "선택한 ${selectedFileNames.size}개 파일 내보내기"
+                },
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+
+        Spacer(Modifier.height(10.dp))
+
+        Button(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp),
+            shape = RoundedCornerShape(18.dp),
+            enabled = files.isNotEmpty(),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Color(0xFFD83A40),
+                contentColor = Color.White,
+                disabledContainerColor = Color.White.copy(alpha = 0.08f),
+                disabledContentColor = Color.White.copy(alpha = 0.35f)
+            ),
+            onClick = {
+                try {
+                    onDeleteLogs()
+                } catch (e: Exception) {
+                    Log.e("InternalLogDelete", "delete error: $e")
+                }
+            }
+        ) {
+            Text(
+                text = if (selectedFileNames.isEmpty()) {
+                    "전체 삭제"
+                } else {
+                    "선택한 파일 삭제"
                 },
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Bold
