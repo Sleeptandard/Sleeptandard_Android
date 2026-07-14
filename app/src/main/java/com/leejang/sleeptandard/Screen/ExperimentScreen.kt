@@ -94,9 +94,7 @@ fun ExperimentScreen(
         sensorData?.let { "%.1f°C".format(it.ntcCelsius) } ?: "--°C"
 
     val heartRateText =
-        processorState.heartRateIrBpm?.let { "$it bpm" }
-            ?: processorState.heartRateBpm?.let { "$it bpm" }
-            ?: "-- bpm"
+        processorState.heartRateBpm?.let { "$it bpm" } ?: "-- bpm"
 
     val batteryPercent =
         sensorData?.batteryVoltage?.let { voltageToBatteryPercent(it) }
@@ -240,17 +238,6 @@ fun ExperimentScreen(
             frameSummary = latestPpgFrameSummary,
             isConnected = bleState.isConnected
         )
-
-        HeartRateComparisonCard(
-            irBpm = processorState.heartRateIrBpm ?: processorState.heartRateBpm,
-            redBpm = processorState.heartRateRedBpm,
-            avgBpm = processorState.heartRateAvgBpm,
-            irQuality = processorState.heartRateIrQuality,
-            redQuality = processorState.heartRateRedQuality,
-            avgQuality = processorState.heartRateAvgQuality
-        )
-
-
 
         /*
         HeartRateFilteredPpgGraphCard(
@@ -456,132 +443,6 @@ private fun SensorCard(
     }
 }
 
-
-@Composable
-private fun HeartRateComparisonCard(
-    irBpm: Int?,
-    redBpm: Int?,
-    avgBpm: Int?,
-    irQuality: Double?,
-    redQuality: Double?,
-    avgQuality: Double?
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(26.dp))
-            .background(Color(0xFF1E1E25))
-            .border(
-                width = 1.dp,
-                color = Color(0xFFFF4B55).copy(alpha = 0.38f),
-                shape = RoundedCornerShape(26.dp)
-            )
-            .padding(18.dp)
-    ) {
-        Text(
-            text = "♥ PPG 심박수 비교",
-            color = Color(0xFFFF4B55),
-            fontSize = 21.sp,
-            fontWeight = FontWeight.Bold
-        )
-
-        Spacer(Modifier.height(8.dp))
-
-        Text(
-            text = "IR, RED, IR/RED raw 평균 신호를 각각 같은 peak 검출 로직으로 계산합니다. 각성지표 입력은 기존처럼 IR 기준을 유지합니다.",
-            color = Color.White.copy(alpha = 0.55f),
-            fontSize = 13.sp,
-            lineHeight = 18.sp
-        )
-
-        Spacer(Modifier.height(14.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            HeartRateMetricBox(
-                modifier = Modifier.weight(1f),
-                title = "IR",
-                bpm = irBpm,
-                quality = irQuality,
-                color = Color(0xFF4CD3FF)
-            )
-
-            HeartRateMetricBox(
-                modifier = Modifier.weight(1f),
-                title = "RED",
-                bpm = redBpm,
-                quality = redQuality,
-                color = Color(0xFFFF4B55)
-            )
-
-            HeartRateMetricBox(
-                modifier = Modifier.weight(1f),
-                title = "AVG",
-                bpm = avgBpm,
-                quality = avgQuality,
-                color = Color(0xFFFFD166)
-            )
-        }
-    }
-}
-
-@Composable
-private fun HeartRateMetricBox(
-    modifier: Modifier = Modifier,
-    title: String,
-    bpm: Int?,
-    quality: Double?,
-    color: Color
-) {
-    Column(
-        modifier = modifier
-            .clip(RoundedCornerShape(18.dp))
-            .background(Color.White.copy(alpha = 0.055f))
-            .border(
-                width = 1.dp,
-                color = color.copy(alpha = 0.28f),
-                shape = RoundedCornerShape(18.dp)
-            )
-            .padding(horizontal = 10.dp, vertical = 12.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text(
-            text = title,
-            color = color,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Bold,
-            fontFamily = FontFamily.Monospace
-        )
-
-        Spacer(Modifier.height(8.dp))
-
-        Text(
-            text = bpm?.let { "$it" } ?: "--",
-            color = Color.White,
-            fontSize = 28.sp,
-            fontWeight = FontWeight.ExtraBold,
-            fontFamily = FontFamily.Monospace
-        )
-
-        Text(
-            text = "bpm",
-            color = Color.White.copy(alpha = 0.50f),
-            fontSize = 11.sp,
-            fontFamily = FontFamily.Monospace
-        )
-
-        Spacer(Modifier.height(6.dp))
-
-        Text(
-            text = quality?.let { "q=%.2f".format(it) } ?: "q=--",
-            color = Color.White.copy(alpha = 0.58f),
-            fontSize = 11.sp,
-            fontFamily = FontFamily.Monospace
-        )
-    }
-}
 
 private const val PPG_SAMPLE_RATE_HZ = 100
 private const val PPG_GRAPH_WINDOW_SECONDS = 10

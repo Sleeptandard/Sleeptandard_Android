@@ -42,18 +42,12 @@ data class DataProcessorState(
     // 아직 수신된 데이터가 없거나 파싱 전이면 null
     val lastParsedData: SensorData? = null,
 
-    // 기존 심박수 표시/각성지표 입력용 값.
-    // 각성지표는 그대로 IR 기반 HeartRateEstimate를 사용한다.
+    // IR과 RED raw sample을 평균낸 합산 PPG 신호 기반 심박수.
+    // 화면 표시와 각성지표 HR/HRV 입력에 모두 이 값을 사용한다.
     val heartRateBpm: Int? = null,
 
-    // 실험 화면에서 채널별 HR 비교를 위해 표시할 값들.
-    val heartRateIrBpm: Int? = null,
-    val heartRateRedBpm: Int? = null,
-    val heartRateAvgBpm: Int? = null,
-
-    val heartRateIrQuality: Double? = null,
-    val heartRateRedQuality: Double? = null,
-    val heartRateAvgQuality: Double? = null,
+    // 현재 심박수 추정의 품질 점수. 0.0~1.0, 값이 클수록 peak 간격이 안정적이다.
+    val heartRateQuality: Double? = null,
 
     // CRC 검증 실패 횟수
     // 패킷 데이터가 손상되었을 가능성을 확인하기 위한 누적 카운트
@@ -164,21 +158,18 @@ class PotchDataProcessor(
     private var expectedFragCounter: Int? = null
 
     /**
-     * 심박수 추정을 위한 PPG IR 샘플 누적 버퍼.
+     * 심박수 추정을 위한 PPG 합산 샘플 누적 버퍼.
      *
      * 한 Super Frame에는 1초(100 샘플)치 PPG 데이터만 들어있어서
      * 그 안에서 피크 검출을 하면 비트 수가 너무 적어 (60bpm 기준 1개) 불안정하다.
      * 그래서 최근 몇 초 분량을 rolling buffer로 누적한 뒤 그 위에서 피크를 검출한다.
      *
+     * 합산 샘플은 같은 index의 IR raw와 RED raw를 평균낸 값이다.
      * CRC가 정상인 프레임의 샘플만 누적한다 (손상된 프레임은 HR 추정에 사용하지 않음).
      */
-    private val heartRateIrBuffer = ArrayDeque<Int>()
-    private val heartRateRedBuffer = ArrayDeque<Int>()
-    private val heartRateAvgBuffer = ArrayDeque<Int>()
+    private val heartRateCombinedBuffer = ArrayDeque<Int>()
 
-    private var totalHeartRateSampleCount: Long = 0L
-    private var totalHeartRateRedSampleCount: Long = 0L
-    private var totalHeartRateAvgSampleCount: Long = 0L
+    private var totalHeartRateCombinedSampleCount: Long = 0L
 
     /** HR 버퍼에 보관할 최대 샘플 수. 100Hz 기준 8초 = 800 샘플. */
     private val heartRateBufferMaxSamples = 800
@@ -387,12 +378,8 @@ class PotchDataProcessor(
         buffer.clear()
         expectedFragCounter = null
 
-        heartRateIrBuffer.clear()
-        heartRateRedBuffer.clear()
-        heartRateAvgBuffer.clear()
-        totalHeartRateSampleCount = 0L
-        totalHeartRateRedSampleCount = 0L
-        totalHeartRateAvgSampleCount = 0L
+        heartRateCombinedBuffer.clear()
+        totalHeartRateCombinedSampleCount = 0L
 
         arousalCalculator.reset()
 
@@ -500,54 +487,26 @@ class PotchDataProcessor(
 
         val frameIrMax = irSamples.maxOrNull()?.toDouble() ?: 0.0
 
-        // CRC가 정상인 프레임만 심박수 계산에 사용
+        // CRC가 정상인 프레임만 심박수 계산에 사용한다.
+        // 심박수는 IR과 RED raw sample을 평균낸 합산 PPG 신호만 사용한다.
         if (receivedCrc == calculatedCrc) {
             appendPpgSamplesToHrBuffer(
-                buffer = heartRateIrBuffer,
-                samples = irSamples
-            ) {
-                totalHeartRateSampleCount += 1L
-            }
-
-            appendPpgSamplesToHrBuffer(
-                buffer = heartRateRedBuffer,
-                samples = redSamples
-            ) {
-                totalHeartRateRedSampleCount += 1L
-            }
-
-            appendPpgSamplesToHrBuffer(
-                buffer = heartRateAvgBuffer,
+                buffer = heartRateCombinedBuffer,
                 samples = avgSamples
             ) {
-                totalHeartRateAvgSampleCount += 1L
+                totalHeartRateCombinedSampleCount += 1L
             }
         }
 
-        val irHeartRateEstimate = estimateHeartRate()
-        val redHeartRateEstimate = estimateHeartRateFromBuffer(
-            buffer = heartRateRedBuffer,
-            totalSampleCount = totalHeartRateRedSampleCount
-        )
-        val avgHeartRateEstimate = estimateHeartRateFromBuffer(
-            buffer = heartRateAvgBuffer,
-            totalSampleCount = totalHeartRateAvgSampleCount
-        )
-
-        // 각성지표는 기존 동작을 유지하기 위해 IR 기반 estimate만 넘긴다.
-        val heartRateEstimate = irHeartRateEstimate
+        val heartRateEstimate = estimateHeartRate()
         val estimatedHeartRate = heartRateEstimate?.bpm
 
         Log.d(
             TAG,
             "SuperFrame parsed timestamp=$timestamp, irMax=$frameIrMax, " +
-                    "bpmIR=${irHeartRateEstimate?.bpm}, " +
-                    "bpmRED=${redHeartRateEstimate?.bpm}, " +
-                    "bpmAVG=${avgHeartRateEstimate?.bpm}, " +
-                    "ibiIR=${irHeartRateEstimate?.intervalCount}, " +
-                    "qIR=${irHeartRateEstimate?.qualityScore}, " +
-                    "qRED=${redHeartRateEstimate?.qualityScore}, " +
-                    "qAVG=${avgHeartRateEstimate?.qualityScore}"
+                    "bpmCombined=${heartRateEstimate?.bpm}, " +
+                    "ibiCombined=${heartRateEstimate?.intervalCount}, " +
+                    "qCombined=${heartRateEstimate?.qualityScore}"
         )
 
         val parsed = SensorData(
@@ -621,16 +580,9 @@ class PotchDataProcessor(
                 lastParsedData = parsed,
 
                 // iOS처럼 계산 실패 시 기존 유효 심박수를 유지한다.
-                // heartRateBpm은 기존 동작 유지를 위해 IR 기반 값을 사용한다.
+                // heartRateBpm은 IR/RED 평균 합산 PPG 기반 값을 사용한다.
                 heartRateBpm = estimatedHeartRate ?: current.heartRateBpm,
-
-                heartRateIrBpm = irHeartRateEstimate?.bpm ?: current.heartRateIrBpm,
-                heartRateRedBpm = redHeartRateEstimate?.bpm ?: current.heartRateRedBpm,
-                heartRateAvgBpm = avgHeartRateEstimate?.bpm ?: current.heartRateAvgBpm,
-
-                heartRateIrQuality = irHeartRateEstimate?.qualityScore ?: current.heartRateIrQuality,
-                heartRateRedQuality = redHeartRateEstimate?.qualityScore ?: current.heartRateRedQuality,
-                heartRateAvgQuality = avgHeartRateEstimate?.qualityScore ?: current.heartRateAvgQuality,
+                heartRateQuality = heartRateEstimate?.qualityScore ?: current.heartRateQuality,
 
                 arousalState = arousalState,
                 lastIrMax = frameIrMax,
@@ -698,7 +650,7 @@ class PotchDataProcessor(
     /**
      * IR과 RED raw sample을 sample index 기준으로 평균낸 합성 PPG 신호를 만든다.
      *
-     * 이 값은 실험 화면 비교용이며, 각성지표 계산에는 사용하지 않는다.
+     * 이 합산 PPG 신호를 심박수 표시, HR 각성지표, HRV 계산에 공통으로 사용한다.
      */
     private fun buildAveragePpgSamples(
         irSamples: IntArray,
@@ -736,8 +688,8 @@ class PotchDataProcessor(
 
     private fun estimateHeartRate(): HeartRateEstimate? {
         return estimateHeartRateFromBuffer(
-            buffer = heartRateIrBuffer,
-            totalSampleCount = totalHeartRateSampleCount
+            buffer = heartRateCombinedBuffer,
+            totalSampleCount = totalHeartRateCombinedSampleCount
         )
     }
 
