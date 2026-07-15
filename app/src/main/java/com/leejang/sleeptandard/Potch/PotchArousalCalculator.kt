@@ -594,6 +594,9 @@ class PotchArousalCalculator(
      */
     private val hrvIbiBuffer = ArrayDeque<IbiInterval>()
 
+    // 현재 유효한 분석 연속 구간과 HRV 중복 제거 위치.
+    private var currentAnalysisSegmentId: Long = 0L
+    private var lastAcceptedHrvIbiSegmentId: Long = Long.MIN_VALUE
     private var lastAcceptedHrvIbiEndSamplePosition: Double = Double.NEGATIVE_INFINITY
 
     // 각 계산 버퍼에 마지막으로 유효한 값이 들어온 휴대폰 시각.
@@ -629,8 +632,17 @@ class PotchArousalCalculator(
         heartRateSignalStatus: MetricCalculationStatus = MetricCalculationStatus(
             state = MetricCalculationState.COLLECTING,
             message = "합산 PPG 심박 신호 수집 중"
-        )
+        ),
+        analysisSegmentId: Long = currentAnalysisSegmentId
     ): ArousalState {
+        // 호출자가 segment 변경 알림을 먼저 주지 않았더라도 안전하게 경계를 적용한다.
+        if (analysisSegmentId != currentAnalysisSegmentId) {
+            onDataDiscontinuity(
+                newSegmentId = analysisSegmentId,
+                reason = "segment changed before valid frame"
+            )
+        }
+
         // 펌웨어 timestamp 단위와 무관하게 stale/rolling window를 안정적으로 관리하기 위해
         // 계산 버퍼의 시간 기준은 휴대폰 수신 시각을 사용한다.
         val nowMillis = System.currentTimeMillis()
@@ -987,6 +999,8 @@ class PotchArousalCalculator(
         frequencyResult: HrvFrequencyResult?,
         isFresh: Boolean
     ): MetricCalculationStatus {
+        val currentSegmentIbiCount = currentSegmentHrvIbis().size
+
         if (!isFresh && hrvBufferExpiredByGap) {
             return MetricCalculationStatus(
                 state = MetricCalculationState.REJECTED,
@@ -1000,7 +1014,7 @@ class PotchArousalCalculator(
                 "RMSSD와 LF/HF 정상 계산 중 (IBI=${timeDomainResult.ibiCount})"
             } else {
                 "RMSSD 정상 계산 중. LF/HF용 IBI 수집 중: " +
-                        "${hrvIbiBuffer.size}/${config.hrvSpectralMinIbiCount}"
+                        "${currentSegmentIbiCount}/${config.hrvSpectralMinIbiCount}"
             }
 
             return MetricCalculationStatus(
@@ -1009,7 +1023,7 @@ class PotchArousalCalculator(
             )
         }
 
-        if (hrvIbiBuffer.size < config.hrvMinIbiCount) {
+        if (currentSegmentIbiCount < config.hrvMinIbiCount) {
             if (heartRateEstimate == null &&
                 heartRateSignalStatus.state == MetricCalculationState.REJECTED
             ) {
@@ -1022,7 +1036,7 @@ class PotchArousalCalculator(
 
             return MetricCalculationStatus(
                 state = MetricCalculationState.COLLECTING,
-                message = "유효 IBI 수집 중: ${hrvIbiBuffer.size}/${config.hrvMinIbiCount}"
+                message = "유효 IBI 수집 중: ${currentSegmentIbiCount}/${config.hrvMinIbiCount}"
             )
         }
 
@@ -1281,6 +1295,7 @@ class PotchArousalCalculator(
 
         if (hasExpired(lastValidHrvTimestampMillis, nowMillis, config.hrvFreshnessTimeoutMillis)) {
             hrvIbiBuffer.clear()
+            lastAcceptedHrvIbiSegmentId = Long.MIN_VALUE
             lastAcceptedHrvIbiEndSamplePosition = Double.NEGATIVE_INFINITY
             lastValidHrvTimestampMillis = null
             hrvBufferExpiredByGap = true
@@ -1437,12 +1452,73 @@ class PotchArousalCalculator(
     }
 
     /**
+     * 패킷 누락/CRC 오류로 샘플 연속성이 끊겼을 때 호출한다.
+     *
+     * sample-domain 신호(PPG/IMU/micro filter)는 즉시 비워 누락 전후 파형이
+     * 하나의 연속 신호처럼 처리되지 않게 한다. 시간 기반 history는 손상 프레임을
+     * 추가하지 않은 채 유지하지만 freshness를 끊어 이전 결과를 현재 결과로 재사용하지 않는다.
+     */
+    fun onDataDiscontinuity(
+        newSegmentId: Long,
+        reason: String
+    ): ArousalState {
+        currentAnalysisSegmentId = newSegmentId
+
+        ppgIrBuffer.clear()
+        ppgRedBuffer.clear()
+        imuGBuffer.clear()
+        microFilteredBuffer.clear()
+        microBpf.reset()
+
+        // HRV는 한 개의 연속 segment 안에서만 계산한다.
+        hrvIbiBuffer.clear()
+        lastAcceptedHrvIbiSegmentId = Long.MIN_VALUE
+        lastAcceptedHrvIbiEndSamplePosition = Double.NEGATIVE_INFINITY
+
+        lastValidHeartRateTimestampMillis = null
+        lastValidHrvTimestampMillis = null
+        lastValidRespirationTimestampMillis = null
+        lastValidTemperatureTimestampMillis = null
+
+        heartRateBufferExpiredByGap = true
+        hrvBufferExpiredByGap = true
+        respirationBufferExpiredByGap = true
+        temperatureBufferExpiredByGap = true
+
+        lastState = ArousalState(
+            rrCalculationStatus = MetricCalculationStatus(
+                state = MetricCalculationState.REJECTED,
+                message = "데이터 연속성 중단: $reason"
+            ),
+            rrvCalculationStatus = MetricCalculationStatus(
+                state = MetricCalculationState.REJECTED,
+                message = "데이터 연속성 중단으로 현재 호흡 interval 사용 불가"
+            ),
+            hrCalculationStatus = MetricCalculationStatus(
+                state = MetricCalculationState.REJECTED,
+                message = "데이터 연속성 중단: $reason"
+            ),
+            hrvCalculationStatus = MetricCalculationStatus(
+                state = MetricCalculationState.REJECTED,
+                message = "새 segment($newSegmentId)의 IBI를 다시 수집해야 함"
+            ),
+            finalWakeScore = 0.0,
+            isWakeTimingCandidate = false,
+            lastLog = "Analysis continuity break: segment=$newSegmentId, reason=$reason"
+        )
+
+        return lastState
+    }
+
+    fun getLastState(): ArousalState = lastState
+
+    /**
      * 계산기 내부의 모든 rolling buffer와 상태형 필터를 초기화한다.
      *
      * BLE 연결을 새로 시작하거나 실험을 재시작할 때 이전 데이터가
      * 새 계산에 섞이지 않도록 호출한다.
      */
-    fun reset() {
+    fun reset(initialSegmentId: Long = 0L) {
         ppgIrBuffer.clear()
         ppgRedBuffer.clear()
         imuGBuffer.clear()
@@ -1451,6 +1527,9 @@ class PotchArousalCalculator(
         heartRateBuffer.clear()
         respirationRateBuffer.clear()
         hrvIbiBuffer.clear()
+
+        currentAnalysisSegmentId = initialSegmentId
+        lastAcceptedHrvIbiSegmentId = Long.MIN_VALUE
         lastAcceptedHrvIbiEndSamplePosition = Double.NEGATIVE_INFINITY
 
         lastValidHeartRateTimestampMillis = null
@@ -3045,11 +3124,17 @@ class PotchArousalCalculator(
 
         var acceptedCount = 0
         val sortedIntervals = estimate.ibiIntervals
+            .filter { it.segmentId == currentAnalysisSegmentId }
             .sortedBy { it.endSamplePosition }
 
         for (ibi in sortedIntervals) {
             if (!ibi.endSamplePosition.isFinite()) {
                 continue
+            }
+
+            if (ibi.segmentId != lastAcceptedHrvIbiSegmentId) {
+                lastAcceptedHrvIbiSegmentId = ibi.segmentId
+                lastAcceptedHrvIbiEndSamplePosition = Double.NEGATIVE_INFINITY
             }
 
             if (ibi.endSamplePosition <= lastAcceptedHrvIbiEndSamplePosition) {
@@ -3075,6 +3160,16 @@ class PotchArousalCalculator(
     }
 
     /**
+     * 현재 연속 구간에 속한 IBI만 반환한다.
+     * 이전 segment의 IBI는 보관 중이어도 RMSSD/LF-HF 계산에는 사용하지 않는다.
+     */
+    private fun currentSegmentHrvIbis(): List<IbiInterval> {
+        return hrvIbiBuffer.filter {
+            it.segmentId == currentAnalysisSegmentId
+        }
+    }
+
+    /**
      * HRV IBI rolling buffer에서 오래된 interval을 제거한다.
      *
      * RMSSD 계산용 window 길이 안의 IBI만 유지한다.
@@ -3082,8 +3177,19 @@ class PotchArousalCalculator(
     private fun trimHrvIbiBuffer() {
         if (hrvIbiBuffer.isEmpty()) return
 
+        // 현재 segment 이전 데이터는 이후 계산에 다시 쓰지 않으므로 제거한다.
+        while (
+            hrvIbiBuffer.isNotEmpty() &&
+            hrvIbiBuffer.first().segmentId < currentAnalysisSegmentId
+        ) {
+            hrvIbiBuffer.removeFirst()
+        }
+
+        val currentIbis = currentSegmentHrvIbis()
+        if (currentIbis.isEmpty()) return
+
         val newestSamplePosition =
-            hrvIbiBuffer.last().endSamplePosition
+            currentIbis.last().endSamplePosition
 
         val windowSamples =
             config.sampleRateHz * config.hrvWindowSeconds
@@ -3092,7 +3198,12 @@ class PotchArousalCalculator(
             newestSamplePosition - windowSamples
 
         while (hrvIbiBuffer.isNotEmpty()) {
-            if (hrvIbiBuffer.first().endSamplePosition >= minSamplePosition) {
+            val first = hrvIbiBuffer.first()
+
+            if (
+                first.segmentId == currentAnalysisSegmentId &&
+                first.endSamplePosition >= minSamplePosition
+            ) {
                 break
             }
 
@@ -3107,11 +3218,13 @@ class PotchArousalCalculator(
      * RMSSD(ms)를 구하고 HRV score와 품질 점수를 함께 반환한다.
      */
     fun calculateHeartRateVariability(): HeartRateVariabilityResult? {
-        if (hrvIbiBuffer.size < config.hrvMinIbiCount) {
+        val segmentIbis = currentSegmentHrvIbis()
+
+        if (segmentIbis.size < config.hrvMinIbiCount) {
             return null
         }
 
-        val cleanedIbis = removeHrvIbiOutliers(hrvIbiBuffer.toList())
+        val cleanedIbis = removeHrvIbiOutliers(segmentIbis)
 
         if (cleanedIbis.size < config.hrvMinIbiCount) {
             return null
@@ -3252,11 +3365,13 @@ class PotchArousalCalculator(
      * 평균 제거, Hamming window, FFT power spectrum을 거쳐 LF/HF power를 구한다.
      */
     fun calculateHrvFrequencyDomain(): HrvFrequencyResult? {
-        if (hrvIbiBuffer.size < config.hrvSpectralMinIbiCount) {
+        val segmentIbis = currentSegmentHrvIbis()
+
+        if (segmentIbis.size < config.hrvSpectralMinIbiCount) {
             return null
         }
 
-        val cleanedIbis = removeHrvIbiOutliers(hrvIbiBuffer.toList())
+        val cleanedIbis = removeHrvIbiOutliers(segmentIbis)
 
         if (cleanedIbis.size < config.hrvSpectralMinIbiCount) {
             return null
@@ -3374,9 +3489,12 @@ class PotchArousalCalculator(
         if (ibis.size < 2) return null
         if (resampleRateHz <= 0.0) return null
 
+        val targetSegmentId = ibis.last().segmentId
+
         val points = ibis
             .filter {
-                it.endSamplePosition.isFinite() &&
+                it.segmentId == targetSegmentId &&
+                        it.endSamplePosition.isFinite() &&
                         it.intervalSec.isFinite() &&
                         it.intervalSec > 0.0
             }

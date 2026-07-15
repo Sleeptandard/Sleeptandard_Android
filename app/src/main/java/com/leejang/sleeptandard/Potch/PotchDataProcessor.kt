@@ -30,6 +30,9 @@ data class IbiInterval(
     // 기존 정수 sample index는 로그/호환용으로 유지한다.
     val endSampleIndex: Long,
 
+    // 패킷 누락/CRC 오류 전후의 IBI가 서로 연결되지 않도록 하는 연속 구간 ID.
+    val segmentId: Long = 0L,
+
     // 포물선 보간으로 추정한 실제 peak 종료 위치.
     // 100Hz에서도 1 sample(10ms) 단위가 아닌 sub-sample 위치를 보존한다.
     val endSamplePosition: Double = endSampleIndex.toDouble()
@@ -109,6 +112,13 @@ data class DataProcessorState(
 
     // 다음에 기대하는 fragment counter
     val expectedFragCounter: Int? = null,
+
+    // 현재 분석 연속 구간 ID. 패킷 누락/CRC 오류마다 증가한다.
+    val analysisSegmentId: Long = 0L,
+
+    // 분석 연속성이 끊긴 누적 횟수와 마지막 원인.
+    val continuityBreakCount: Int = 0,
+    val lastContinuityBreakReason: String? = null,
 
     // 가장 최근 프레임의 IR 최댓값.
     // 손가락/피부 접촉이 있으면 보통 10000 이상, 강하면 50000 이상.
@@ -215,6 +225,14 @@ class PotchDataProcessor(
      * null이면 아직 기준 counter가 없는 초기 상태다.
      */
     private var expectedFragCounter: Int? = null
+
+    /**
+     * 현재 분석 연속 구간 ID.
+     *
+     * Fragment 누락, CRC 오류, Super Header 오류가 발생하면 증가한다.
+     * 이후 생성되는 IBI에 이 값을 기록해 서로 다른 구간의 RR을 연결하지 않는다.
+     */
+    private var currentAnalysisSegmentId: Long = 0L
 
     /**
      * 심박수 추정을 위한 PPG 합산 샘플 누적 버퍼.
@@ -452,15 +470,21 @@ class PotchDataProcessor(
     fun reset() {
         buffer.clear()
         expectedFragCounter = null
+        currentFrameErrors.clear()
+        currentFrameMissPacketNums.clear()
+
+        currentAnalysisSegmentId = 0L
 
         heartRateCombinedBuffer.clear()
         totalHeartRateCombinedSampleCount = 0L
         lastValidHeartRateInputTimestampMillis = null
         lastValidHeartRateEstimateTimestampMillis = null
 
-        arousalCalculator.reset()
+        arousalCalculator.reset(initialSegmentId = currentAnalysisSegmentId)
 
-        _state.value = DataProcessorState()
+        _state.value = DataProcessorState(
+            analysisSegmentId = currentAnalysisSegmentId
+        )
     }
 
     /**
@@ -567,9 +591,22 @@ class PotchDataProcessor(
         val phoneTimeMillis = System.currentTimeMillis()
         val isCrcValid = receivedCrc == calculatedCrc
 
-        // CRC가 정상인 현재 프레임만 심박수 계산에 사용한다.
-        // CRC 오류 프레임에서는 과거 8초 buffer를 다시 계산해 같은 HR을 재삽입하지 않는다.
-        if (isCrcValid) {
+        // CRC뿐 아니라 Super Header까지 정상인 프레임만 모든 분석에 사용한다.
+        // 손상 프레임은 PPG/IMU/체온/HR/HRV 어느 buffer에도 넣지 않는다.
+        val isFrameUsableForAnalysis =
+            frameComplete && isCrcValid
+
+        if (!isFrameUsableForAnalysis) {
+            val discontinuityReasons = buildList {
+                if (!frameComplete) add("invalid super header")
+                if (!isCrcValid) add("CRC mismatch")
+            }
+
+            advanceAnalysisSegment(
+                "SuperFrame excluded from analysis: " +
+                        discontinuityReasons.joinToString(", ")
+            )
+        } else {
             appendPpgSamplesToHrBuffer(
                 buffer = heartRateCombinedBuffer,
                 samples = avgSamples
@@ -577,17 +614,9 @@ class PotchDataProcessor(
                 totalHeartRateCombinedSampleCount += 1L
             }
             lastValidHeartRateInputTimestampMillis = phoneTimeMillis
-        } else if (hasTimestampExpired(
-                lastTimestampMillis = lastValidHeartRateInputTimestampMillis,
-                nowMillis = phoneTimeMillis,
-                timeoutMillis = heartRateInputStaleTimeoutMillis
-            )
-        ) {
-            heartRateCombinedBuffer.clear()
-            lastValidHeartRateInputTimestampMillis = null
         }
 
-        val heartRateEstimate = if (isCrcValid) {
+        val heartRateEstimate = if (isFrameUsableForAnalysis) {
             estimateHeartRate()
         } else {
             null
@@ -606,13 +635,14 @@ class PotchDataProcessor(
 
         val heartRateCalculationStatus = buildHeartRateCalculationStatus(
             estimate = heartRateEstimate,
-            isCurrentFrameCrcValid = isCrcValid,
+            isCurrentFrameCrcValid = isFrameUsableForAnalysis,
             nowMillis = phoneTimeMillis
         )
 
         Log.d(
             TAG,
-            "SuperFrame parsed timestamp=$timestamp, irMax=$frameIrMax, " +
+            "SuperFrame parsed timestamp=$timestamp, segment=$currentAnalysisSegmentId, " +
+                    "analysisValid=$isFrameUsableForAnalysis, irMax=$frameIrMax, " +
                     "bpmCombined=${heartRateEstimate?.bpm}, " +
                     "ibiCombined=${heartRateEstimate?.intervalCount}, " +
                     "qCombined=${heartRateEstimate?.qualityScore}, " +
@@ -651,11 +681,19 @@ class PotchDataProcessor(
                     "hr=${arousalBufferSnapshot.heartRateSampleCount}"
         )
 
-        val arousalState = arousalCalculator.process(
-            sensorData = parsed,
-            heartRateEstimate = heartRateEstimate,
-            heartRateSignalStatus = heartRateCalculationStatus
-        )
+        val arousalState =
+            if (isFrameUsableForAnalysis) {
+                arousalCalculator.process(
+                    sensorData = parsed,
+                    heartRateEstimate = heartRateEstimate,
+                    heartRateSignalStatus = heartRateCalculationStatus,
+                    analysisSegmentId = currentAnalysisSegmentId
+                )
+            } else {
+                // advanceAnalysisSegment()가 만든 불연속 상태를 사용한다.
+                // 손상된 parsed 값은 어떤 분석 buffer에도 append하지 않는다.
+                arousalCalculator.getLastState()
+            }
 
         val allErrors = currentFrameErrors + frameErrors
         val allMissNums = (currentFrameMissPacketNums + missNums)
@@ -691,7 +729,9 @@ class PotchDataProcessor(
 
         _state.update { current ->
             current.copy(
-                lastParsedData = parsed,
+                // CRC/Super Header가 정상인 마지막 프레임만 노출한다.
+                lastParsedData =
+                    if (isFrameUsableForAnalysis) parsed else current.lastParsedData,
 
                 // 마지막 정상값은 최대 10초까지만 유지하고, 그 뒤에는 stale 값 대신 null을 표시한다.
                 // heartRateBpm은 IR/RED 평균 합산 PPG 기반 값을 사용한다.
@@ -708,7 +748,9 @@ class PotchDataProcessor(
                 heartRateCalculationStatus = heartRateCalculationStatus,
 
                 arousalState = arousalState,
-                lastIrMax = frameIrMax,
+                lastIrMax =
+                    if (isFrameUsableForAnalysis) frameIrMax else current.lastIrMax,
+                analysisSegmentId = currentAnalysisSegmentId,
                 parsedSuperFrameCount = current.parsedSuperFrameCount + 1
             )
         }
@@ -940,7 +982,8 @@ class PotchDataProcessor(
         val bestFit = findBestHeartRatePeakFit(
             signal = filtered,
             sampleRateHz = sampleRateHz,
-            bufferStartSampleIndex = bufferStartSampleIndex
+            bufferStartSampleIndex = bufferStartSampleIndex,
+            segmentId = currentAnalysisSegmentId
         ) ?: return null
 
         val avgInterval = bestFit.usedIntervals
@@ -1166,7 +1209,8 @@ class PotchDataProcessor(
     private fun findBestHeartRatePeakFit(
         signal: DoubleArray,
         sampleRateHz: Double,
-        bufferStartSampleIndex: Long
+        bufferStartSampleIndex: Long,
+        segmentId: Long
     ): HeartRatePeakFitCandidate? {
         if (signal.size < 3 || sampleRateHz <= 0.0) return null
 
@@ -1232,6 +1276,7 @@ class PotchDataProcessor(
                 peakPositions = peakPositions,
                 bufferStartSampleIndex = bufferStartSampleIndex,
                 sampleRateHz = sampleRateHz,
+                segmentId = segmentId,
                 enforcePhysiologicalRange = false
             )
 
@@ -1524,6 +1569,7 @@ class PotchDataProcessor(
         peakPositions: List<Double>,
         bufferStartSampleIndex: Long,
         sampleRateHz: Double = 100.0,
+        segmentId: Long,
         enforcePhysiologicalRange: Boolean = true
     ): MutableList<IbiInterval> {
         val intervals = mutableListOf<IbiInterval>()
@@ -1553,6 +1599,7 @@ class PotchDataProcessor(
                     IbiInterval(
                         intervalSec = intervalSec,
                         endSampleIndex = endSamplePosition.roundToLong(),
+                        segmentId = segmentId,
                         endSamplePosition = endSamplePosition
                     )
                 )
@@ -1911,6 +1958,51 @@ class PotchDataProcessor(
         updateLog("DEBUG: Counter wrap-around test completed. 4095 → 0")
     }
 
+    /**
+     * 분석 데이터의 연속성이 끊겼음을 기록하고 새 segment를 시작한다.
+     *
+     * 심박 raw window를 즉시 비워 누락 전 peak와 누락 후 peak가 하나의 IBI로
+     * 연결되는 것을 막는다. ArousalCalculator에도 같은 segment ID를 전달해
+     * PPG/IMU raw window와 HRV 계산을 분리한다.
+     */
+    private fun advanceAnalysisSegment(reason: String) {
+        currentAnalysisSegmentId += 1L
+
+        heartRateCombinedBuffer.clear()
+        lastValidHeartRateInputTimestampMillis = null
+        lastValidHeartRateEstimateTimestampMillis = null
+
+        val gapState = arousalCalculator.onDataDiscontinuity(
+            newSegmentId = currentAnalysisSegmentId,
+            reason = reason
+        )
+
+        Log.w(
+            TAG,
+            "Analysis continuity break: segment=$currentAnalysisSegmentId, reason=$reason"
+        )
+        dataLogger?.logDebug(
+            TAG,
+            "Analysis continuity break: segment=$currentAnalysisSegmentId, reason=$reason",
+            "W"
+        )
+
+        _state.update { current ->
+            current.copy(
+                heartRateBpm = null,
+                heartRateQuality = null,
+                heartRateCalculationStatus = MetricCalculationStatus(
+                    state = MetricCalculationState.REJECTED,
+                    message = "데이터 연속성 중단: $reason"
+                ),
+                arousalState = gapState,
+                analysisSegmentId = currentAnalysisSegmentId,
+                continuityBreakCount = current.continuityBreakCount + 1,
+                lastContinuityBreakReason = reason
+            )
+        }
+    }
+
     private fun currentMiniPacketIndexInFrame(): Int {
         // payload 202B 단위로 몇 개 쌓였는지 계산
         // 다음에 들어올 패킷 번호이므로 +1
@@ -1918,6 +2010,9 @@ class PotchDataProcessor(
     }
 
     private fun logMissFrameAndClear(reason: String, missPacketNum: Int?) {
+        // Fragment 길이/헤더/순서 오류는 샘플 연속성이 끊긴 사건이다.
+        advanceAnalysisSegment(reason)
+
         currentFrameErrors.add(reason)
 
         if (missPacketNum != null) {
