@@ -34,7 +34,14 @@ data class HeartRateEstimate(
     val peakCount: Int,
     val intervalCount: Int,
     val averageIntervalSec: Double,
-    val qualityScore: Double
+    val qualityScore: Double,
+
+    // HeartPy-style adaptive peak fitting debug values.
+    // 어떤 이동평균 상승률 후보가 선택됐는지와 해당 후보의 SDSD를 남긴다.
+    val selectedThresholdPercent: Double? = null,
+    val peakFitSdsdMs: Double? = null,
+    val rawIntervalCount: Int = intervalCount,
+    val acceptedIntervalRatio: Double = 1.0
 )
 
 data class DataProcessorState(
@@ -121,6 +128,37 @@ class PotchDataProcessor(
 ) {
     private val TAG = "PotchDataProcessor"
 
+    companion object {
+        private const val HEART_RATE_MIN_BPM = 40
+        private const val HEART_RATE_MAX_BPM = 180
+        private const val HEART_RATE_MOVING_AVERAGE_SECONDS = 1.5
+        private const val HEART_RATE_MIN_ACCEPTED_INTERVAL_RATIO = 0.50
+        private const val HEART_RATE_MIN_PHYSIOLOGICAL_INTERVAL_RATIO = 0.75
+
+        // candidate 비교에서 IBI 개수 부족과 reject 비율에 주는 작은 penalty.
+        private const val HEART_RATE_COUNT_PENALTY_SEC = 0.020
+        private const val HEART_RATE_REJECTION_PENALTY_SEC = 0.050
+
+        // HeartPy의 ma_perc 후보 범위를 참고한 moving-average 상승률 목록.
+        private val HEART_RATE_THRESHOLD_PERCENT_CANDIDATES = doubleArrayOf(
+            5.0, 10.0, 15.0, 20.0, 25.0, 30.0,
+            40.0, 50.0, 75.0, 100.0, 150.0, 200.0, 300.0
+        )
+    }
+
+    private data class HeartRatePeakFitCandidate(
+        val thresholdPercent: Double,
+        val thresholdOffset: Double,
+        val peakIndices: List<Int>,
+        val rawIntervals: List<IbiInterval>,
+        val usedIntervals: List<IbiInterval>,
+        val rawBpm: Double,
+        val finalBpm: Double,
+        val sdsdSec: Double,
+        val acceptedIntervalRatio: Double,
+        val selectionScore: Double
+    )
+
     // 각성지표 연산기
     private val arousalCalculator = PotchArousalCalculator()
 
@@ -180,8 +218,14 @@ class PotchDataProcessor(
     /** HR 버퍼에 보관할 최대 샘플 수. 100Hz 기준 8초 = 800 샘플. */
     private val heartRateBufferMaxSamples = 800
 
-    /** HR을 계산하기 위한 최소 누적 샘플 수. 100Hz 기준 3초 = 300 샘플. */
+    /** HR 계산을 시도하기 위한 최소 누적 샘플 수. 100Hz 기준 3초 = 300 샘플. */
     private val heartRateMinSamples = 300
+
+    /**
+     * adaptive peak fitting이 실패해도 초기 수집 중으로 표시할 권장 길이.
+     * SDSD에는 최소 4개 peak가 필요하므로 저심박까지 고려해 6초를 확보한다.
+     */
+    private val heartRateAdaptiveFitPreferredSamples = 600
 
     // CRC 정상 PPG 입력과 유효 HR 결과의 마지막 휴대폰 시각.
     private var lastValidHeartRateInputTimestampMillis: Long? = null
@@ -556,7 +600,10 @@ class PotchDataProcessor(
             "SuperFrame parsed timestamp=$timestamp, irMax=$frameIrMax, " +
                     "bpmCombined=${heartRateEstimate?.bpm}, " +
                     "ibiCombined=${heartRateEstimate?.intervalCount}, " +
-                    "qCombined=${heartRateEstimate?.qualityScore}"
+                    "qCombined=${heartRateEstimate?.qualityScore}, " +
+                    "maPerc=${heartRateEstimate?.selectedThresholdPercent}, " +
+                    "sdsdMs=${heartRateEstimate?.peakFitSdsdMs}, " +
+                    "ibiAccept=${heartRateEstimate?.acceptedIntervalRatio}"
         )
 
         val parsed = SensorData(
@@ -772,7 +819,9 @@ class PotchDataProcessor(
             return MetricCalculationStatus(
                 state = MetricCalculationState.VALID,
                 message = "합산 PPG 심박수 정상 검출: ${estimate.bpm} bpm, " +
-                        "quality=${"%.2f".format(estimate.qualityScore)}"
+                        "quality=${"%.2f".format(estimate.qualityScore)}, " +
+                        "ma=${estimate.selectedThresholdPercent?.let { "%.0f%%".format(it) } ?: "-"}, " +
+                        "SDSD=${estimate.peakFitSdsdMs?.let { "%.1fms".format(it) } ?: "-"}"
             )
         }
 
@@ -781,6 +830,14 @@ class PotchDataProcessor(
                 state = MetricCalculationState.COLLECTING,
                 message = "합산 PPG 심박 신호 수집 중: " +
                         "${heartRateCombinedBuffer.size}/$heartRateMinSamples samples"
+            )
+        }
+
+        if (heartRateCombinedBuffer.size < heartRateAdaptiveFitPreferredSamples) {
+            return MetricCalculationStatus(
+                state = MetricCalculationState.COLLECTING,
+                message = "이동평균/SDSD peak fitting용 IBI 추가 수집 중: " +
+                        "${heartRateCombinedBuffer.size}/$heartRateAdaptiveFitPreferredSamples samples"
             )
         }
 
@@ -826,18 +883,17 @@ class PotchDataProcessor(
     }
 
     /**
-     * HeartPy filtering.py의 처리 흐름을 Android/Kotlin용으로 단순화한 HR 추정 함수.
-     *
-     * Python HeartPy 원본의 filter_signal()은 scipy.signal.filtfilt 기반 Butterworth filter를 쓰지만,
-     * Android 실시간 처리에서는 SciPy를 그대로 사용할 수 없으므로 아래처럼 재구성한다.
+     * HeartPy의 핵심 아이디어를 Android/Kotlin 실시간 처리 구조에 맞게 적용한 HR 추정 함수.
      *
      * raw PPG
      * -> Hampel-style spike suppression
      * -> forward-backward one-pole bandpass(0.75~3.5Hz)
      * -> return_top처럼 양수 성분만 사용
-     * -> peak detection
-     * -> IBI 계산
-     * -> quotient filter + median outlier filter
+     * -> 1.5초 이동평균 계산
+     * -> 여러 moving-average 상승률 후보에서 ROI별 peak 검출
+     * -> 후보별 BPM / SDSD / IBI 유지율 평가
+     * -> 최적 후보 선택
+     * -> 기존 quotient filter + median outlier filter 유지
      * -> bpm 계산
      */
     private fun estimateHeartRateFromBuffer(
@@ -846,6 +902,7 @@ class PotchDataProcessor(
     ): HeartRateEstimate? {
         if (buffer.size < heartRateMinSamples) return null
 
+        val sampleRateHz = 100.0
         val signal = buffer.map { it.toDouble() }
         val n = signal.size
 
@@ -859,47 +916,53 @@ class PotchDataProcessor(
         val peakAmplitude = filtered.maxOrNull() ?: 0.0
         if (peakAmplitude <= 80.0) return null
 
-        val threshold = peakAmplitude * 0.35
-        val minPeakDistanceSamples = 35 // 100Hz 기준 0.35초, 약 171bpm보다 빠른 peak 중복 방지
-
-        val peakIndices = detectHeartRatePeaks(
-            signal = filtered,
-            threshold = threshold,
-            minPeakDistanceSamples = minPeakDistanceSamples
-        )
-
-        if (peakIndices.size < 2) return null
-
         val bufferStartSampleIndex = totalSampleCount - buffer.size
 
-        val intervals = buildHeartRateIntervals(
-            peakIndices = peakIndices,
+        val bestFit = findBestHeartRatePeakFit(
+            signal = filtered,
+            sampleRateHz = sampleRateHz,
             bufferStartSampleIndex = bufferStartSampleIndex
-        )
+        ) ?: return null
 
-        if (intervals.isEmpty()) return null
+        val avgInterval = bestFit.usedIntervals
+            .map { it.intervalSec }
+            .average()
 
-        val usedIntervals = filterHeartRateIntervals(intervals)
-        if (usedIntervals.isEmpty()) return null
-
-        val avgInterval = usedIntervals.map { it.intervalSec }.average()
         if (avgInterval <= 0.0) return null
 
         val bpm = (60.0 / avgInterval).roundToInt()
-        if (bpm !in 40..180) return null
+        if (bpm !in HEART_RATE_MIN_BPM..HEART_RATE_MAX_BPM) return null
 
-        val qualityScore = calculateHeartRateEstimateQuality(
-            intervals = usedIntervals,
+        val baseQuality = calculateHeartRateEstimateQuality(
+            intervals = bestFit.usedIntervals,
             peakAmplitude = peakAmplitude
         )
 
+        // 기존 quality에 peak fitting 자체의 신뢰도를 조금 반영한다.
+        // SDSD 80ms 이상이면 fitting 신뢰도를 거의 0으로 보고,
+        // raw interval 중 실제로 유지된 비율도 함께 반영한다.
+        val sdsdQuality =
+            (1.0 - bestFit.sdsdSec / 0.080).coerceIn(0.0, 1.0)
+
+        val fitQuality =
+            (sdsdQuality * 0.65 + bestFit.acceptedIntervalRatio * 0.35)
+                .coerceIn(0.0, 1.0)
+
+        val qualityScore =
+            (baseQuality * 0.75 + fitQuality * 0.25)
+                .coerceIn(0.0, 1.0)
+
         return HeartRateEstimate(
             bpm = bpm,
-            ibiIntervals = usedIntervals,
-            peakCount = peakIndices.size,
-            intervalCount = usedIntervals.size,
+            ibiIntervals = bestFit.usedIntervals,
+            peakCount = bestFit.peakIndices.size,
+            intervalCount = bestFit.usedIntervals.size,
             averageIntervalSec = avgInterval,
-            qualityScore = qualityScore
+            qualityScore = qualityScore,
+            selectedThresholdPercent = bestFit.thresholdPercent,
+            peakFitSdsdMs = bestFit.sdsdSec * 1000.0,
+            rawIntervalCount = bestFit.rawIntervals.size,
+            acceptedIntervalRatio = bestFit.acceptedIntervalRatio
         )
     }
 
@@ -1069,52 +1132,311 @@ class PotchDataProcessor(
         return output
     }
 
-    private fun detectHeartRatePeaks(
+    /**
+     * 여러 이동평균 임계값 후보를 시험하고 가장 신뢰할 수 있는 peak fitting 결과를 선택한다.
+     *
+     * 선택 기준:
+     * 1. 최종 BPM이 40~180 범위
+     * 2. raw/정제 IBI가 충분함
+     * 3. SDSD가 작음
+     * 4. IBI 후처리에서 너무 많은 interval이 제거되지 않음
+     * 5. 비슷한 결과라면 더 많은 interval을 유지한 후보를 우선함
+     */
+    private fun findBestHeartRatePeakFit(
         signal: DoubleArray,
-        threshold: Double,
+        sampleRateHz: Double,
+        bufferStartSampleIndex: Long
+    ): HeartRatePeakFitCandidate? {
+        if (signal.size < 3 || sampleRateHz <= 0.0) return null
+
+        val movingAverageWindowSamples =
+            (sampleRateHz * HEART_RATE_MOVING_AVERAGE_SECONDS)
+                .roundToInt()
+                .coerceAtLeast(3)
+
+        val movingAverage = calculateCenteredMovingAverage(
+            signal = signal,
+            windowSamples = movingAverageWindowSamples
+        )
+
+        val movingAverageMean = movingAverage.average()
+        if (movingAverageMean <= 0.0) return null
+
+        val minPeakDistanceSamples =
+            (sampleRateHz * 60.0 / HEART_RATE_MAX_BPM)
+                .roundToInt()
+                .coerceAtLeast(1)
+
+        val candidates = mutableListOf<HeartRatePeakFitCandidate>()
+
+        for (thresholdPercent in HEART_RATE_THRESHOLD_PERCENT_CANDIDATES) {
+            // HeartPy의 rol_mean + ma_perc 방식과 비슷하게,
+            // 이동평균 전체의 평균값에 대한 일정 비율을 offset으로 더한다.
+            val thresholdOffset =
+                movingAverageMean * thresholdPercent / 100.0
+
+            val peakIndices = detectHeartRatePeaksByRoi(
+                signal = signal,
+                movingAverage = movingAverage,
+                thresholdOffset = thresholdOffset,
+                minPeakDistanceSamples = minPeakDistanceSamples
+            )
+
+            // SDSD를 평가하려면 최소 4개 peak = 3개 IBI가 필요하다.
+            if (peakIndices.size < 4) continue
+
+            // 후보 fitting 평가에서는 생리 범위 밖 interval도 우선 보존한다.
+            // 먼저 버리면 짧은 가짜 peak가 만든 interval이 사라져 나쁜 후보가 좋아 보일 수 있다.
+            val rawIntervals = buildHeartRateIntervals(
+                peakIndices = peakIndices,
+                bufferStartSampleIndex = bufferStartSampleIndex,
+                sampleRateHz = sampleRateHz,
+                enforcePhysiologicalRange = false
+            )
+
+            if (rawIntervals.size < 3) continue
+
+            val rawAverageInterval =
+                rawIntervals.map { it.intervalSec }.average()
+
+            if (rawAverageInterval <= 0.0) continue
+
+            val rawBpm = 60.0 / rawAverageInterval
+            if (rawBpm !in HEART_RATE_MIN_BPM.toDouble()..HEART_RATE_MAX_BPM.toDouble()) {
+                continue
+            }
+
+            // threshold fitting 자체는 생리 범위 제거 및 quotient/median 후처리 전 SDSD로 평가한다.
+            // 그래야 짧은 가짜 IBI나 긴 누락 IBI가 후보 점수에 그대로 불이익을 준다.
+            val sdsdSec = calculateSdsd(
+                rawIntervals.map { it.intervalSec }
+            ) ?: continue
+
+            val physiologicalIntervals = rawIntervals.filter { interval ->
+                interval.intervalSec in
+                        (60.0 / HEART_RATE_MAX_BPM)..(60.0 / HEART_RATE_MIN_BPM)
+            }
+
+            val physiologicalIntervalRatio =
+                physiologicalIntervals.size.toDouble() / rawIntervals.size.toDouble()
+
+            if (physiologicalIntervalRatio < HEART_RATE_MIN_PHYSIOLOGICAL_INTERVAL_RATIO) {
+                continue
+            }
+
+            val usedIntervals = filterHeartRateIntervals(
+                physiologicalIntervals.toMutableList()
+            )
+
+            if (usedIntervals.size < 2) continue
+
+            val usedAverageInterval =
+                usedIntervals.map { it.intervalSec }.average()
+
+            if (usedAverageInterval <= 0.0) continue
+
+            val finalBpm = 60.0 / usedAverageInterval
+            if (finalBpm !in HEART_RATE_MIN_BPM.toDouble()..HEART_RATE_MAX_BPM.toDouble()) {
+                continue
+            }
+
+            val acceptedIntervalRatio =
+                usedIntervals.size.toDouble() / rawIntervals.size.toDouble()
+
+            // 후처리에서 절반 이상 버려지는 후보는 peak fitting 자체가 불안정하다고 판단한다.
+            if (acceptedIntervalRatio < HEART_RATE_MIN_ACCEPTED_INTERVAL_RATIO) {
+                continue
+            }
+
+            // SDSD가 가장 중요한 평가값이다.
+            // 단, IBI가 적거나 제거 비율이 높은 후보가 우연히 유리해지지 않도록 작은 penalty를 더한다.
+            val countPenaltySec =
+                HEART_RATE_COUNT_PENALTY_SEC / sqrt(rawIntervals.size.toDouble())
+
+            val rejectionPenaltySec =
+                (1.0 - acceptedIntervalRatio) * HEART_RATE_REJECTION_PENALTY_SEC
+
+            val selectionScore =
+                sdsdSec + countPenaltySec + rejectionPenaltySec
+
+            candidates += HeartRatePeakFitCandidate(
+                thresholdPercent = thresholdPercent,
+                thresholdOffset = thresholdOffset,
+                peakIndices = peakIndices,
+                rawIntervals = rawIntervals,
+                usedIntervals = usedIntervals,
+                rawBpm = rawBpm,
+                finalBpm = finalBpm,
+                sdsdSec = sdsdSec,
+                acceptedIntervalRatio = acceptedIntervalRatio,
+                selectionScore = selectionScore
+            )
+        }
+
+        return candidates.minWithOrNull(
+            compareBy<HeartRatePeakFitCandidate> { it.selectionScore }
+                .thenByDescending { it.usedIntervals.size }
+                .thenByDescending { it.acceptedIntervalRatio }
+        )
+    }
+
+    /**
+     * 중심 정렬 이동평균을 O(n) prefix-sum 방식으로 계산한다.
+     * 양 끝에서는 사용할 수 있는 실제 구간 길이만으로 평균을 낸다.
+     */
+    private fun calculateCenteredMovingAverage(
+        signal: DoubleArray,
+        windowSamples: Int
+    ): DoubleArray {
+        if (signal.isEmpty()) return signal
+
+        val safeWindow = windowSamples
+            .coerceAtLeast(1)
+            .coerceAtMost(signal.size)
+
+        val leftHalf = safeWindow / 2
+        val rightHalf = safeWindow - leftHalf
+
+        val prefixSum = DoubleArray(signal.size + 1)
+        for (i in signal.indices) {
+            prefixSum[i + 1] = prefixSum[i] + signal[i]
+        }
+
+        return DoubleArray(signal.size) { i ->
+            val from = (i - leftHalf).coerceAtLeast(0)
+            val toExclusive = (i + rightHalf).coerceAtMost(signal.size)
+            val count = (toExclusive - from).coerceAtLeast(1)
+            (prefixSum[toExclusive] - prefixSum[from]) / count
+        }
+    }
+
+    /**
+     * signal > movingAverage + offset인 연속 구간을 ROI로 보고,
+     * 각 ROI 내부에서 가장 높은 sample 하나만 peak 후보로 선택한다.
+     *
+     * ROI가 너무 가까이 붙어 있으면 생리적 최소 peak 거리 안에서 더 높은 peak만 유지한다.
+     */
+    private fun detectHeartRatePeaksByRoi(
+        signal: DoubleArray,
+        movingAverage: DoubleArray,
+        thresholdOffset: Double,
         minPeakDistanceSamples: Int
-    ): MutableList<Int> {
-        val peakIndices = mutableListOf<Int>()
-        var lastPeakIdx = -minPeakDistanceSamples
+    ): List<Int> {
+        if (signal.size != movingAverage.size || signal.size < 3) {
+            return emptyList()
+        }
 
-        for (i in 1 until signal.size - 1) {
-            val isPeak =
-                signal[i] > signal[i - 1] &&
-                        signal[i] > signal[i + 1] &&
-                        signal[i] > threshold
+        val roiPeaks = mutableListOf<Int>()
+        var roiStart = -1
 
-            if (!isPeak) continue
+        for (i in signal.indices) {
+            val threshold = movingAverage[i] + thresholdOffset
+            val aboveThreshold = signal[i] > threshold
 
-            val dist = i - lastPeakIdx
+            if (aboveThreshold && roiStart < 0) {
+                roiStart = i
+            }
 
-            if (dist >= minPeakDistanceSamples) {
-                peakIndices.add(i)
-                lastPeakIdx = i
-            } else if (peakIndices.isNotEmpty()) {
-                val last = peakIndices.last()
+            val roiEnds =
+                roiStart >= 0 && (!aboveThreshold || i == signal.lastIndex)
 
-                if (signal[i] > signal[last]) {
-                    peakIndices[peakIndices.lastIndex] = i
-                    lastPeakIdx = i
+            if (!roiEnds) continue
+
+            val roiEnd =
+                if (aboveThreshold && i == signal.lastIndex) i else i - 1
+
+            if (roiEnd >= roiStart) {
+                var maxIndex = roiStart
+
+                for (j in roiStart + 1..roiEnd) {
+                    if (signal[j] > signal[maxIndex]) {
+                        maxIndex = j
+                    }
                 }
+
+                // 가장자리 sample은 온전한 local peak인지 확인하기 어려우므로 제외한다.
+                if (maxIndex in 1 until signal.lastIndex) {
+                    roiPeaks += maxIndex
+                }
+            }
+
+            roiStart = -1
+        }
+
+        if (roiPeaks.isEmpty()) return emptyList()
+
+        val distanceFiltered = mutableListOf<Int>()
+
+        for (candidate in roiPeaks) {
+            if (distanceFiltered.isEmpty()) {
+                distanceFiltered += candidate
+                continue
+            }
+
+            val previous = distanceFiltered.last()
+            val distance = candidate - previous
+
+            if (distance >= minPeakDistanceSamples) {
+                distanceFiltered += candidate
+            } else if (signal[candidate] > signal[previous]) {
+                // 동일 박동 안에서 두 ROI가 생겼다면 더 높은 peak로 교체한다.
+                distanceFiltered[distanceFiltered.lastIndex] = candidate
             }
         }
 
-        return peakIndices
+        return distanceFiltered
+    }
+
+    /**
+     * IBI successive difference의 표준편차(SDSD)를 초 단위로 계산한다.
+     * 최소 3개 IBI가 있어야 두 개 이상의 successive difference를 만들 수 있다.
+     */
+    private fun calculateSdsd(
+        intervalsSec: List<Double>
+    ): Double? {
+        if (intervalsSec.size < 3) return null
+
+        val successiveDiffs = DoubleArray(intervalsSec.size - 1) { i ->
+            intervalsSec[i + 1] - intervalsSec[i]
+        }
+
+        if (successiveDiffs.size < 2) return null
+
+        val meanDiff = successiveDiffs.average()
+        var sumSquaredDeviation = 0.0
+
+        for (diff in successiveDiffs) {
+            val deviation = diff - meanDiff
+            sumSquaredDeviation += deviation * deviation
+        }
+
+        val sdsd = sqrt(sumSquaredDeviation / successiveDiffs.size)
+        return if (sdsd.isFinite()) sdsd else null
     }
 
     private fun buildHeartRateIntervals(
         peakIndices: List<Int>,
-        bufferStartSampleIndex: Long
+        bufferStartSampleIndex: Long,
+        sampleRateHz: Double = 100.0,
+        enforcePhysiologicalRange: Boolean = true
     ): MutableList<IbiInterval> {
         val intervals = mutableListOf<IbiInterval>()
 
+        if (sampleRateHz <= 0.0) return intervals
+
+        val minIntervalSec = 60.0 / HEART_RATE_MAX_BPM
+        val maxIntervalSec = 60.0 / HEART_RATE_MIN_BPM
+
         for (i in 1 until peakIndices.size) {
             val diffSamples = peakIndices[i] - peakIndices[i - 1]
-            val intervalSec = diffSamples / 100.0
+            val intervalSec = diffSamples / sampleRateHz
 
-            // 0.333~1.5초 = 약 40~180bpm 범위.
-            if (intervalSec in 0.333..1.5) {
+            if (intervalSec <= 0.0) continue
+
+            if (
+                !enforcePhysiologicalRange ||
+                intervalSec in minIntervalSec..maxIntervalSec
+            ) {
                 intervals.add(
                     IbiInterval(
                         intervalSec = intervalSec,
