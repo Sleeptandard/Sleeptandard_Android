@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import kotlin.math.roundToLong
 import kotlin.math.sqrt
 
 /**
@@ -25,7 +26,13 @@ data class PacketErrorLog(
 
 data class IbiInterval(
     val intervalSec: Double,
-    val endSampleIndex: Long
+
+    // 기존 정수 sample index는 로그/호환용으로 유지한다.
+    val endSampleIndex: Long,
+
+    // 포물선 보간으로 추정한 실제 peak 종료 위치.
+    // 100Hz에서도 1 sample(10ms) 단위가 아닌 sub-sample 위치를 보존한다.
+    val endSamplePosition: Double = endSampleIndex.toDouble()
 )
 
 data class HeartRateEstimate(
@@ -41,7 +48,12 @@ data class HeartRateEstimate(
     val selectedThresholdPercent: Double? = null,
     val peakFitSdsdMs: Double? = null,
     val rawIntervalCount: Int = intervalCount,
-    val acceptedIntervalRatio: Double = 1.0
+    val acceptedIntervalRatio: Double = 1.0,
+
+    // 정수 peak index에서 포물선 보간 위치까지 이동한 크기.
+    // 측정 정확도 자체를 뜻하지 않고 10ms grid 보정량을 디버깅하기 위한 값이다.
+    val meanPeakInterpolationOffsetMs: Double = 0.0,
+    val maxPeakInterpolationOffsetMs: Double = 0.0
 )
 
 data class DataProcessorState(
@@ -150,13 +162,16 @@ class PotchDataProcessor(
         val thresholdPercent: Double,
         val thresholdOffset: Double,
         val peakIndices: List<Int>,
+        val peakPositions: List<Double>,
         val rawIntervals: List<IbiInterval>,
         val usedIntervals: List<IbiInterval>,
         val rawBpm: Double,
         val finalBpm: Double,
         val sdsdSec: Double,
         val acceptedIntervalRatio: Double,
-        val selectionScore: Double
+        val selectionScore: Double,
+        val meanInterpolationOffsetMs: Double,
+        val maxInterpolationOffsetMs: Double
     )
 
     // 각성지표 연산기
@@ -603,7 +618,9 @@ class PotchDataProcessor(
                     "qCombined=${heartRateEstimate?.qualityScore}, " +
                     "maPerc=${heartRateEstimate?.selectedThresholdPercent}, " +
                     "sdsdMs=${heartRateEstimate?.peakFitSdsdMs}, " +
-                    "ibiAccept=${heartRateEstimate?.acceptedIntervalRatio}"
+                    "ibiAccept=${heartRateEstimate?.acceptedIntervalRatio}, " +
+                    "peakOffsetMeanMs=${heartRateEstimate?.meanPeakInterpolationOffsetMs}, " +
+                    "peakOffsetMaxMs=${heartRateEstimate?.maxPeakInterpolationOffsetMs}"
         )
 
         val parsed = SensorData(
@@ -821,7 +838,8 @@ class PotchDataProcessor(
                 message = "합산 PPG 심박수 정상 검출: ${estimate.bpm} bpm, " +
                         "quality=${"%.2f".format(estimate.qualityScore)}, " +
                         "ma=${estimate.selectedThresholdPercent?.let { "%.0f%%".format(it) } ?: "-"}, " +
-                        "SDSD=${estimate.peakFitSdsdMs?.let { "%.1fms".format(it) } ?: "-"}"
+                        "SDSD=${estimate.peakFitSdsdMs?.let { "%.1fms".format(it) } ?: "-"}, " +
+                        "peak보정=${"%.2fms".format(estimate.meanPeakInterpolationOffsetMs)}"
             )
         }
 
@@ -891,6 +909,7 @@ class PotchDataProcessor(
      * -> return_top처럼 양수 성분만 사용
      * -> 1.5초 이동평균 계산
      * -> 여러 moving-average 상승률 후보에서 ROI별 peak 검출
+     * -> 각 peak 주변 3점을 이용한 포물선 보간으로 sub-sample 위치 추정
      * -> 후보별 BPM / SDSD / IBI 유지율 평가
      * -> 최적 후보 선택
      * -> 기존 quotient filter + median outlier filter 유지
@@ -955,14 +974,16 @@ class PotchDataProcessor(
         return HeartRateEstimate(
             bpm = bpm,
             ibiIntervals = bestFit.usedIntervals,
-            peakCount = bestFit.peakIndices.size,
+            peakCount = bestFit.peakPositions.size,
             intervalCount = bestFit.usedIntervals.size,
             averageIntervalSec = avgInterval,
             qualityScore = qualityScore,
             selectedThresholdPercent = bestFit.thresholdPercent,
             peakFitSdsdMs = bestFit.sdsdSec * 1000.0,
             rawIntervalCount = bestFit.rawIntervals.size,
-            acceptedIntervalRatio = bestFit.acceptedIntervalRatio
+            acceptedIntervalRatio = bestFit.acceptedIntervalRatio,
+            meanPeakInterpolationOffsetMs = bestFit.meanInterpolationOffsetMs,
+            maxPeakInterpolationOffsetMs = bestFit.maxInterpolationOffsetMs
         )
     }
 
@@ -1185,10 +1206,30 @@ class PotchDataProcessor(
             // SDSD를 평가하려면 최소 4개 peak = 3개 IBI가 필요하다.
             if (peakIndices.size < 4) continue
 
+            // 100Hz 정수 index를 그대로 사용하면 peak timing이 10ms 격자에 고정된다.
+            // 각 peak와 좌우 sample의 포물선을 적합해 정수 index 사이의 peak 위치를 추정한다.
+            val peakPositions = refineHeartRatePeakPositions(
+                signal = signal,
+                peakIndices = peakIndices
+            )
+
+            if (peakPositions.size < 4) continue
+
+            val interpolationOffsetsMs = peakPositions.indices.map { i ->
+                abs(peakPositions[i] - peakIndices[i].toDouble()) /
+                        sampleRateHz * 1000.0
+            }
+
+            val meanInterpolationOffsetMs =
+                interpolationOffsetsMs.average()
+
+            val maxInterpolationOffsetMs =
+                interpolationOffsetsMs.maxOrNull() ?: 0.0
+
             // 후보 fitting 평가에서는 생리 범위 밖 interval도 우선 보존한다.
             // 먼저 버리면 짧은 가짜 peak가 만든 interval이 사라져 나쁜 후보가 좋아 보일 수 있다.
             val rawIntervals = buildHeartRateIntervals(
-                peakIndices = peakIndices,
+                peakPositions = peakPositions,
                 bufferStartSampleIndex = bufferStartSampleIndex,
                 sampleRateHz = sampleRateHz,
                 enforcePhysiologicalRange = false
@@ -1263,13 +1304,16 @@ class PotchDataProcessor(
                 thresholdPercent = thresholdPercent,
                 thresholdOffset = thresholdOffset,
                 peakIndices = peakIndices,
+                peakPositions = peakPositions,
                 rawIntervals = rawIntervals,
                 usedIntervals = usedIntervals,
                 rawBpm = rawBpm,
                 finalBpm = finalBpm,
                 sdsdSec = sdsdSec,
                 acceptedIntervalRatio = acceptedIntervalRatio,
-                selectionScore = selectionScore
+                selectionScore = selectionScore,
+                meanInterpolationOffsetMs = meanInterpolationOffsetMs,
+                maxInterpolationOffsetMs = maxInterpolationOffsetMs
             )
         }
 
@@ -1388,6 +1432,68 @@ class PotchDataProcessor(
     }
 
     /**
+     * 정수 sample index로 검출된 peak를 3점 포물선 보간으로 보정한다.
+     *
+     * y[-1], y[0], y[+1]을 지나는 포물선의 꼭짓점 위치를 구하며,
+     * 검출된 중심 sample을 기준으로 최대 ±0.5 sample까지만 이동시킨다.
+     * 100Hz에서는 최대 ±5ms 보정이며, 새로운 센서 정보를 만드는 것이 아니라
+     * 이산 sampling으로 생긴 10ms 격자 오차를 줄이는 추정이다.
+     */
+    private fun refineHeartRatePeakPositions(
+        signal: DoubleArray,
+        peakIndices: List<Int>
+    ): List<Double> {
+        return peakIndices.map { peakIndex ->
+            refineHeartRatePeakPositionQuadratic(
+                signal = signal,
+                peakIndex = peakIndex
+            )
+        }
+    }
+
+    private fun refineHeartRatePeakPositionQuadratic(
+        signal: DoubleArray,
+        peakIndex: Int
+    ): Double {
+        if (peakIndex <= 0 || peakIndex >= signal.lastIndex) {
+            return peakIndex.toDouble()
+        }
+
+        val left = signal[peakIndex - 1]
+        val center = signal[peakIndex]
+        val right = signal[peakIndex + 1]
+
+        if (!left.isFinite() || !center.isFinite() || !right.isFinite()) {
+            return peakIndex.toDouble()
+        }
+
+        // ROI 최댓값이 실제 local maximum이 아닌 경우에는 보간하지 않는다.
+        if (center < left || center < right) {
+            return peakIndex.toDouble()
+        }
+
+        val denominator = left - 2.0 * center + right
+
+        // 평평한 꼭대기나 거의 직선인 경우 꼭짓점 위치가 불안정하므로 정수 위치를 유지한다.
+        val scale = maxOf(abs(left), abs(center), abs(right), 1.0)
+        if (abs(denominator) <= scale * 1e-12) {
+            return peakIndex.toDouble()
+        }
+
+        val rawOffset =
+            0.5 * (left - right) / denominator
+
+        if (!rawOffset.isFinite()) {
+            return peakIndex.toDouble()
+        }
+
+        val boundedOffset =
+            rawOffset.coerceIn(-0.5, 0.5)
+
+        return peakIndex.toDouble() + boundedOffset
+    }
+
+    /**
      * IBI successive difference의 표준편차(SDSD)를 초 단위로 계산한다.
      * 최소 3개 IBI가 있어야 두 개 이상의 successive difference를 만들 수 있다.
      */
@@ -1415,7 +1521,7 @@ class PotchDataProcessor(
     }
 
     private fun buildHeartRateIntervals(
-        peakIndices: List<Int>,
+        peakPositions: List<Double>,
         bufferStartSampleIndex: Long,
         sampleRateHz: Double = 100.0,
         enforcePhysiologicalRange: Boolean = true
@@ -1427,20 +1533,27 @@ class PotchDataProcessor(
         val minIntervalSec = 60.0 / HEART_RATE_MAX_BPM
         val maxIntervalSec = 60.0 / HEART_RATE_MIN_BPM
 
-        for (i in 1 until peakIndices.size) {
-            val diffSamples = peakIndices[i] - peakIndices[i - 1]
-            val intervalSec = diffSamples / sampleRateHz
+        for (i in 1 until peakPositions.size) {
+            val diffSamples =
+                peakPositions[i] - peakPositions[i - 1]
 
-            if (intervalSec <= 0.0) continue
+            val intervalSec =
+                diffSamples / sampleRateHz
+
+            if (!intervalSec.isFinite() || intervalSec <= 0.0) continue
 
             if (
                 !enforcePhysiologicalRange ||
                 intervalSec in minIntervalSec..maxIntervalSec
             ) {
+                val endSamplePosition =
+                    bufferStartSampleIndex.toDouble() + peakPositions[i]
+
                 intervals.add(
                     IbiInterval(
                         intervalSec = intervalSec,
-                        endSampleIndex = bufferStartSampleIndex + peakIndices[i]
+                        endSampleIndex = endSamplePosition.roundToLong(),
+                        endSamplePosition = endSamplePosition
                     )
                 )
             }

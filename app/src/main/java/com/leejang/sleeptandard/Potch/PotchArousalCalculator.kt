@@ -594,7 +594,7 @@ class PotchArousalCalculator(
      */
     private val hrvIbiBuffer = ArrayDeque<IbiInterval>()
 
-    private var lastAcceptedHrvIbiEndSampleIndex: Long = Long.MIN_VALUE
+    private var lastAcceptedHrvIbiEndSamplePosition: Double = Double.NEGATIVE_INFINITY
 
     // 각 계산 버퍼에 마지막으로 유효한 값이 들어온 휴대폰 시각.
     private var lastValidHeartRateTimestampMillis: Long? = null
@@ -1281,7 +1281,7 @@ class PotchArousalCalculator(
 
         if (hasExpired(lastValidHrvTimestampMillis, nowMillis, config.hrvFreshnessTimeoutMillis)) {
             hrvIbiBuffer.clear()
-            lastAcceptedHrvIbiEndSampleIndex = Long.MIN_VALUE
+            lastAcceptedHrvIbiEndSamplePosition = Double.NEGATIVE_INFINITY
             lastValidHrvTimestampMillis = null
             hrvBufferExpiredByGap = true
         }
@@ -1451,7 +1451,7 @@ class PotchArousalCalculator(
         heartRateBuffer.clear()
         respirationRateBuffer.clear()
         hrvIbiBuffer.clear()
-        lastAcceptedHrvIbiEndSampleIndex = Long.MIN_VALUE
+        lastAcceptedHrvIbiEndSamplePosition = Double.NEGATIVE_INFINITY
 
         lastValidHeartRateTimestampMillis = null
         lastValidHrvTimestampMillis = null
@@ -3033,7 +3033,7 @@ class PotchArousalCalculator(
      * DataProcessor에서 넘어온 HeartRateEstimate의 IBI들을 HRV buffer에 저장한다.
      *
      * rolling buffer 재계산 때문에 같은 IBI가 반복 전달될 수 있으므로
-     * endSampleIndex를 이용해 이미 저장한 interval은 건너뛴다.
+     * 포물선 보간된 endSamplePosition을 이용해 이미 저장한 interval은 건너뛴다.
      */
     private fun appendHeartRateEstimateToHrvBuffer(
         estimate: HeartRateEstimate,
@@ -3045,10 +3045,14 @@ class PotchArousalCalculator(
 
         var acceptedCount = 0
         val sortedIntervals = estimate.ibiIntervals
-            .sortedBy { it.endSampleIndex }
+            .sortedBy { it.endSamplePosition }
 
         for (ibi in sortedIntervals) {
-            if (ibi.endSampleIndex <= lastAcceptedHrvIbiEndSampleIndex) {
+            if (!ibi.endSamplePosition.isFinite()) {
+                continue
+            }
+
+            if (ibi.endSamplePosition <= lastAcceptedHrvIbiEndSamplePosition) {
                 continue
             }
 
@@ -3057,7 +3061,7 @@ class PotchArousalCalculator(
             }
 
             hrvIbiBuffer.addLast(ibi)
-            lastAcceptedHrvIbiEndSampleIndex = ibi.endSampleIndex
+            lastAcceptedHrvIbiEndSamplePosition = ibi.endSamplePosition
             acceptedCount += 1
         }
 
@@ -3078,14 +3082,17 @@ class PotchArousalCalculator(
     private fun trimHrvIbiBuffer() {
         if (hrvIbiBuffer.isEmpty()) return
 
-        val newestSampleIndex = hrvIbiBuffer.last().endSampleIndex
-        val windowSamples =
-            (config.sampleRateHz * config.hrvWindowSeconds).toLong()
+        val newestSamplePosition =
+            hrvIbiBuffer.last().endSamplePosition
 
-        val minSampleIndex = newestSampleIndex - windowSamples
+        val windowSamples =
+            config.sampleRateHz * config.hrvWindowSeconds
+
+        val minSamplePosition =
+            newestSamplePosition - windowSamples
 
         while (hrvIbiBuffer.isNotEmpty()) {
-            if (hrvIbiBuffer.first().endSampleIndex >= minSampleIndex) {
+            if (hrvIbiBuffer.first().endSamplePosition >= minSamplePosition) {
                 break
             }
 
@@ -3339,13 +3346,19 @@ class PotchArousalCalculator(
     ): List<IbiInterval> {
         if (ibis.isEmpty()) return emptyList()
 
-        val newestSampleIndex = ibis.last().endSampleIndex
+        val newestSamplePosition =
+            ibis.last().endSamplePosition
+
         val windowSamples =
-            (config.sampleRateHz * config.hrvFrequencyWindowSeconds).toLong()
+            config.sampleRateHz * config.hrvFrequencyWindowSeconds
 
-        val minSampleIndex = newestSampleIndex - windowSamples
+        val minSamplePosition =
+            newestSamplePosition - windowSamples
 
-        return ibis.filter { it.endSampleIndex >= minSampleIndex }
+        return ibis.filter {
+            it.endSamplePosition.isFinite() &&
+                    it.endSamplePosition >= minSamplePosition
+        }
     }
 
     /**
@@ -3362,11 +3375,20 @@ class PotchArousalCalculator(
         if (resampleRateHz <= 0.0) return null
 
         val points = ibis
-            .sortedBy { it.endSampleIndex }
+            .filter {
+                it.endSamplePosition.isFinite() &&
+                        it.intervalSec.isFinite() &&
+                        it.intervalSec > 0.0
+            }
+            .sortedBy { it.endSamplePosition }
             .map { ibi ->
-                val timeSec = ibi.endSampleIndex / config.sampleRateHz
+                val timeSec =
+                    ibi.endSamplePosition / config.sampleRateHz
+
                 timeSec to ibi.intervalSec
             }
+
+        if (points.size < 2) return null
 
         val startTime = points.first().first
         val endTime = points.last().first
