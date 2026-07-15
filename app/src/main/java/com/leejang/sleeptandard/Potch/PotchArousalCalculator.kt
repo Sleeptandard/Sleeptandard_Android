@@ -1970,6 +1970,9 @@ class PotchArousalCalculator(
      *
      * 중앙값 대비 허용 비율을 벗어난 interval을 버려
      * 잘못 검출된 peak가 RR/RRV 계산에 주는 영향을 줄인다.
+     *
+     * 필터 결과가 부족하거나 비어도 원본을 복구하지 않는다.
+     * 빈 결과는 상위 계산 함수가 null/REJECTED로 처리한다.
      */
     private fun removeRespIntervalOutliers(
         intervals: List<Double>
@@ -1981,15 +1984,22 @@ class PotchArousalCalculator(
         val sorted = intervals.sorted()
         val median = sorted[sorted.size / 2]
 
-        if (median <= 0.0) {
-            return intervals
+        if (!median.isFinite() || median <= 0.0) {
+            // 유효하지 않은 기준값으로는 outlier 판정을 신뢰할 수 없으므로
+            // 원본 interval을 되살리지 않고 계산 실패를 상위 함수에 전달한다.
+            return emptyList()
         }
 
-        val filtered = intervals.filter { interval ->
-            abs(interval - median) / median <= config.ppgRespIntervalOutlierTolerance
+        val tolerance = config.ppgRespIntervalOutlierTolerance
+        if (!tolerance.isFinite() || tolerance < 0.0) {
+            return emptyList()
         }
 
-        return filtered.ifEmpty { intervals }
+        return intervals.filter { interval ->
+            interval.isFinite() &&
+                    interval > 0.0 &&
+                    abs(interval - median) / median <= tolerance
+        }
     }
 
     /**
@@ -2290,16 +2300,20 @@ class PotchArousalCalculator(
         val sorted = intervals.sorted()
         val median = sorted[sorted.size / 2]
 
-        if (median <= 0.0) {
-            return intervals
+        if (!median.isFinite() || median <= 0.0) {
+            return emptyList()
         }
 
-        val filtered = intervals.filter { interval ->
-            kotlin.math.abs(interval - median) / median <=
-                    config.imuRespIntervalOutlierTolerance
+        val tolerance = config.imuRespIntervalOutlierTolerance
+        if (!tolerance.isFinite() || tolerance < 0.0) {
+            return emptyList()
         }
 
-        return filtered.ifEmpty { intervals }
+        return intervals.filter { interval ->
+            interval.isFinite() &&
+                    interval > 0.0 &&
+                    kotlin.math.abs(interval - median) / median <= tolerance
+        }
     }
 
     /**
@@ -2664,11 +2678,16 @@ class PotchArousalCalculator(
         val sortedRr = values.map { it.second }.sorted()
         val median = sortedRr[sortedRr.size / 2]
 
-        val filtered = values.filter { (_, rrBpm) ->
-            abs(rrBpm - median) <= config.rrScoreOutlierToleranceBpm
+        val tolerance = config.rrScoreOutlierToleranceBpm
+        if (!median.isFinite() || !tolerance.isFinite() || tolerance < 0.0) {
+            return emptyList()
         }
 
-        return filtered.ifEmpty { values }
+        return values.filter { (_, rrBpm) ->
+            rrBpm.isFinite() &&
+                    rrBpm > 0.0 &&
+                    abs(rrBpm - median) <= tolerance
+        }
     }
 
     private fun scoreRespiratoryRateAbsolute(
@@ -2825,15 +2844,20 @@ class PotchArousalCalculator(
         val sorted = intervals.sorted()
         val median = sorted[sorted.size / 2]
 
-        if (median <= 0.0) {
-            return intervals
+        if (!median.isFinite() || median <= 0.0) {
+            return emptyList()
         }
 
-        val filtered = intervals.filter { interval ->
-            abs(interval - median) / median <= config.rrvIntervalOutlierTolerance
+        val tolerance = config.rrvIntervalOutlierTolerance
+        if (!tolerance.isFinite() || tolerance < 0.0) {
+            return emptyList()
         }
 
-        return filtered.ifEmpty { intervals }
+        return intervals.filter { interval ->
+            interval.isFinite() &&
+                    interval > 0.0 &&
+                    abs(interval - median) / median <= tolerance
+        }
     }
 
     /**
@@ -2971,11 +2995,14 @@ class PotchArousalCalculator(
         val bpmValues = values.map { it.second }.sorted()
         val median = bpmValues[bpmValues.size / 2]
 
-        val filtered = values.filter { (_, bpm) ->
-            abs(bpm - median) <= config.hrOutlierToleranceBpm
+        val tolerance = config.hrOutlierToleranceBpm
+        if (!tolerance.isFinite() || tolerance < 0.0) {
+            return emptyList()
         }
 
-        return filtered.ifEmpty { values }
+        return values.filter { (_, bpm) ->
+            bpm > 0 && abs(bpm - median) <= tolerance
+        }
     }
 
     /**
@@ -3144,15 +3171,20 @@ class PotchArousalCalculator(
         val sorted = ibis.map { it.intervalSec }.sorted()
         val median = sorted[sorted.size / 2]
 
-        if (median <= 0.0) {
-            return ibis
+        if (!median.isFinite() || median <= 0.0) {
+            return emptyList()
         }
 
-        val filtered = ibis.filter { ibi ->
-            abs(ibi.intervalSec - median) / median <= config.hrvIbiOutlierTolerance
+        val tolerance = config.hrvIbiOutlierTolerance
+        if (!tolerance.isFinite() || tolerance < 0.0) {
+            return emptyList()
         }
 
-        return filtered.ifEmpty { ibis }
+        return ibis.filter { ibi ->
+            ibi.intervalSec.isFinite() &&
+                    ibi.intervalSec > 0.0 &&
+                    abs(ibi.intervalSec - median) / median <= tolerance
+        }
     }
 
     /**
@@ -3654,11 +3686,15 @@ class PotchArousalCalculator(
         val sortedTemps = values.map { it.second }.sorted()
         val median = sortedTemps[sortedTemps.size / 2]
 
-        val filtered = values.filter { (_, celsius) ->
-            abs(celsius - median) <= config.skinTempOutlierToleranceCelsius
+        val tolerance = config.skinTempOutlierToleranceCelsius
+        if (!median.isFinite() || !tolerance.isFinite() || tolerance < 0.0) {
+            return emptyList()
         }
 
-        return filtered.ifEmpty { values }
+        return values.filter { (_, celsius) ->
+            celsius.isFinite() &&
+                    abs(celsius - median) <= tolerance
+        }
     }
 
     /**
@@ -3687,7 +3723,9 @@ class PotchArousalCalculator(
             }
         }
 
-        return result.ifEmpty { values }
+        // 첫 번째 값을 항상 넣으므로 정상 입력에서는 비어 있지 않다.
+        // 향후 로직이 바뀌더라도 원본 이상치를 되살리지 않도록 결과를 그대로 반환한다.
+        return result
     }
 
     /**
