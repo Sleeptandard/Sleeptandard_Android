@@ -24,6 +24,82 @@ data class PacketErrorLog(
     val timestampMs: Long = System.currentTimeMillis()
 )
 
+/**
+ * 한 번의 HR 분석 시도가 어떤 상태로 끝났는지 구분한다.
+ *
+ * HELD_PREVIOUS는 새 HR 계산에는 실패했지만 화면에는 제한 시간 동안
+ * 마지막 정상값을 유지하고 있음을 뜻한다. 실제 실패 원인은
+ * [HeartRateDiagnostics.underlyingFailureReason]에 별도로 남긴다.
+ */
+enum class HeartRateProcessingState {
+    COLLECTING,
+    NO_CONTACT,
+    SIGNAL_TOO_WEAK,
+    SIGNAL_SATURATED,
+    MOTION_ARTIFACT,
+    INSUFFICIENT_PEAKS,
+    INVALID_IBI,
+    BPM_OUT_OF_RANGE,
+    PACKET_LOSS,
+    VALID,
+    HELD_PREVIOUS
+}
+
+enum class HeartRatePeakPolarity {
+    POSITIVE,
+    NEGATIVE,
+    NONE
+}
+
+/**
+ * 매 SuperFrame마다 HR 계산에 사용된 신호 특징과 성공/실패 사유를 저장한다.
+ *
+ * 이 객체는 UI 상태와 potch_hr_diagnostic_log CSV에 그대로 사용된다.
+ */
+data class HeartRateDiagnostics(
+    val processingState: HeartRateProcessingState = HeartRateProcessingState.COLLECTING,
+    val underlyingFailureReason: HeartRateProcessingState? = null,
+    val message: String = "PPG 심박 신호 수집 중",
+
+    val analysisSegmentId: Long = 0L,
+    val windowSampleCount: Int = 0,
+    val windowSeconds: Double = 0.0,
+
+    val irDcMean: Double? = null,
+    val irMin: Double? = null,
+    val irMax: Double? = null,
+
+    // band-pass 출력의 5~95 percentile 폭. 극단 spike 한두 개에 덜 민감하다.
+    val acRobustAmplitude: Double? = null,
+
+    // 선택된 moving-average threshold의 실제 offset과 백분율.
+    val selectedPeakThreshold: Double? = null,
+    val selectedThresholdPercent: Double? = null,
+    val selectedPolarity: HeartRatePeakPolarity = HeartRatePeakPolarity.NONE,
+
+    val detectedPeakCount: Int = 0,
+    val rawIbiCount: Int = 0,
+    val validIbiCount: Int = 0,
+    val acceptedIntervalRatio: Double? = null,
+    val sdsdMs: Double? = null,
+
+    // 이번 window에서 새로 계산한 BPM과 실제 화면 표시 BPM을 분리한다.
+    val calculatedBpm: Int? = null,
+    val displayedBpm: Int? = null,
+    val heartRateFresh: Boolean = false,
+    val heartRateAgeMillis: Long? = null,
+
+    // 현재 1초 IMU frame의 g-magnitude 연속 변화 최대값.
+    val imuMaxDeltaG: Double? = null,
+
+    // HR rolling window의 raw PPG 연속 sample 변화 최대값.
+    val maxRawSampleDelta: Double? = null,
+
+    val crcErrorCount: Int = 0,
+    val sequenceLossCount: Int = 0,
+    val estimatedLostPacketCount: Int = 0
+)
+
 data class IbiInterval(
     val intervalSec: Double,
 
@@ -49,6 +125,8 @@ data class HeartRateEstimate(
     // HeartPy-style adaptive peak fitting debug values.
     // 어떤 이동평균 상승률 후보가 선택됐는지와 해당 후보의 SDSD를 남긴다.
     val selectedThresholdPercent: Double? = null,
+    val selectedPeakThreshold: Double? = null,
+    val selectedPolarity: HeartRatePeakPolarity = HeartRatePeakPolarity.NONE,
     val peakFitSdsdMs: Double? = null,
     val rawIntervalCount: Int = intervalCount,
     val acceptedIntervalRatio: Double = 1.0,
@@ -70,6 +148,13 @@ data class DataProcessorState(
 
     // 현재 심박수 추정의 품질 점수. 0.0~1.0, 값이 클수록 peak 간격이 안정적이다.
     val heartRateQuality: Double? = null,
+
+    // 이번 SuperFrame에서 새 HR이 계산됐는지와 마지막 정상 HR의 나이.
+    val heartRateFresh: Boolean = false,
+    val heartRateAgeMillis: Long? = null,
+
+    // 매초 기록되는 상세 HR 분석 상태.
+    val heartRateDiagnostics: HeartRateDiagnostics = HeartRateDiagnostics(),
 
     // 현재 프레임에서 합산 PPG 심박수 추출이 가능한지와 실패 이유.
     val heartRateCalculationStatus: MetricCalculationStatus = MetricCalculationStatus(
@@ -157,6 +242,18 @@ class PotchDataProcessor(
         private const val HEART_RATE_MIN_ACCEPTED_INTERVAL_RATIO = 0.50
         private const val HEART_RATE_MIN_PHYSIOLOGICAL_INTERVAL_RATIO = 0.75
 
+        // Potch MAX3010x 계열 PPG는 18-bit 범위를 사용한다.
+        private const val HEART_RATE_PPG_ADC_MAX = 262143.0
+        private const val HEART_RATE_CONTACT_DC_MIN = 10000.0
+        private const val HEART_RATE_SATURATION_HIGH = 260000.0
+        private const val HEART_RATE_MIN_ROBUST_AC_AMPLITUDE = 80.0
+
+        // 1초 IMU frame에서 이보다 큰 연속 g-magnitude 변화가 있으면
+        // HR peak fitting 성공 여부와 무관하게 강한 움직임 artifact로 거부한다.
+        private const val HEART_RATE_MOTION_MAX_DELTA_G = 0.15
+
+        private const val HEART_RATE_IMU_LSB_PER_G = 1024.0
+
         // candidate 비교에서 IBI 개수 부족과 reject 비율에 주는 작은 penalty.
         private const val HEART_RATE_COUNT_PENALTY_SEC = 0.020
         private const val HEART_RATE_REJECTION_PENALTY_SEC = 0.050
@@ -169,6 +266,7 @@ class PotchDataProcessor(
     }
 
     private data class HeartRatePeakFitCandidate(
+        val polarity: HeartRatePeakPolarity,
         val thresholdPercent: Double,
         val thresholdOffset: Double,
         val peakIndices: List<Int>,
@@ -182,6 +280,20 @@ class PotchDataProcessor(
         val selectionScore: Double,
         val meanInterpolationOffsetMs: Double,
         val maxInterpolationOffsetMs: Double
+    )
+
+    private data class HeartRatePeakFitSearchResult(
+        val bestCandidate: HeartRatePeakFitCandidate?,
+        val maxDetectedPeakCount: Int,
+        val maxRawIntervalCount: Int,
+        val maxValidIntervalCount: Int,
+        val sawInvalidIbi: Boolean,
+        val sawBpmOutOfRange: Boolean
+    )
+
+    private data class HeartRateAnalysisResult(
+        val estimate: HeartRateEstimate?,
+        val diagnostics: HeartRateDiagnostics
     )
 
     // 각성지표 연산기
@@ -245,6 +357,7 @@ class PotchDataProcessor(
      * CRC가 정상인 프레임의 샘플만 누적한다 (손상된 프레임은 HR 추정에 사용하지 않음).
      */
     private val heartRateCombinedBuffer = ArrayDeque<Int>()
+    private val heartRateIrBuffer = ArrayDeque<Int>()
 
     private var totalHeartRateCombinedSampleCount: Long = 0L
 
@@ -263,6 +376,7 @@ class PotchDataProcessor(
     // CRC 정상 PPG 입력과 유효 HR 결과의 마지막 휴대폰 시각.
     private var lastValidHeartRateInputTimestampMillis: Long? = null
     private var lastValidHeartRateEstimateTimestampMillis: Long? = null
+    private var lastValidHeartRateEstimate: HeartRateEstimate? = null
 
     // CRC 정상 PPG가 끊긴 채 과거 raw buffer를 반복 계산하지 않도록 하는 제한.
     private val heartRateInputStaleTimeoutMillis = 3 * 1000L
@@ -476,9 +590,11 @@ class PotchDataProcessor(
         currentAnalysisSegmentId = 0L
 
         heartRateCombinedBuffer.clear()
+        heartRateIrBuffer.clear()
         totalHeartRateCombinedSampleCount = 0L
         lastValidHeartRateInputTimestampMillis = null
         lastValidHeartRateEstimateTimestampMillis = null
+        lastValidHeartRateEstimate = null
 
         arousalCalculator.reset(initialSegmentId = currentAnalysisSegmentId)
 
@@ -587,6 +703,7 @@ class PotchDataProcessor(
         )
 
         val frameIrMax = irSamples.maxOrNull()?.toDouble() ?: 0.0
+        val frameImuMaxDeltaG = calculateImuMaxDeltaG(imuData)
 
         val phoneTimeMillis = System.currentTimeMillis()
         val isCrcValid = receivedCrc == calculatedCrc
@@ -607,45 +724,108 @@ class PotchDataProcessor(
                         discontinuityReasons.joinToString(", ")
             )
         } else {
-            appendPpgSamplesToHrBuffer(
-                buffer = heartRateCombinedBuffer,
-                samples = avgSamples
-            ) {
-                totalHeartRateCombinedSampleCount += 1L
-            }
+            appendPpgSamplesToHrBuffers(
+                irSamples = irSamples,
+                combinedSamples = avgSamples
+            )
             lastValidHeartRateInputTimestampMillis = phoneTimeMillis
         }
 
-        val heartRateEstimate = if (isFrameUsableForAnalysis) {
-            estimateHeartRate()
-        } else {
-            null
-        }
+        val rawHeartRateAnalysis =
+            if (isFrameUsableForAnalysis) {
+                estimateHeartRate(
+                    imuMaxDeltaG = frameImuMaxDeltaG
+                )
+            } else {
+                HeartRateAnalysisResult(
+                    estimate = null,
+                    diagnostics = HeartRateDiagnostics(
+                        processingState = HeartRateProcessingState.PACKET_LOSS,
+                        message = "현재 SuperFrame이 CRC 또는 header 오류로 HR 분석에서 제외됨",
+                        analysisSegmentId = currentAnalysisSegmentId,
+                        windowSampleCount = heartRateCombinedBuffer.size,
+                        windowSeconds = heartRateCombinedBuffer.size / 100.0,
+                        imuMaxDeltaG = frameImuMaxDeltaG
+                    )
+                )
+            }
+
+        val heartRateEstimate = rawHeartRateAnalysis.estimate
 
         if (heartRateEstimate != null) {
             lastValidHeartRateEstimateTimestampMillis = phoneTimeMillis
+            lastValidHeartRateEstimate = heartRateEstimate
         }
 
-        val estimatedHeartRate = heartRateEstimate?.bpm
-        val isDisplayedHeartRateFresh = isTimestampFresh(
-            lastTimestampMillis = lastValidHeartRateEstimateTimestampMillis,
-            nowMillis = phoneTimeMillis,
-            timeoutMillis = heartRateDisplayStaleTimeoutMillis
-        )
+        val heartRateAgeMillis =
+            lastValidHeartRateEstimateTimestampMillis?.let { timestampMillis ->
+                (phoneTimeMillis - timestampMillis).coerceAtLeast(0L)
+            }
 
-        val heartRateCalculationStatus = buildHeartRateCalculationStatus(
-            estimate = heartRateEstimate,
-            isCurrentFrameCrcValid = isFrameUsableForAnalysis,
-            nowMillis = phoneTimeMillis
-        )
+        val canHoldPrevious =
+            heartRateEstimate == null &&
+                    lastValidHeartRateEstimate != null &&
+                    heartRateAgeMillis != null &&
+                    heartRateAgeMillis <= heartRateDisplayStaleTimeoutMillis
+
+        val displayedHeartRateEstimate =
+            heartRateEstimate ?: if (canHoldPrevious) lastValidHeartRateEstimate else null
+
+        val packetCounters = _state.value
+
+        val heartRateDiagnostics =
+            if (heartRateEstimate != null) {
+                rawHeartRateAnalysis.diagnostics.copy(
+                    processingState = HeartRateProcessingState.VALID,
+                    underlyingFailureReason = null,
+                    calculatedBpm = heartRateEstimate.bpm,
+                    displayedBpm = heartRateEstimate.bpm,
+                    heartRateFresh = true,
+                    heartRateAgeMillis = 0L,
+                    crcErrorCount = packetCounters.crcErrorCount,
+                    sequenceLossCount = packetCounters.missingSequenceErrors,
+                    estimatedLostPacketCount = packetCounters.estimatedLostPacketCount
+                )
+            } else if (canHoldPrevious) {
+                rawHeartRateAnalysis.diagnostics.copy(
+                    processingState = HeartRateProcessingState.HELD_PREVIOUS,
+                    underlyingFailureReason = rawHeartRateAnalysis.diagnostics.processingState,
+                    message = "새 HR 계산 실패(${rawHeartRateAnalysis.diagnostics.processingState.name}); " +
+                            "마지막 정상값을 ${heartRateAgeMillis}ms 동안 유지",
+                    calculatedBpm = null,
+                    displayedBpm = displayedHeartRateEstimate?.bpm,
+                    heartRateFresh = false,
+                    heartRateAgeMillis = heartRateAgeMillis,
+                    crcErrorCount = packetCounters.crcErrorCount,
+                    sequenceLossCount = packetCounters.missingSequenceErrors,
+                    estimatedLostPacketCount = packetCounters.estimatedLostPacketCount
+                )
+            } else {
+                rawHeartRateAnalysis.diagnostics.copy(
+                    displayedBpm = null,
+                    heartRateFresh = false,
+                    heartRateAgeMillis = heartRateAgeMillis,
+                    crcErrorCount = packetCounters.crcErrorCount,
+                    sequenceLossCount = packetCounters.missingSequenceErrors,
+                    estimatedLostPacketCount = packetCounters.estimatedLostPacketCount
+                )
+            }
+
+        val estimatedHeartRate = displayedHeartRateEstimate?.bpm
+
+        val heartRateCalculationStatus =
+            buildHeartRateCalculationStatus(heartRateDiagnostics)
 
         Log.d(
             TAG,
             "SuperFrame parsed timestamp=$timestamp, segment=$currentAnalysisSegmentId, " +
                     "analysisValid=$isFrameUsableForAnalysis, irMax=$frameIrMax, " +
                     "bpmCombined=${heartRateEstimate?.bpm}, " +
+                    "displayBpm=${displayedHeartRateEstimate?.bpm}, " +
+                    "hrState=${heartRateDiagnostics.processingState}, " +
                     "ibiCombined=${heartRateEstimate?.intervalCount}, " +
                     "qCombined=${heartRateEstimate?.qualityScore}, " +
+                    "polarity=${heartRateEstimate?.selectedPolarity}, " +
                     "maPerc=${heartRateEstimate?.selectedThresholdPercent}, " +
                     "sdsdMs=${heartRateEstimate?.peakFitSdsdMs}, " +
                     "ibiAccept=${heartRateEstimate?.acceptedIntervalRatio}, " +
@@ -715,6 +895,12 @@ class PotchDataProcessor(
             errorLog = errorLogText
         )
 
+        dataLogger?.logHeartRateDiagnostics(
+            phoneTimeMillis = phoneTimeMillis,
+            timestamp = timestamp,
+            diagnostics = heartRateDiagnostics
+        )
+
         dataLogger?.logArousalState(
             phoneTimeMillis = phoneTimeMillis,
             timestamp = timestamp,
@@ -733,18 +919,14 @@ class PotchDataProcessor(
                 lastParsedData =
                     if (isFrameUsableForAnalysis) parsed else current.lastParsedData,
 
-                // 마지막 정상값은 최대 10초까지만 유지하고, 그 뒤에는 stale 값 대신 null을 표시한다.
-                // heartRateBpm은 IR/RED 평균 합산 PPG 기반 값을 사용한다.
-                heartRateBpm = when {
-                    estimatedHeartRate != null -> estimatedHeartRate
-                    isDisplayedHeartRateFresh -> current.heartRateBpm
-                    else -> null
-                },
-                heartRateQuality = when {
-                    heartRateEstimate != null -> heartRateEstimate.qualityScore
-                    isDisplayedHeartRateFresh -> current.heartRateQuality
-                    else -> null
-                },
+                // 새 결과와 화면 표시값을 분리한다.
+                // 새 계산에 실패해도 최대 10초 동안 마지막 정상값을 표시하되,
+                // heartRateFresh=false와 age를 통해 stale/held 상태를 명시한다.
+                heartRateBpm = estimatedHeartRate,
+                heartRateQuality = displayedHeartRateEstimate?.qualityScore,
+                heartRateFresh = heartRateEstimate != null,
+                heartRateAgeMillis = heartRateDiagnostics.heartRateAgeMillis,
+                heartRateDiagnostics = heartRateDiagnostics,
                 heartRateCalculationStatus = heartRateCalculationStatus,
 
                 arousalState = arousalState,
@@ -829,91 +1011,57 @@ class PotchDataProcessor(
     }
 
     /**
-     * 새로 들어온 PPG IR 샘플을 rolling buffer에 누적한다.
+     * 새로 들어온 PPG IR/합산 sample을 동일한 위치로 rolling buffer에 누적한다.
      *
-     * Super Frame 한 개에는 1초(100 샘플)치 PPG만 들어있어서,
-     * 그 안에서만 피크를 찾으면 60bpm 기준 피크가 1개뿐이라 추정이 매우 불안정하다.
-     * 그래서 최근 [heartRateBufferMaxSamples]개(최대 8초)를 누적해 두고
-     * 그 위에서 심박수를 추정한다.
+     * HR 계산은 IR/RED 평균 신호를 사용하고, 접촉·포화·DC 진단은 IR 원신호를 사용한다.
+     * 두 buffer는 항상 같은 sample 수를 유지한다.
      */
-    private fun appendPpgSamplesToHrBuffer(
-        buffer: ArrayDeque<Int>,
-        samples: IntArray,
-        onSampleAdded: () -> Unit
+    private fun appendPpgSamplesToHrBuffers(
+        irSamples: IntArray,
+        combinedSamples: IntArray
     ) {
-        for (sample in samples) {
-            buffer.addLast(sample)
-            onSampleAdded()
+        val sampleCount = minOf(irSamples.size, combinedSamples.size)
 
-            if (buffer.size > heartRateBufferMaxSamples) {
-                buffer.removeFirst()
+        for (i in 0 until sampleCount) {
+            heartRateIrBuffer.addLast(irSamples[i])
+            heartRateCombinedBuffer.addLast(combinedSamples[i])
+            totalHeartRateCombinedSampleCount += 1L
+
+            if (heartRateIrBuffer.size > heartRateBufferMaxSamples) {
+                heartRateIrBuffer.removeFirst()
+            }
+
+            if (heartRateCombinedBuffer.size > heartRateBufferMaxSamples) {
+                heartRateCombinedBuffer.removeFirst()
             }
         }
     }
 
     private fun buildHeartRateCalculationStatus(
-        estimate: HeartRateEstimate?,
-        isCurrentFrameCrcValid: Boolean,
-        nowMillis: Long
+        diagnostics: HeartRateDiagnostics
     ): MetricCalculationStatus {
-        if (!isCurrentFrameCrcValid) {
-            val rawInputIsStale = !isTimestampFresh(
-                lastTimestampMillis = lastValidHeartRateInputTimestampMillis,
-                nowMillis = nowMillis,
-                timeoutMillis = heartRateInputStaleTimeoutMillis
-            )
+        val metricState = when (diagnostics.processingState) {
+            HeartRateProcessingState.VALID ->
+                MetricCalculationState.VALID
 
-            return MetricCalculationStatus(
-                state = MetricCalculationState.REJECTED,
-                message = if (rawInputIsStale) {
-                    "CRC 정상 PPG가 ${heartRateInputStaleTimeoutMillis / 1000}초 이상 없어 " +
-                            "과거 HR raw buffer를 초기화했습니다"
-                } else {
-                    "현재 SuperFrame CRC 오류: 이 프레임은 HR/HRV 계산에 사용하지 않습니다"
-                }
-            )
-        }
+            HeartRateProcessingState.COLLECTING ->
+                MetricCalculationState.COLLECTING
 
-        if (estimate != null) {
-            return MetricCalculationStatus(
-                state = MetricCalculationState.VALID,
-                message = "합산 PPG 심박수 정상 검출: ${estimate.bpm} bpm, " +
-                        "quality=${"%.2f".format(estimate.qualityScore)}, " +
-                        "ma=${estimate.selectedThresholdPercent?.let { "%.0f%%".format(it) } ?: "-"}, " +
-                        "SDSD=${estimate.peakFitSdsdMs?.let { "%.1fms".format(it) } ?: "-"}, " +
-                        "peak보정=${"%.2fms".format(estimate.meanPeakInterpolationOffsetMs)}"
-            )
-        }
-
-        if (heartRateCombinedBuffer.size < heartRateMinSamples) {
-            return MetricCalculationStatus(
-                state = MetricCalculationState.COLLECTING,
-                message = "합산 PPG 심박 신호 수집 중: " +
-                        "${heartRateCombinedBuffer.size}/$heartRateMinSamples samples"
-            )
-        }
-
-        if (heartRateCombinedBuffer.size < heartRateAdaptiveFitPreferredSamples) {
-            return MetricCalculationStatus(
-                state = MetricCalculationState.COLLECTING,
-                message = "이동평균/SDSD peak fitting용 IBI 추가 수집 중: " +
-                        "${heartRateCombinedBuffer.size}/$heartRateAdaptiveFitPreferredSamples samples"
-            )
-        }
-
-        val maxRaw = heartRateCombinedBuffer.maxOrNull()?.toDouble() ?: 0.0
-
-        if (maxRaw <= 10000.0) {
-            return MetricCalculationStatus(
-                state = MetricCalculationState.REJECTED,
-                message = "PPG 접촉 신호가 약함: 합산 raw 최대값=${maxRaw.toInt()} " +
-                        "(접촉 불량 또는 센서 이탈 가능)"
-            )
+            HeartRateProcessingState.HELD_PREVIOUS,
+            HeartRateProcessingState.NO_CONTACT,
+            HeartRateProcessingState.SIGNAL_TOO_WEAK,
+            HeartRateProcessingState.SIGNAL_SATURATED,
+            HeartRateProcessingState.MOTION_ARTIFACT,
+            HeartRateProcessingState.INSUFFICIENT_PEAKS,
+            HeartRateProcessingState.INVALID_IBI,
+            HeartRateProcessingState.BPM_OUT_OF_RANGE,
+            HeartRateProcessingState.PACKET_LOSS ->
+                MetricCalculationState.REJECTED
         }
 
         return MetricCalculationStatus(
-            state = MetricCalculationState.REJECTED,
-            message = "유효 peak/IBI 부족: 움직임 잡음, 파형 왜곡 또는 이상치 필터링 가능"
+            state = metricState,
+            message = diagnostics.message
         )
     }
 
@@ -935,74 +1083,304 @@ class PotchDataProcessor(
         return nowMillis - lastTimestampMillis > timeoutMillis
     }
 
-    private fun estimateHeartRate(): HeartRateEstimate? {
+    private fun estimateHeartRate(
+        imuMaxDeltaG: Double?
+    ): HeartRateAnalysisResult {
         return estimateHeartRateFromBuffer(
-            buffer = heartRateCombinedBuffer,
-            totalSampleCount = totalHeartRateCombinedSampleCount
+            combinedBuffer = heartRateCombinedBuffer,
+            irBuffer = heartRateIrBuffer,
+            totalSampleCount = totalHeartRateCombinedSampleCount,
+            imuMaxDeltaG = imuMaxDeltaG
         )
     }
 
     /**
-     * HeartPy의 핵심 아이디어를 Android/Kotlin 실시간 처리 구조에 맞게 적용한 HR 추정 함수.
+     * 최근 최대 8초 PPG window에서 HR과 상세 실패 사유를 함께 계산한다.
      *
-     * raw PPG
-     * -> Hampel-style spike suppression
-     * -> forward-backward one-pole bandpass(0.75~3.5Hz)
-     * -> return_top처럼 양수 성분만 사용
-     * -> 1.5초 이동평균 계산
-     * -> 여러 moving-average 상승률 후보에서 ROI별 peak 검출
-     * -> 각 peak 주변 3점을 이용한 포물선 보간으로 sub-sample 위치 추정
-     * -> 후보별 BPM / SDSD / IBI 유지율 평가
-     * -> 최적 후보 선택
-     * -> 기존 quotient filter + median outlier filter 유지
-     * -> bpm 계산
+     * 양/음 방향 peak를 각각 모든 threshold 후보로 평가하고,
+     * SDSD + IBI 유지율이 가장 좋은 방향/threshold 조합을 선택한다.
      */
     private fun estimateHeartRateFromBuffer(
-        buffer: ArrayDeque<Int>,
-        totalSampleCount: Long
-    ): HeartRateEstimate? {
-        if (buffer.size < heartRateMinSamples) return null
-
+        combinedBuffer: ArrayDeque<Int>,
+        irBuffer: ArrayDeque<Int>,
+        totalSampleCount: Long,
+        imuMaxDeltaG: Double?
+    ): HeartRateAnalysisResult {
         val sampleRateHz = 100.0
-        val signal = buffer.map { it.toDouble() }
-        val n = signal.size
+        val signal = combinedBuffer.map { it.toDouble() }
+        val irSignal = irBuffer.map { it.toDouble() }
 
-        if (n < 200) return null
+        val irDcMean = irSignal.takeIf { it.isNotEmpty() }?.average()
+        val irMin = irSignal.minOrNull()
+        val irMax = irSignal.maxOrNull()
+        val maxRawSampleDelta = calculateMaxConsecutiveDifference(signal)
 
-        val maxRaw = signal.maxOrNull() ?: 0.0
-        if (maxRaw <= 10000.0) return null
+        fun diagnostics(
+            state: HeartRateProcessingState,
+            message: String,
+            acRobustAmplitude: Double? = null,
+            selectedCandidate: HeartRatePeakFitCandidate? = null,
+            detectedPeakCount: Int = 0,
+            rawIbiCount: Int = 0,
+            validIbiCount: Int = 0
+        ): HeartRateDiagnostics {
+            return HeartRateDiagnostics(
+                processingState = state,
+                message = message,
+                analysisSegmentId = currentAnalysisSegmentId,
+                windowSampleCount = signal.size,
+                windowSeconds = signal.size / sampleRateHz,
+                irDcMean = irDcMean,
+                irMin = irMin,
+                irMax = irMax,
+                acRobustAmplitude = acRobustAmplitude,
+                selectedPeakThreshold = selectedCandidate?.thresholdOffset,
+                selectedThresholdPercent = selectedCandidate?.thresholdPercent,
+                selectedPolarity = selectedCandidate?.polarity
+                    ?: HeartRatePeakPolarity.NONE,
+                detectedPeakCount = selectedCandidate?.peakPositions?.size
+                    ?: detectedPeakCount,
+                rawIbiCount = selectedCandidate?.rawIntervals?.size
+                    ?: rawIbiCount,
+                validIbiCount = selectedCandidate?.usedIntervals?.size
+                    ?: validIbiCount,
+                acceptedIntervalRatio = selectedCandidate?.acceptedIntervalRatio,
+                sdsdMs = selectedCandidate?.sdsdSec?.times(1000.0),
+                calculatedBpm = selectedCandidate?.finalBpm?.roundToInt(),
+                imuMaxDeltaG = imuMaxDeltaG,
+                maxRawSampleDelta = maxRawSampleDelta
+            )
+        }
 
-        val filtered = preprocessPpgForHeartRate(signal)
+        if (signal.isEmpty() || irSignal.isEmpty()) {
+            return HeartRateAnalysisResult(
+                estimate = null,
+                diagnostics = diagnostics(
+                    state = HeartRateProcessingState.COLLECTING,
+                    message = "PPG 심박 신호 수집 전"
+                )
+            )
+        }
 
-        val peakAmplitude = filtered.maxOrNull() ?: 0.0
-        if (peakAmplitude <= 80.0) return null
+        if (
+            irDcMean == null ||
+            irDcMean < HEART_RATE_CONTACT_DC_MIN ||
+            (irMax ?: 0.0) < HEART_RATE_CONTACT_DC_MIN
+        ) {
+            return HeartRateAnalysisResult(
+                estimate = null,
+                diagnostics = diagnostics(
+                    state = HeartRateProcessingState.NO_CONTACT,
+                    message = "PPG 접촉 신호 없음/약함: IR DC=${irDcMean?.let { "%.1f".format(it) } ?: "-"}"
+                )
+            )
+        }
 
-        val bufferStartSampleIndex = totalSampleCount - buffer.size
+        val saturatedCount = irSignal.count {
+            it >= HEART_RATE_SATURATION_HIGH ||
+                    it >= HEART_RATE_PPG_ADC_MAX
+        }
+        val saturationRatio =
+            saturatedCount.toDouble() / irSignal.size.toDouble()
 
-        val bestFit = findBestHeartRatePeakFit(
-            signal = filtered,
+        if (saturationRatio >= 0.02) {
+            return HeartRateAnalysisResult(
+                estimate = null,
+                diagnostics = diagnostics(
+                    state = HeartRateProcessingState.SIGNAL_SATURATED,
+                    message = "PPG IR 포화: ${(saturationRatio * 100.0).let { "%.1f".format(it) }}%"
+                )
+            )
+        }
+
+        if (signal.size < heartRateMinSamples) {
+            return HeartRateAnalysisResult(
+                estimate = null,
+                diagnostics = diagnostics(
+                    state = HeartRateProcessingState.COLLECTING,
+                    message = "PPG 심박 신호 수집 중: ${signal.size}/$heartRateMinSamples samples"
+                )
+            )
+        }
+
+        val bandPassed = preprocessPpgForHeartRate(signal)
+        val acRobustAmplitude = calculateRobustAmplitude(bandPassed)
+
+        if (
+            !acRobustAmplitude.isFinite() ||
+            acRobustAmplitude < HEART_RATE_MIN_ROBUST_AC_AMPLITUDE
+        ) {
+            return HeartRateAnalysisResult(
+                estimate = null,
+                diagnostics = diagnostics(
+                    state = HeartRateProcessingState.SIGNAL_TOO_WEAK,
+                    message = "PPG AC 진폭 부족: robust amplitude=${"%.2f".format(acRobustAmplitude)}",
+                    acRobustAmplitude = acRobustAmplitude
+                )
+            )
+        }
+
+        val positiveTop = DoubleArray(bandPassed.size) { i ->
+            bandPassed[i].coerceAtLeast(0.0)
+        }
+        val negativeTop = DoubleArray(bandPassed.size) { i ->
+            (-bandPassed[i]).coerceAtLeast(0.0)
+        }
+
+        val bufferStartSampleIndex = totalSampleCount - combinedBuffer.size
+
+        val positiveSearch = findBestHeartRatePeakFit(
+            signal = positiveTop,
             sampleRateHz = sampleRateHz,
             bufferStartSampleIndex = bufferStartSampleIndex,
-            segmentId = currentAnalysisSegmentId
-        ) ?: return null
+            segmentId = currentAnalysisSegmentId,
+            polarity = HeartRatePeakPolarity.POSITIVE
+        )
+
+        val negativeSearch = findBestHeartRatePeakFit(
+            signal = negativeTop,
+            sampleRateHz = sampleRateHz,
+            bufferStartSampleIndex = bufferStartSampleIndex,
+            segmentId = currentAnalysisSegmentId,
+            polarity = HeartRatePeakPolarity.NEGATIVE
+        )
+
+        val bestFit = listOfNotNull(
+            positiveSearch.bestCandidate,
+            negativeSearch.bestCandidate
+        ).minWithOrNull(
+            compareBy<HeartRatePeakFitCandidate> { it.selectionScore }
+                .thenByDescending { it.usedIntervals.size }
+                .thenByDescending { it.acceptedIntervalRatio }
+        )
+
+        val maxDetectedPeakCount = maxOf(
+            positiveSearch.maxDetectedPeakCount,
+            negativeSearch.maxDetectedPeakCount
+        )
+        val maxRawIbiCount = maxOf(
+            positiveSearch.maxRawIntervalCount,
+            negativeSearch.maxRawIntervalCount
+        )
+        val maxValidIbiCount = maxOf(
+            positiveSearch.maxValidIntervalCount,
+            negativeSearch.maxValidIntervalCount
+        )
+
+        if (
+            imuMaxDeltaG != null &&
+            imuMaxDeltaG >= HEART_RATE_MOTION_MAX_DELTA_G
+        ) {
+            return HeartRateAnalysisResult(
+                estimate = null,
+                diagnostics = diagnostics(
+                    state = HeartRateProcessingState.MOTION_ARTIFACT,
+                    message = "강한 움직임 감지: IMU maxDelta=${"%.4f".format(imuMaxDeltaG)}g",
+                    acRobustAmplitude = acRobustAmplitude,
+                    selectedCandidate = bestFit,
+                    detectedPeakCount = maxDetectedPeakCount,
+                    rawIbiCount = maxRawIbiCount,
+                    validIbiCount = maxValidIbiCount
+                )
+            )
+        }
+
+        if (bestFit == null) {
+            val failureState = when {
+                // 3초부터 계산을 시도하지만, 6초 이전 실패는 데이터 부족 가능성이 커서
+                // 확정 실패가 아니라 COLLECTING으로 남긴다.
+                signal.size < heartRateAdaptiveFitPreferredSamples ->
+                    HeartRateProcessingState.COLLECTING
+
+                maxDetectedPeakCount < 4 ->
+                    HeartRateProcessingState.INSUFFICIENT_PEAKS
+
+                positiveSearch.sawBpmOutOfRange ||
+                        negativeSearch.sawBpmOutOfRange ->
+                    HeartRateProcessingState.BPM_OUT_OF_RANGE
+
+                positiveSearch.sawInvalidIbi ||
+                        negativeSearch.sawInvalidIbi ||
+                        maxRawIbiCount > 0 ->
+                    HeartRateProcessingState.INVALID_IBI
+
+                else ->
+                    HeartRateProcessingState.INSUFFICIENT_PEAKS
+            }
+
+            val message = when (failureState) {
+                HeartRateProcessingState.COLLECTING ->
+                    "adaptive peak fitting용 IBI 추가 수집 중: ${signal.size}/$heartRateAdaptiveFitPreferredSamples samples"
+
+                HeartRateProcessingState.INSUFFICIENT_PEAKS ->
+                    "유효 peak 부족: 최대 ${maxDetectedPeakCount}개 검출"
+
+                HeartRateProcessingState.INVALID_IBI ->
+                    "peak는 검출됐지만 유효 IBI 부족: raw=$maxRawIbiCount, valid=$maxValidIbiCount"
+
+                HeartRateProcessingState.BPM_OUT_OF_RANGE ->
+                    "검출 후보 BPM이 허용 범위 ${HEART_RATE_MIN_BPM}~${HEART_RATE_MAX_BPM} 밖"
+
+                else -> "HR peak fitting 실패"
+            }
+
+            return HeartRateAnalysisResult(
+                estimate = null,
+                diagnostics = diagnostics(
+                    state = failureState,
+                    message = message,
+                    acRobustAmplitude = acRobustAmplitude,
+                    detectedPeakCount = maxDetectedPeakCount,
+                    rawIbiCount = maxRawIbiCount,
+                    validIbiCount = maxValidIbiCount
+                )
+            )
+        }
 
         val avgInterval = bestFit.usedIntervals
             .map { it.intervalSec }
             .average()
 
-        if (avgInterval <= 0.0) return null
+        if (!avgInterval.isFinite() || avgInterval <= 0.0) {
+            return HeartRateAnalysisResult(
+                estimate = null,
+                diagnostics = diagnostics(
+                    state = HeartRateProcessingState.INVALID_IBI,
+                    message = "평균 IBI가 유효하지 않음",
+                    acRobustAmplitude = acRobustAmplitude,
+                    selectedCandidate = bestFit
+                )
+            )
+        }
 
         val bpm = (60.0 / avgInterval).roundToInt()
-        if (bpm !in HEART_RATE_MIN_BPM..HEART_RATE_MAX_BPM) return null
+
+        if (bpm !in HEART_RATE_MIN_BPM..HEART_RATE_MAX_BPM) {
+            return HeartRateAnalysisResult(
+                estimate = null,
+                diagnostics = diagnostics(
+                    state = HeartRateProcessingState.BPM_OUT_OF_RANGE,
+                    message = "최종 BPM $bpm 이 허용 범위 밖",
+                    acRobustAmplitude = acRobustAmplitude,
+                    selectedCandidate = bestFit
+                )
+            )
+        }
+
+        val selectedSignal =
+            if (bestFit.polarity == HeartRatePeakPolarity.POSITIVE) {
+                positiveTop
+            } else {
+                negativeTop
+            }
+
+        val peakAmplitude = selectedSignal.maxOrNull() ?: 0.0
 
         val baseQuality = calculateHeartRateEstimateQuality(
             intervals = bestFit.usedIntervals,
             peakAmplitude = peakAmplitude
         )
 
-        // 기존 quality에 peak fitting 자체의 신뢰도를 조금 반영한다.
-        // SDSD 80ms 이상이면 fitting 신뢰도를 거의 0으로 보고,
-        // raw interval 중 실제로 유지된 비율도 함께 반영한다.
         val sdsdQuality =
             (1.0 - bestFit.sdsdSec / 0.080).coerceIn(0.0, 1.0)
 
@@ -1014,7 +1392,7 @@ class PotchDataProcessor(
             (baseQuality * 0.75 + fitQuality * 0.25)
                 .coerceIn(0.0, 1.0)
 
-        return HeartRateEstimate(
+        val estimate = HeartRateEstimate(
             bpm = bpm,
             ibiIntervals = bestFit.usedIntervals,
             peakCount = bestFit.peakPositions.size,
@@ -1022,11 +1400,25 @@ class PotchDataProcessor(
             averageIntervalSec = avgInterval,
             qualityScore = qualityScore,
             selectedThresholdPercent = bestFit.thresholdPercent,
+            selectedPeakThreshold = bestFit.thresholdOffset,
+            selectedPolarity = bestFit.polarity,
             peakFitSdsdMs = bestFit.sdsdSec * 1000.0,
             rawIntervalCount = bestFit.rawIntervals.size,
             acceptedIntervalRatio = bestFit.acceptedIntervalRatio,
             meanPeakInterpolationOffsetMs = bestFit.meanInterpolationOffsetMs,
             maxPeakInterpolationOffsetMs = bestFit.maxInterpolationOffsetMs
+        )
+
+        return HeartRateAnalysisResult(
+            estimate = estimate,
+            diagnostics = diagnostics(
+                state = HeartRateProcessingState.VALID,
+                message = "합산 PPG 심박수 정상 검출: $bpm bpm",
+                acRobustAmplitude = acRobustAmplitude,
+                selectedCandidate = bestFit
+            ).copy(
+                calculatedBpm = bpm
+            )
         )
     }
 
@@ -1060,20 +1452,10 @@ class PotchDataProcessor(
             highCutHz = 3.5
         )
 
-        // 4) PPG 신호 극성이 뒤집혀 들어올 수 있으므로, 양수 peak와 음수 peak 중 더 강한 쪽을 선택한다.
-        //    HeartPy의 return_top=True처럼 peak 검출에 필요한 위쪽 성분만 남긴다.
-        val positiveTop = DoubleArray(bandPassed.size) { i ->
-            if (bandPassed[i] > 0.0) bandPassed[i] else 0.0
-        }
-        val negativeTop = DoubleArray(bandPassed.size) { i ->
-            val inverted = -bandPassed[i]
-            if (inverted > 0.0) inverted else 0.0
-        }
-
-        val positiveMax = positiveTop.maxOrNull() ?: 0.0
-        val negativeMax = negativeTop.maxOrNull() ?: 0.0
-
-        return if (positiveMax >= negativeMax) positiveTop else negativeTop
+        // 극성 선택은 여기서 max 진폭으로 결정하지 않는다.
+        // estimateHeartRateFromBuffer()에서 양/음 방향을 각각 peak fitting한 뒤
+        // SDSD와 IBI 유지율이 더 좋은 방향을 선택한다.
+        return bandPassed
     }
 
     private fun hampelFilterSymmetric(
@@ -1210,9 +1592,19 @@ class PotchDataProcessor(
         signal: DoubleArray,
         sampleRateHz: Double,
         bufferStartSampleIndex: Long,
-        segmentId: Long
-    ): HeartRatePeakFitCandidate? {
-        if (signal.size < 3 || sampleRateHz <= 0.0) return null
+        segmentId: Long,
+        polarity: HeartRatePeakPolarity
+    ): HeartRatePeakFitSearchResult {
+        if (signal.size < 3 || sampleRateHz <= 0.0) {
+            return HeartRatePeakFitSearchResult(
+                bestCandidate = null,
+                maxDetectedPeakCount = 0,
+                maxRawIntervalCount = 0,
+                maxValidIntervalCount = 0,
+                sawInvalidIbi = false,
+                sawBpmOutOfRange = false
+            )
+        }
 
         val movingAverageWindowSamples =
             (sampleRateHz * HEART_RATE_MOVING_AVERAGE_SECONDS)
@@ -1225,7 +1617,16 @@ class PotchDataProcessor(
         )
 
         val movingAverageMean = movingAverage.average()
-        if (movingAverageMean <= 0.0) return null
+        if (movingAverageMean <= 0.0) {
+            return HeartRatePeakFitSearchResult(
+                bestCandidate = null,
+                maxDetectedPeakCount = 0,
+                maxRawIntervalCount = 0,
+                maxValidIntervalCount = 0,
+                sawInvalidIbi = false,
+                sawBpmOutOfRange = false
+            )
+        }
 
         val minPeakDistanceSamples =
             (sampleRateHz * 60.0 / HEART_RATE_MAX_BPM)
@@ -1233,6 +1634,11 @@ class PotchDataProcessor(
                 .coerceAtLeast(1)
 
         val candidates = mutableListOf<HeartRatePeakFitCandidate>()
+        var maxDetectedPeakCount = 0
+        var maxRawIntervalCount = 0
+        var maxValidIntervalCount = 0
+        var sawInvalidIbi = false
+        var sawBpmOutOfRange = false
 
         for (thresholdPercent in HEART_RATE_THRESHOLD_PERCENT_CANDIDATES) {
             // HeartPy의 rol_mean + ma_perc 방식과 비슷하게,
@@ -1245,6 +1651,11 @@ class PotchDataProcessor(
                 movingAverage = movingAverage,
                 thresholdOffset = thresholdOffset,
                 minPeakDistanceSamples = minPeakDistanceSamples
+            )
+
+            maxDetectedPeakCount = maxOf(
+                maxDetectedPeakCount,
+                peakIndices.size
             )
 
             // SDSD를 평가하려면 최소 4개 peak = 3개 IBI가 필요하다.
@@ -1280,15 +1691,27 @@ class PotchDataProcessor(
                 enforcePhysiologicalRange = false
             )
 
-            if (rawIntervals.size < 3) continue
+            maxRawIntervalCount = maxOf(
+                maxRawIntervalCount,
+                rawIntervals.size
+            )
+
+            if (rawIntervals.size < 3) {
+                if (rawIntervals.isNotEmpty()) sawInvalidIbi = true
+                continue
+            }
 
             val rawAverageInterval =
                 rawIntervals.map { it.intervalSec }.average()
 
-            if (rawAverageInterval <= 0.0) continue
+            if (!rawAverageInterval.isFinite() || rawAverageInterval <= 0.0) {
+                sawInvalidIbi = true
+                continue
+            }
 
             val rawBpm = 60.0 / rawAverageInterval
             if (rawBpm !in HEART_RATE_MIN_BPM.toDouble()..HEART_RATE_MAX_BPM.toDouble()) {
+                sawBpmOutOfRange = true
                 continue
             }
 
@@ -1307,6 +1730,7 @@ class PotchDataProcessor(
                 physiologicalIntervals.size.toDouble() / rawIntervals.size.toDouble()
 
             if (physiologicalIntervalRatio < HEART_RATE_MIN_PHYSIOLOGICAL_INTERVAL_RATIO) {
+                sawInvalidIbi = true
                 continue
             }
 
@@ -1314,7 +1738,15 @@ class PotchDataProcessor(
                 physiologicalIntervals.toMutableList()
             )
 
-            if (usedIntervals.size < 2) continue
+            maxValidIntervalCount = maxOf(
+                maxValidIntervalCount,
+                usedIntervals.size
+            )
+
+            if (usedIntervals.size < 2) {
+                sawInvalidIbi = true
+                continue
+            }
 
             val usedAverageInterval =
                 usedIntervals.map { it.intervalSec }.average()
@@ -1323,6 +1755,7 @@ class PotchDataProcessor(
 
             val finalBpm = 60.0 / usedAverageInterval
             if (finalBpm !in HEART_RATE_MIN_BPM.toDouble()..HEART_RATE_MAX_BPM.toDouble()) {
+                sawBpmOutOfRange = true
                 continue
             }
 
@@ -1331,6 +1764,7 @@ class PotchDataProcessor(
 
             // 후처리에서 절반 이상 버려지는 후보는 peak fitting 자체가 불안정하다고 판단한다.
             if (acceptedIntervalRatio < HEART_RATE_MIN_ACCEPTED_INTERVAL_RATIO) {
+                sawInvalidIbi = true
                 continue
             }
 
@@ -1346,6 +1780,7 @@ class PotchDataProcessor(
                 sdsdSec + countPenaltySec + rejectionPenaltySec
 
             candidates += HeartRatePeakFitCandidate(
+                polarity = polarity,
                 thresholdPercent = thresholdPercent,
                 thresholdOffset = thresholdOffset,
                 peakIndices = peakIndices,
@@ -1362,10 +1797,19 @@ class PotchDataProcessor(
             )
         }
 
-        return candidates.minWithOrNull(
+        val bestCandidate = candidates.minWithOrNull(
             compareBy<HeartRatePeakFitCandidate> { it.selectionScore }
                 .thenByDescending { it.usedIntervals.size }
                 .thenByDescending { it.acceptedIntervalRatio }
+        )
+
+        return HeartRatePeakFitSearchResult(
+            bestCandidate = bestCandidate,
+            maxDetectedPeakCount = maxDetectedPeakCount,
+            maxRawIntervalCount = maxRawIntervalCount,
+            maxValidIntervalCount = maxValidIntervalCount,
+            sawInvalidIbi = sawInvalidIbi,
+            sawBpmOutOfRange = sawBpmOutOfRange
         )
     }
 
@@ -1678,6 +2122,109 @@ class PotchDataProcessor(
         }
     }
 
+    private fun calculateRobustAmplitude(
+        values: DoubleArray
+    ): Double {
+        if (values.isEmpty()) return 0.0
+
+        val sorted = values.sorted()
+        val low = percentileFromSorted(sorted, 0.05)
+        val high = percentileFromSorted(sorted, 0.95)
+
+        return (high - low).coerceAtLeast(0.0)
+    }
+
+    private fun percentileFromSorted(
+        sorted: List<Double>,
+        quantile: Double
+    ): Double {
+        if (sorted.isEmpty()) return 0.0
+
+        val q = quantile.coerceIn(0.0, 1.0)
+        val position = q * (sorted.size - 1)
+        val lower = position.toInt()
+        val upper = (lower + 1).coerceAtMost(sorted.lastIndex)
+        val fraction = position - lower
+
+        return sorted[lower] * (1.0 - fraction) +
+                sorted[upper] * fraction
+    }
+
+    private fun calculateMaxConsecutiveDifference(
+        values: List<Double>
+    ): Double? {
+        if (values.size < 2) return null
+
+        var maxDelta = 0.0
+
+        for (i in 1 until values.size) {
+            val delta = abs(values[i] - values[i - 1])
+            if (delta > maxDelta) {
+                maxDelta = delta
+            }
+        }
+
+        return maxDelta
+    }
+
+    private fun calculateImuMaxDeltaG(
+        imuData: ByteArray
+    ): Double? {
+        if (imuData.size < 12) return null
+
+        var previousMagnitude: Double? = null
+        var maxDelta = 0.0
+        var validSampleCount = 0
+
+        for (i in imuData.indices step 6) {
+            if (i + 5 >= imuData.size) break
+
+            val xRaw = readInt16LittleEndian(imuData, i)
+            val yRaw = readInt16LittleEndian(imuData, i + 2)
+            val zRaw = readInt16LittleEndian(imuData, i + 4)
+
+            val xG = xRaw / HEART_RATE_IMU_LSB_PER_G
+            val yG = yRaw / HEART_RATE_IMU_LSB_PER_G
+            val zG = zRaw / HEART_RATE_IMU_LSB_PER_G
+
+            val magnitude = sqrt(
+                xG * xG +
+                        yG * yG +
+                        zG * zG
+            )
+
+            val previous = previousMagnitude
+            if (previous != null) {
+                maxDelta = maxOf(
+                    maxDelta,
+                    abs(magnitude - previous)
+                )
+            }
+
+            previousMagnitude = magnitude
+            validSampleCount += 1
+        }
+
+        return if (validSampleCount >= 2) maxDelta else null
+    }
+
+    private fun readInt16LittleEndian(
+        data: ByteArray,
+        offset: Int
+    ): Int {
+        if (offset < 0 || offset + 1 >= data.size) return 0
+
+        val value =
+            (data[offset].toInt() and 0xFF) or
+                    ((data[offset + 1].toInt() and 0xFF) shl 8)
+
+        return if ((value and 0x8000) != 0) {
+            value - 0x10000
+        } else {
+            value
+        }
+    }
+
     private fun calculateHeartRateEstimateQuality(
         intervals: List<IbiInterval>,
         peakAmplitude: Double
@@ -1969,8 +2516,11 @@ class PotchDataProcessor(
         currentAnalysisSegmentId += 1L
 
         heartRateCombinedBuffer.clear()
+        heartRateIrBuffer.clear()
         lastValidHeartRateInputTimestampMillis = null
-        lastValidHeartRateEstimateTimestampMillis = null
+
+        // 마지막 정상 HR과 timestamp는 화면 표시용으로만 최대 10초 유지한다.
+        // raw/IBI buffer는 즉시 초기화되므로 새 segment의 HR/HRV 계산에는 섞이지 않는다.
 
         val gapState = arousalCalculator.onDataDiscontinuity(
             newSegmentId = currentAnalysisSegmentId,
@@ -1987,13 +2537,57 @@ class PotchDataProcessor(
             "W"
         )
 
+        val nowMillis = System.currentTimeMillis()
+        val ageMillis =
+            lastValidHeartRateEstimateTimestampMillis?.let {
+                (nowMillis - it).coerceAtLeast(0L)
+            }
+        val canHoldPrevious =
+            lastValidHeartRateEstimate != null &&
+                    ageMillis != null &&
+                    ageMillis <= heartRateDisplayStaleTimeoutMillis
+
+        val packetLossDiagnostics = HeartRateDiagnostics(
+            processingState =
+                if (canHoldPrevious) {
+                    HeartRateProcessingState.HELD_PREVIOUS
+                } else {
+                    HeartRateProcessingState.PACKET_LOSS
+                },
+            underlyingFailureReason =
+                if (canHoldPrevious) {
+                    HeartRateProcessingState.PACKET_LOSS
+                } else {
+                    null
+                },
+            message =
+                if (canHoldPrevious) {
+                    "데이터 연속성 중단($reason); 마지막 정상 HR을 ${ageMillis}ms 동안 유지"
+                } else {
+                    "데이터 연속성 중단: $reason"
+                },
+            analysisSegmentId = currentAnalysisSegmentId,
+            displayedBpm =
+                if (canHoldPrevious) lastValidHeartRateEstimate?.bpm else null,
+            heartRateFresh = false,
+            heartRateAgeMillis = ageMillis,
+            crcErrorCount = _state.value.crcErrorCount,
+            sequenceLossCount = _state.value.missingSequenceErrors,
+            estimatedLostPacketCount = _state.value.estimatedLostPacketCount
+        )
+
         _state.update { current ->
             current.copy(
-                heartRateBpm = null,
-                heartRateQuality = null,
+                heartRateBpm =
+                    if (canHoldPrevious) lastValidHeartRateEstimate?.bpm else null,
+                heartRateQuality =
+                    if (canHoldPrevious) lastValidHeartRateEstimate?.qualityScore else null,
+                heartRateFresh = false,
+                heartRateAgeMillis = ageMillis,
+                heartRateDiagnostics = packetLossDiagnostics,
                 heartRateCalculationStatus = MetricCalculationStatus(
                     state = MetricCalculationState.REJECTED,
-                    message = "데이터 연속성 중단: $reason"
+                    message = packetLossDiagnostics.message
                 ),
                 arousalState = gapState,
                 analysisSegmentId = currentAnalysisSegmentId,
@@ -2021,8 +2615,10 @@ class PotchDataProcessor(
 
         val partialFrame = buffer.toByteArray()
 
+        val missEventTimeMillis = System.currentTimeMillis()
+
         dataLogger?.logSuperFrame(
-            phoneTimeMillis = System.currentTimeMillis(),
+            phoneTimeMillis = missEventTimeMillis,
             timestamp = null,
             superFrame = partialFrame,
             complete = "miss",
@@ -2031,6 +2627,12 @@ class PotchDataProcessor(
                 .sorted()
                 .joinToString("|"),
             errorLog = currentFrameErrors.joinToString(" / ")
+        )
+
+        dataLogger?.logHeartRateDiagnostics(
+            phoneTimeMillis = missEventTimeMillis,
+            timestamp = null,
+            diagnostics = _state.value.heartRateDiagnostics
         )
 
         buffer.clear()

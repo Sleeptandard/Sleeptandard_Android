@@ -34,8 +34,11 @@ data class InternalPotchLogFile(
  * 3. potch_arousal_state_log_yyyyMMdd_HHmmss.csv
  *    - 각 Super Frame마다 계산된 ArousalState 저장
  *
+ * 4. potch_hr_diagnostic_log_yyyyMMdd_HHmmss.csv
+ *    - HR 계산 성공/실패 사유와 PPG/IMU 품질값 저장
+ *
  * 종료 및 저장 시:
- * - 세 파일을 모두 Download/PotchLogs 폴더로 복사한다.
+ * - 네 파일을 모두 Download/PotchLogs 폴더로 복사한다.
  */
 class PotchDataLogger(
     context: Context
@@ -53,6 +56,9 @@ class PotchDataLogger(
 
     // ArousalState 전용 CSV 로그 파일
     private var workingArousalLogFile: File? = null
+
+    // HR 계산 상세 진단 전용 CSV 로그 파일
+    private var workingHeartRateDiagnosticLogFile: File? = null
 
     // 마지막으로 Downloads에 저장/복사된 CSV 경로
     var lastSavedFilePath: String? = null
@@ -81,6 +87,8 @@ class PotchDataLogger(
         workingLogFile = File(dir, "potch_super_frame_log_$timestamp.csv")
         workingDebugLogFile = File(dir, "potch_debug_log_$timestamp.txt")
         workingArousalLogFile = File(dir, "potch_arousal_state_log_$timestamp.csv")
+        workingHeartRateDiagnosticLogFile =
+            File(dir, "potch_hr_diagnostic_log_$timestamp.csv")
 
         workingDebugLogFile?.writeText(
             "Potch debug log started at $timestamp\n"
@@ -158,6 +166,40 @@ class PotchDataLogger(
                 "last_log"
             ).joinToString(",") + "\n"
         )
+
+        workingHeartRateDiagnosticLogFile?.writeText(
+            listOf(
+                "phone_time",
+                "timestamp",
+                "analysis_segment_id",
+                "processing_state",
+                "underlying_failure_reason",
+                "message",
+                "heart_rate_fresh",
+                "heart_rate_age_ms",
+                "window_sample_count",
+                "window_seconds",
+                "ir_dc_mean",
+                "ir_min",
+                "ir_max",
+                "ac_robust_amplitude",
+                "selected_peak_threshold",
+                "selected_threshold_percent",
+                "selected_polarity",
+                "detected_peak_count",
+                "raw_ibi_count",
+                "valid_ibi_count",
+                "accepted_interval_ratio",
+                "sdsd_ms",
+                "calculated_bpm",
+                "displayed_bpm",
+                "imu_max_delta_g",
+                "max_raw_sample_delta",
+                "crc_error_count",
+                "sequence_loss_count",
+                "estimated_lost_packet_count"
+            ).joinToString(",") + "\n"
+        )
     }
 
     /**
@@ -230,6 +272,61 @@ class PotchDataLogger(
             escapeCsv(complete),
             escapeCsv(missPacketNum),
             escapeCsv(errorLog)
+        ).joinToString(",")
+
+        file.appendText(row + "\n")
+    }
+
+    /**
+     * HR 계산 진단값을 전용 CSV에 append한다.
+     *
+     * 새 BPM이 없더라도 COLLECTING/NO_CONTACT/MOTION_ARTIFACT 같은 상태와
+     * 마지막 값 유지 여부를 매 SuperFrame마다 기록한다.
+     */
+    fun logHeartRateDiagnostics(
+        phoneTimeMillis: Long,
+        timestamp: Long?,
+        diagnostics: HeartRateDiagnostics
+    ) {
+        if (!isLogging) return
+
+        val file = workingHeartRateDiagnosticLogFile ?: return
+
+        val phoneTimeText = SimpleDateFormat(
+            "yyyy-MM-dd HH:mm:ss.SSS",
+            Locale.getDefault()
+        ).format(Date(phoneTimeMillis))
+
+        val row = listOf(
+            escapeCsv(phoneTimeText),
+            timestamp?.toString() ?: "",
+            diagnostics.analysisSegmentId.toString(),
+            escapeCsv(diagnostics.processingState.name),
+            escapeCsv(diagnostics.underlyingFailureReason?.name.orEmpty()),
+            escapeCsv(diagnostics.message),
+            diagnostics.heartRateFresh.toString(),
+            diagnostics.heartRateAgeMillis?.toString() ?: "",
+            diagnostics.windowSampleCount.toString(),
+            formatDouble(diagnostics.windowSeconds, digits = 3),
+            formatDouble(diagnostics.irDcMean, digits = 3),
+            formatDouble(diagnostics.irMin, digits = 3),
+            formatDouble(diagnostics.irMax, digits = 3),
+            formatDouble(diagnostics.acRobustAmplitude, digits = 6),
+            formatDouble(diagnostics.selectedPeakThreshold, digits = 6),
+            formatDouble(diagnostics.selectedThresholdPercent, digits = 3),
+            escapeCsv(diagnostics.selectedPolarity.name),
+            diagnostics.detectedPeakCount.toString(),
+            diagnostics.rawIbiCount.toString(),
+            diagnostics.validIbiCount.toString(),
+            formatDouble(diagnostics.acceptedIntervalRatio, digits = 6),
+            formatDouble(diagnostics.sdsdMs, digits = 3),
+            diagnostics.calculatedBpm?.toString() ?: "",
+            diagnostics.displayedBpm?.toString() ?: "",
+            formatDouble(diagnostics.imuMaxDeltaG, digits = 8),
+            formatDouble(diagnostics.maxRawSampleDelta, digits = 6),
+            diagnostics.crcErrorCount.toString(),
+            diagnostics.sequenceLossCount.toString(),
+            diagnostics.estimatedLostPacketCount.toString()
         ).joinToString(",")
 
         file.appendText(row + "\n")
@@ -366,6 +463,7 @@ class PotchDataLogger(
         val sourceFile = workingLogFile ?: return null
         val debugFile = workingDebugLogFile
         val arousalFile = workingArousalLogFile
+        val heartRateDiagnosticFile = workingHeartRateDiagnosticLogFile
 
         isLogging = false
 
@@ -389,6 +487,17 @@ class PotchDataLogger(
             copyInternalFileToDownloads(
                 context = appContext,
                 sourceFile = arousalFile
+            )
+        }
+
+        if (
+            heartRateDiagnosticFile != null &&
+            heartRateDiagnosticFile.exists() &&
+            heartRateDiagnosticFile.length() > 0L
+        ) {
+            copyInternalFileToDownloads(
+                context = appContext,
+                sourceFile = heartRateDiagnosticFile
             )
         }
 
@@ -419,6 +528,13 @@ class PotchDataLogger(
     }
 
     /**
+     * 현재 작업 중인 내부 HR 진단 CSV 파일 경로를 확인할 때 사용한다.
+     */
+    fun getWorkingHeartRateDiagnosticLogPath(): String? {
+        return workingHeartRateDiagnosticLogFile?.absolutePath
+    }
+
+    /**
      * 저장하지 않고 현재 로그 상태를 초기화한다.
      */
     fun clear() {
@@ -426,6 +542,7 @@ class PotchDataLogger(
         workingLogFile = null
         workingDebugLogFile = null
         workingArousalLogFile = null
+        workingHeartRateDiagnosticLogFile = null
         lastSavedFilePath = null
     }
 
