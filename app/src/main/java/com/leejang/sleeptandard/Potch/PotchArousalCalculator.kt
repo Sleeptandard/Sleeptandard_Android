@@ -44,12 +44,28 @@ data class ArousalState(
     val rrFusionLog: String? = null,
     val rrCalculationStatus: MetricCalculationStatus = MetricCalculationStatus(),
 
+    // RR 디버깅/검증용: 현재 45초 분석창에서 검출된 peak와 사용 interval.
+    // sample position은 현재 analysis segment 시작점을 0으로 하는 절대 sample index다.
+    val rrAnalysisSegmentId: Long = 0L,
+    val ppgRespPeakSamplePositions: List<Long> = emptyList(),
+    val ppgRespIntervalsSec: List<Double> = emptyList(),
+    val imuRespPeakSamplePositions: List<Long> = emptyList(),
+    val imuRespIntervalsSec: List<Double> = emptyList(),
+
     // 3. Respiratory Rate Variability
-    val rrvRmssd: Double? = null,        // seconds 기준 RMSSD
+    val rrvRmssd: Double? = null,        // 최종 선택된 source의 seconds 기준 RMSSD
     val rrvRmssdMs: Double? = null,      // 로그/UI 확인용 ms
     val rrvScore: Double? = null,
     val rrvSource: RrvSource = RrvSource.NONE,
     val rrvQuality: Double = 0.0,
+
+    // PPG와 IMU RRV를 따로 기록하여 source별 정확도를 비교할 수 있게 한다.
+    val rrvFromPpgRmssdSec: Double? = null,
+    val rrvFromImuRmssdSec: Double? = null,
+    val rrvPpgIntervalCount: Int = 0,
+    val rrvImuIntervalCount: Int = 0,
+    val rrvPpgQuality: Double = 0.0,
+    val rrvImuQuality: Double = 0.0,
     val rrvCalculationStatus: MetricCalculationStatus = MetricCalculationStatus(),
 
     // 4. Heart Rate
@@ -126,15 +142,20 @@ data class ArousalConfig(
     val imuRespIntervalOutlierTolerance: Double = 0.40,
 
     // RR Fusion
-    val rrFusionAgreeDiffBpm: Double = 3.0,
+    // 두 센서가 1 bpm 이내로 일치할 때만 weighted fusion을 허용한다.
+    val rrFusionAgreeDiffBpm: Double = 1.0,
     val rrFusionStrongDisagreeDiffBpm: Double = 6.0,
 
     // 기본적으로 PPG를 더 신뢰
     val rrFusionImuBaseWeight: Double = 0.3,
     val rrFusionPpgBaseWeight: Double = 0.7,
 
-    // quality가 이 값보다 낮으면 신뢰도 낮은 RR로 판단
+    // 한 센서를 단독 후보로 사용할 수 있는 최소 quality.
     val rrFusionMinUsableQuality: Double = 0.35,
+
+    // IMU가 weighted fusion에 실제로 참여하기 위한 더 엄격한 quality 기준.
+    // 이번 paced-breathing 로그에서는 IMU가 PPG보다 오차가 컸으므로 보수적으로 둔다.
+    val rrFusionMinImuQualityForWeighting: Double = 0.70,
 
     // RR Score
     // 수면 중 호흡수가 이 값 이하이면 RR 자체만으로는 각성 신호로 거의 보지 않음
@@ -168,7 +189,15 @@ data class ArousalConfig(
     val rrFreshnessTimeoutMillis: Long = 30 * 1000L,
 
     // RRV
-    val rrvMinIntervalCount: Int = 3,
+    // RR은 45초 창으로 빠르게 계산하지만 RRV는 최근 3분 interval을 별도로 누적한다.
+    val rrvWindowSeconds: Int = 180,
+
+    // RMSSD를 계산하기 위한 최소 유효 호흡 interval 수.
+    val rrvMinIntervalCount: Int = 8,
+
+    // interval 개수 품질 점수가 최대가 되는 권장 개수.
+    val rrvPreferredIntervalCount: Int = 20,
+
     val rrvIntervalOutlierTolerance: Double = 0.40,
 
     // 임시 score 기준.
@@ -314,6 +343,30 @@ data class MicroMovementResult(
 )
 
 /**
+ * 호흡 peak 두 개 사이의 interval.
+ *
+ * sample position은 현재 analysis segment 안에서의 절대 위치이므로,
+ * rolling window를 매초 다시 계산해도 endSamplePosition으로 중복 제거할 수 있다.
+ */
+data class RespirationInterval(
+    val intervalSec: Double,
+    val startSamplePosition: Long,
+    val endSamplePosition: Long,
+    val segmentId: Long
+)
+
+private data class BufferedRespirationInterval(
+    val interval: RespirationInterval,
+    val qualityScore: Double
+)
+
+data class RrvCalculationBundle(
+    val ppg: RrvResult?,
+    val imu: RrvResult?,
+    val selected: RrvResult?
+)
+
+/**
  * PPG 기반 호흡 추정에 사용한 광학 채널.
  *
  * 기본은 IR을 우선 사용하고, IR에서 호흡 파형 검출이 실패하면 RED를 백업으로 사용한다.
@@ -337,8 +390,13 @@ data class PpgRespirationResult(
     val averageIntervalSec: Double,
     val peakToPeakAmplitude: Double,
     val qualityScore: Double,
+    val inverted: Boolean,
+    val peakSamplePositions: List<Long>,
+    val intervals: List<RespirationInterval>
+) {
     val intervalsSec: List<Double>
-)
+        get() = intervals.map { it.intervalSec }
+}
 
 /**
  * IMU g-magnitude에서 추출한 호흡수 계산 결과.
@@ -351,8 +409,12 @@ data class ImuRespirationResult(
     val peakToPeakAmplitudeG: Double,
     val qualityScore: Double,
     val inverted: Boolean,
+    val peakSamplePositions: List<Long>,
+    val intervals: List<RespirationInterval>
+) {
     val intervalsSec: List<Double>
-)
+        get() = intervals.map { it.intervalSec }
+}
 /**
  * 최종 RR이 어떤 센서 조합으로 결정되었는지 나타낸다.
  *
@@ -524,6 +586,8 @@ data class ArousalBufferSnapshot(
     val imuGSampleCount: Int,
     val temperatureSampleCount: Int,
     val heartRateSampleCount: Int,
+    val ppgRrvIntervalCount: Int,
+    val imuRrvIntervalCount: Int,
     val latestTemperatureCelsius: Double?,
     val latestHeartRateBpm: Int?
 )
@@ -593,6 +657,23 @@ class PotchArousalCalculator(
      * 여기서는 중복되지 않은 IBI만 저장한다.
      */
     private val hrvIbiBuffer = ArrayDeque<IbiInterval>()
+
+    /**
+     * RRV 전용 source별 rolling interval buffer.
+     *
+     * RR 계산의 45초 창과 분리해 최근 config.rrvWindowSeconds(기본 180초)의
+     * 중복되지 않은 호흡 interval을 유지한다.
+     */
+    private val ppgRrvIntervalBuffer = ArrayDeque<BufferedRespirationInterval>()
+    private val imuRrvIntervalBuffer = ArrayDeque<BufferedRespirationInterval>()
+
+    // 현재 segment에서 각 source가 처리한 누적 sample 수.
+    private var totalPpgRespSampleCount: Long = 0L
+    private var totalImuRespSampleCount: Long = 0L
+
+    // rolling 재계산에서 동일 interval을 다시 넣지 않기 위한 마지막 end position.
+    private var lastAcceptedPpgRrvEndSamplePosition: Long = Long.MIN_VALUE
+    private var lastAcceptedImuRrvEndSamplePosition: Long = Long.MIN_VALUE
 
     // 현재 유효한 분석 연속 구간과 HRV 중복 제거 위치.
     private var currentAnalysisSegmentId: Long = 0L
@@ -691,12 +772,17 @@ class PotchArousalCalculator(
 
         val rrArousalResult = calculateRespiratoryRateArousal(rrFusion)
 
-        // RRV는 현재 프레임에서 얻은 호흡 interval만 사용하므로 과거 결과를 유지하지 않는다.
-        val rrvResult = calculateRrvRmssd(
+        // 현재 45초 창에서 새로 나타난 interval만 source별 3분 RRV buffer에 누적한다.
+        appendRespirationIntervalsForRrv(
             ppg = ppgRespiration,
-            imu = imuRespiration,
+            imu = imuRespiration
+        )
+        trimRespirationVariabilityBuffers()
+
+        val rrvBundle = calculateRrvRmssd(
             rrFusion = rrFusion
         )
+        val rrvResult = rrvBundle.selected
 
         val heartRateIsFresh = isFresh(
             lastValidTimestampMillis = lastValidHeartRateTimestampMillis,
@@ -748,8 +834,6 @@ class PotchArousalCalculator(
 
         val rrvCalculationStatus = buildRrvCalculationStatus(
             result = rrvResult,
-            ppg = ppgRespiration,
-            imu = imuRespiration,
             rrStatus = rrCalculationStatus
         )
 
@@ -791,11 +875,23 @@ class PotchArousalCalculator(
             rrFusionLog = rrFusion.log,
             rrCalculationStatus = rrCalculationStatus,
 
+            rrAnalysisSegmentId = currentAnalysisSegmentId,
+            ppgRespPeakSamplePositions = ppgRespiration?.peakSamplePositions ?: emptyList(),
+            ppgRespIntervalsSec = ppgRespiration?.intervalsSec ?: emptyList(),
+            imuRespPeakSamplePositions = imuRespiration?.peakSamplePositions ?: emptyList(),
+            imuRespIntervalsSec = imuRespiration?.intervalsSec ?: emptyList(),
+
             rrvRmssd = rrvResult?.rmssdSec,
             rrvRmssdMs = rrvResult?.rmssdMs,
             rrvScore = rrvResult?.score,
             rrvSource = rrvResult?.source ?: RrvSource.NONE,
             rrvQuality = rrvResult?.qualityScore ?: 0.0,
+            rrvFromPpgRmssdSec = rrvBundle.ppg?.rmssdSec,
+            rrvFromImuRmssdSec = rrvBundle.imu?.rmssdSec,
+            rrvPpgIntervalCount = rrvBundle.ppg?.intervalCount ?: ppgRrvIntervalBuffer.size,
+            rrvImuIntervalCount = rrvBundle.imu?.intervalCount ?: imuRrvIntervalBuffer.size,
+            rrvPpgQuality = rrvBundle.ppg?.qualityScore ?: 0.0,
+            rrvImuQuality = rrvBundle.imu?.qualityScore ?: 0.0,
             rrvCalculationStatus = rrvCalculationStatus,
 
             // stale 상태에서는 마지막 정상값을 유지하지 않고 null로 내린다.
@@ -831,7 +927,8 @@ class PotchArousalCalculator(
             lastLog = "Arousal score=$finalScore, " +
                     "micro=${microMovement?.level}, " +
                     "rr=${rrFusion.log}, rrScore=${rrArousalResult?.log}, " +
-                    "rrv=${rrvResult?.log}, " +
+                    "rrv=${rrvResult?.log}, ppgRrvN=${ppgRrvIntervalBuffer.size}, " +
+                    "imuRrvN=${imuRrvIntervalBuffer.size}, " +
                     "hr=${hrResult?.log}, " +
                     "hrv=${hrvFrequencyResult?.log ?: hrvResult?.log}, " +
                     "skin=${skinTempResult?.log}"
@@ -898,46 +995,49 @@ class PotchArousalCalculator(
 
     private fun buildRrvCalculationStatus(
         result: RrvResult?,
-        ppg: PpgRespirationResult?,
-        imu: ImuRespirationResult?,
         rrStatus: MetricCalculationStatus
     ): MetricCalculationStatus {
         if (result != null) {
             return MetricCalculationStatus(
                 state = MetricCalculationState.VALID,
                 message = "정상 계산 중 (${result.source.name}, interval=${result.intervalCount}, " +
-                        "quality=${"%.2f".format(result.qualityScore)})"
+                        "quality=${"%.2f".format(result.qualityScore)}, " +
+                        "PPG buffer=${ppgRrvIntervalBuffer.size}, " +
+                        "IMU buffer=${imuRrvIntervalBuffer.size})"
             )
         }
+
+        val ppgCount = ppgRrvIntervalBuffer.size
+        val imuCount = imuRrvIntervalBuffer.size
+        val maxCount = maxOf(ppgCount, imuCount)
 
         if (rrStatus.state == MetricCalculationState.COLLECTING) {
             return MetricCalculationStatus(
                 state = MetricCalculationState.COLLECTING,
-                message = "RRV 계산에 사용할 호흡 interval을 수집 중"
+                message = "RRV 전용 ${config.rrvWindowSeconds}초 buffer 수집 중: " +
+                        "PPG=$ppgCount, IMU=$imuCount / 최소 ${config.rrvMinIntervalCount}개"
             )
         }
 
         if (rrStatus.state == MetricCalculationState.REJECTED) {
             return MetricCalculationStatus(
                 state = MetricCalculationState.REJECTED,
-                message = "RR 계산 실패로 RRV 계산 불가: 호흡 파형 품질을 확인하세요"
+                message = "현재 RR 계산 실패로 RRV 출력 보류. " +
+                        "누적 buffer: PPG=$ppgCount, IMU=$imuCount"
             )
         }
-
-        val ppgCount = ppg?.intervalsSec?.size ?: 0
-        val imuCount = imu?.intervalsSec?.size ?: 0
-        val maxCount = maxOf(ppgCount, imuCount)
 
         return if (maxCount < config.rrvMinIntervalCount) {
             MetricCalculationStatus(
                 state = MetricCalculationState.COLLECTING,
-                message = "유효 호흡 interval 수집 중: PPG=$ppgCount, IMU=$imuCount / " +
+                message = "RRV 전용 호흡 interval 수집 중: PPG=$ppgCount, IMU=$imuCount / " +
                         "최소 ${config.rrvMinIntervalCount}개"
             )
         } else {
             MetricCalculationStatus(
                 state = MetricCalculationState.REJECTED,
-                message = "호흡 interval이 quality 또는 이상치 필터에서 제외되어 RRV 계산 불가"
+                message = "누적 호흡 interval이 quality 또는 중앙값 이상치 필터에서 제외되어 " +
+                        "RRV 계산 불가: PPG=$ppgCount, IMU=$imuCount"
             )
         }
     }
@@ -1168,6 +1268,9 @@ class PotchArousalCalculator(
                 ppgIrBuffer.removeFirst()
             }
         }
+
+        // RED/IR은 같은 sample 시각을 공유하므로 한 채널 sample 수만 누적한다.
+        totalPpgRespSampleCount += minOf(redSamples.size, irSamples.size).toLong()
     }
 
     /**
@@ -1209,6 +1312,8 @@ class PotchArousalCalculator(
             if (microFilteredBuffer.size > maxImuSamples) {
                 microFilteredBuffer.removeFirst()
             }
+
+            totalImuRespSampleCount += 1L
         }
     }
 
@@ -1303,6 +1408,7 @@ class PotchArousalCalculator(
 
         if (hasExpired(lastValidRespirationTimestampMillis, nowMillis, config.rrFreshnessTimeoutMillis)) {
             respirationRateBuffer.clear()
+            clearRespirationVariabilityBuffers(resetSampleCounters = false)
             lastValidRespirationTimestampMillis = null
             respirationBufferExpiredByGap = true
         }
@@ -1342,6 +1448,8 @@ class PotchArousalCalculator(
             imuGSampleCount = imuGBuffer.size,
             temperatureSampleCount = temperatureBuffer.size,
             heartRateSampleCount = heartRateBuffer.size,
+            ppgRrvIntervalCount = ppgRrvIntervalBuffer.size,
+            imuRrvIntervalCount = imuRrvIntervalBuffer.size,
             latestTemperatureCelsius = temperatureBuffer.lastOrNull()?.second,
             latestHeartRateBpm = heartRateBuffer.lastOrNull()?.second
         )
@@ -1469,6 +1577,7 @@ class PotchArousalCalculator(
         imuGBuffer.clear()
         microFilteredBuffer.clear()
         microBpf.reset()
+        clearRespirationVariabilityBuffers(resetSampleCounters = true)
 
         // HRV는 한 개의 연속 segment 안에서만 계산한다.
         hrvIbiBuffer.clear()
@@ -1527,6 +1636,7 @@ class PotchArousalCalculator(
         heartRateBuffer.clear()
         respirationRateBuffer.clear()
         hrvIbiBuffer.clear()
+        clearRespirationVariabilityBuffers(resetSampleCounters = true)
 
         currentAnalysisSegmentId = initialSegmentId
         lastAcceptedHrvIbiSegmentId = Long.MIN_VALUE
@@ -1860,6 +1970,9 @@ class PotchArousalCalculator(
                 buffer.toList()
             }
 
+        val windowStartSamplePosition =
+            totalPpgRespSampleCount - rawWindow.size.toLong()
+
         if (rawWindow.size < minSampleCount) {
             return null
         }
@@ -1908,7 +2021,8 @@ class PotchArousalCalculator(
             filtered = filtered,
             usableStartIndex = usableStartIndex,
             peakToPeakAmplitude = peakToPeakAmplitude,
-            invert = false
+            invert = false,
+            windowStartSamplePosition = windowStartSamplePosition
         )
 
         val negativeResult = calculateRrFromRespWave(
@@ -1916,7 +2030,8 @@ class PotchArousalCalculator(
             filtered = filtered,
             usableStartIndex = usableStartIndex,
             peakToPeakAmplitude = peakToPeakAmplitude,
-            invert = true
+            invert = true,
+            windowStartSamplePosition = windowStartSamplePosition
         )
 
         return chooseBetterRespirationResult(
@@ -1936,7 +2051,8 @@ class PotchArousalCalculator(
         filtered: DoubleArray,
         usableStartIndex: Int,
         peakToPeakAmplitude: Double,
-        invert: Boolean
+        invert: Boolean,
+        windowStartSamplePosition: Long
     ): PpgRespirationResult? {
         val wave = if (invert) {
             DoubleArray(filtered.size) { i -> -filtered[i] }
@@ -1953,9 +2069,6 @@ class PotchArousalCalculator(
 
         val minPeakDistanceSamples =
             (config.sampleRateHz * (60.0 / config.rrMaxBpm)).toInt()
-
-        val maxPeakDistanceSamples =
-            (config.sampleRateHz * (60.0 / config.rrMinBpm)).toInt()
 
         val peakIndices = mutableListOf<Int>()
         var lastPeakIndex = -minPeakDistanceSamples
@@ -1988,17 +2101,30 @@ class PotchArousalCalculator(
             return null
         }
 
-        val intervals = mutableListOf<Double>()
+        val peakSamplePositions = peakIndices.map { index ->
+            windowStartSamplePosition + index.toLong()
+        }
 
-        for (i in 1 until peakIndices.size) {
-            val diffSamples = peakIndices[i] - peakIndices[i - 1]
-            val intervalSec = diffSamples / config.sampleRateHz
+        val intervals = mutableListOf<RespirationInterval>()
+
+        for (i in 1 until peakSamplePositions.size) {
+            val startPosition = peakSamplePositions[i - 1]
+            val endPosition = peakSamplePositions[i]
+            val intervalSec =
+                (endPosition - startPosition) / config.sampleRateHz
 
             val minIntervalSec = 60.0 / config.rrMaxBpm
             val maxIntervalSec = 60.0 / config.rrMinBpm
 
             if (intervalSec in minIntervalSec..maxIntervalSec) {
-                intervals.add(intervalSec)
+                intervals.add(
+                    RespirationInterval(
+                        intervalSec = intervalSec,
+                        startSamplePosition = startPosition,
+                        endSamplePosition = endPosition,
+                        segmentId = currentAnalysisSegmentId
+                    )
+                )
             }
         }
 
@@ -2012,7 +2138,8 @@ class PotchArousalCalculator(
             return null
         }
 
-        val averageIntervalSec = usedIntervals.average()
+        val usedIntervalValues = usedIntervals.map { it.intervalSec }
+        val averageIntervalSec = usedIntervalValues.average()
         if (averageIntervalSec <= 0.0) {
             return null
         }
@@ -2023,7 +2150,7 @@ class PotchArousalCalculator(
             return null
         }
 
-        val intervalRegularityScore = calculateIntervalRegularityScore(usedIntervals)
+        val intervalRegularityScore = calculateIntervalRegularityScore(usedIntervalValues)
         val amplitudeScore =
             (peakToPeakAmplitude / config.ppgRespMinPeakToPeakAmplitude)
                 .coerceIn(0.0, 3.0) / 3.0
@@ -2040,7 +2167,9 @@ class PotchArousalCalculator(
             averageIntervalSec = averageIntervalSec,
             peakToPeakAmplitude = peakToPeakAmplitude,
             qualityScore = qualityScore,
-            intervalsSec = usedIntervals
+            inverted = invert,
+            peakSamplePositions = peakSamplePositions,
+            intervals = usedIntervals
         )
     }
 
@@ -2054,13 +2183,13 @@ class PotchArousalCalculator(
      * 빈 결과는 상위 계산 함수가 null/REJECTED로 처리한다.
      */
     private fun removeRespIntervalOutliers(
-        intervals: List<Double>
-    ): List<Double> {
+        intervals: List<RespirationInterval>
+    ): List<RespirationInterval> {
         if (intervals.size < 3) {
             return intervals
         }
 
-        val sorted = intervals.sorted()
+        val sorted = intervals.map { it.intervalSec }.sorted()
         val median = sorted[sorted.size / 2]
 
         if (!median.isFinite() || median <= 0.0) {
@@ -2075,9 +2204,9 @@ class PotchArousalCalculator(
         }
 
         return intervals.filter { interval ->
-            interval.isFinite() &&
-                    interval > 0.0 &&
-                    abs(interval - median) / median <= tolerance
+            interval.intervalSec.isFinite() &&
+                    interval.intervalSec > 0.0 &&
+                    abs(interval.intervalSec - median) / median <= tolerance
         }
     }
 
@@ -2167,6 +2296,9 @@ class PotchArousalCalculator(
                 imuGBuffer.toList()
             }
 
+        val windowStartSamplePosition =
+            totalImuRespSampleCount - rawWindow.size.toLong()
+
         if (rawWindow.size < minSampleCount) {
             return null
         }
@@ -2213,14 +2345,16 @@ class PotchArousalCalculator(
             filtered = filtered,
             usableStartIndex = warmupSamples,
             peakToPeakAmplitudeG = peakToPeakAmplitudeG,
-            invert = false
+            invert = false,
+            windowStartSamplePosition = windowStartSamplePosition
         )
 
         val negativeResult = calculateRrFromImuRespWave(
             filtered = filtered,
             usableStartIndex = warmupSamples,
             peakToPeakAmplitudeG = peakToPeakAmplitudeG,
-            invert = true
+            invert = true,
+            windowStartSamplePosition = windowStartSamplePosition
         )
 
         return chooseBetterImuRespirationResult(
@@ -2247,7 +2381,8 @@ class PotchArousalCalculator(
         filtered: DoubleArray,
         usableStartIndex: Int,
         peakToPeakAmplitudeG: Double,
-        invert: Boolean
+        invert: Boolean,
+        windowStartSamplePosition: Long
     ): ImuRespirationResult? {
         val wave =
             if (invert) {
@@ -2304,17 +2439,30 @@ class PotchArousalCalculator(
             return null
         }
 
-        val intervals = mutableListOf<Double>()
+        val peakSamplePositions = peakIndices.map { index ->
+            windowStartSamplePosition + index.toLong()
+        }
+
+        val intervals = mutableListOf<RespirationInterval>()
 
         val minIntervalSec = 60.0 / config.rrMaxBpm
         val maxIntervalSec = 60.0 / config.rrMinBpm
 
-        for (i in 1 until peakIndices.size) {
-            val diffSamples = peakIndices[i] - peakIndices[i - 1]
-            val intervalSec = diffSamples / config.sampleRateHz
+        for (i in 1 until peakSamplePositions.size) {
+            val startPosition = peakSamplePositions[i - 1]
+            val endPosition = peakSamplePositions[i]
+            val intervalSec =
+                (endPosition - startPosition) / config.sampleRateHz
 
             if (intervalSec in minIntervalSec..maxIntervalSec) {
-                intervals.add(intervalSec)
+                intervals.add(
+                    RespirationInterval(
+                        intervalSec = intervalSec,
+                        startSamplePosition = startPosition,
+                        endSamplePosition = endPosition,
+                        segmentId = currentAnalysisSegmentId
+                    )
+                )
             }
         }
 
@@ -2328,7 +2476,8 @@ class PotchArousalCalculator(
             return null
         }
 
-        val averageIntervalSec = usedIntervals.average()
+        val usedIntervalValues = usedIntervals.map { it.intervalSec }
+        val averageIntervalSec = usedIntervalValues.average()
 
         if (averageIntervalSec <= 0.0) {
             return null
@@ -2341,7 +2490,7 @@ class PotchArousalCalculator(
         }
 
         val intervalRegularityScore =
-            calculateImuIntervalRegularityScore(usedIntervals)
+            calculateImuIntervalRegularityScore(usedIntervalValues)
 
         val amplitudeScore =
             (peakToPeakAmplitudeG / config.imuRespMinPeakToPeakAmplitudeG)
@@ -2359,7 +2508,8 @@ class PotchArousalCalculator(
             peakToPeakAmplitudeG = peakToPeakAmplitudeG,
             qualityScore = qualityScore,
             inverted = invert,
-            intervalsSec = usedIntervals
+            peakSamplePositions = peakSamplePositions,
+            intervals = usedIntervals
         )
     }
 
@@ -2370,13 +2520,13 @@ class PotchArousalCalculator(
      * 큰 움직임이나 잘못 잡힌 peak의 영향을 줄인다.
      */
     private fun removeImuRespIntervalOutliers(
-        intervals: List<Double>
-    ): List<Double> {
+        intervals: List<RespirationInterval>
+    ): List<RespirationInterval> {
         if (intervals.size < 3) {
             return intervals
         }
 
-        val sorted = intervals.sorted()
+        val sorted = intervals.map { it.intervalSec }.sorted()
         val median = sorted[sorted.size / 2]
 
         if (!median.isFinite() || median <= 0.0) {
@@ -2389,9 +2539,9 @@ class PotchArousalCalculator(
         }
 
         return intervals.filter { interval ->
-            interval.isFinite() &&
-                    interval > 0.0 &&
-                    kotlin.math.abs(interval - median) / median <= tolerance
+            interval.intervalSec.isFinite() &&
+                    interval.intervalSec > 0.0 &&
+                    kotlin.math.abs(interval.intervalSec - median) / median <= tolerance
         }
     }
 
@@ -2511,8 +2661,22 @@ class PotchArousalCalculator(
         val ppgQuality = ppg.qualityScore.coerceIn(0.0, 1.0)
         val imuQuality = imu.qualityScore.coerceIn(0.0, 1.0)
 
-        // 1. 둘이 충분히 비슷하면 가중 평균
-        if (diff <= config.rrFusionAgreeDiffBpm) {
+        val ppgUsable =
+            ppgQuality >= config.rrFusionMinUsableQuality
+
+        val imuUsable =
+            imuQuality >= config.rrFusionMinUsableQuality
+
+        val imuStrongEnoughForWeighting =
+            imuQuality >= config.rrFusionMinImuQualityForWeighting
+
+        // 1. 두 값이 1 bpm 이내이고 양쪽 품질이 충분하며,
+        // IMU가 엄격한 weighting 품질 기준까지 통과할 때만 가중 평균한다.
+        if (
+            diff <= config.rrFusionAgreeDiffBpm &&
+            ppgUsable &&
+            imuStrongEnoughForWeighting
+        ) {
             val imuWeight =
                 config.rrFusionImuBaseWeight * (0.5 + imuQuality)
 
@@ -2547,15 +2711,13 @@ class PotchArousalCalculator(
                 imuQuality = imuQuality,
                 diffBpm = diff,
                 confidence = confidence,
-                log = "RR fusion: weighted, diff=${"%.2f".format(diff)}"
+                log = "RR fusion: weighted, diff=${"%.2f".format(diff)}, " +
+                        "ppgQ=${"%.2f".format(ppgQuality)}, imuQ=${"%.2f".format(imuQuality)}"
             )
         }
 
-        // 2. 차이가 크면 기본적으로 PPG 우선
-        // 단, PPG quality가 낮고 IMU quality가 충분하면 IMU를 백업으로 사용
-        val imuUsable = imuQuality >= config.rrFusionMinUsableQuality
-        val ppgUsable = ppgQuality >= config.rrFusionMinUsableQuality
-
+        // 2. weighted fusion 조건을 만족하지 못하면 기본적으로 PPG를 사용한다.
+        // PPG가 usable하지 않고 IMU만 usable한 경우에만 IMU를 백업으로 사용한다.
         if (!ppgUsable && imuUsable) {
             return RrFusionResult(
                 rrBpm = imuRr,
@@ -2579,7 +2741,9 @@ class PotchArousalCalculator(
             imuQuality = imuQuality,
             diffBpm = diff,
             confidence = (ppgQuality * 0.8).coerceIn(0.0, 1.0),
-            log = "RR fusion: disagree, PPG preferred"
+            log = "RR fusion: PPG preferred, weighted blocked " +
+                    "(diff=${"%.2f".format(diff)}, ppgQ=${"%.2f".format(ppgQuality)}, " +
+                    "imuQ=${"%.2f".format(imuQuality)})"
         )
     }
 
@@ -2806,93 +2970,273 @@ class PotchArousalCalculator(
      * RR fusion source에 맞춰 IMU/PPG interval 중 더 적절한 쪽을 선택하고,
      * 호흡 interval의 연속 차이를 이용해 RMSSD를 산출한다.
      */
-    private fun calculateRrvRmssd(
+    private fun appendRespirationIntervalsForRrv(
         ppg: PpgRespirationResult?,
-        imu: ImuRespirationResult?,
-        rrFusion: RrFusionResult
-    ): RrvResult? {
-        val imuRrv = buildRrvResultFromIntervals(
-            source = RrvSource.IMU,
-            intervalsSec = imu?.intervalsSec,
-            respirationQuality = imu?.qualityScore
-        )
+        imu: ImuRespirationResult?
+    ) {
+        if (ppg != null) {
+            appendRespirationIntervalsForRrvSource(
+                source = RrvSource.PPG,
+                intervals = ppg.intervals,
+                qualityScore = ppg.qualityScore
+            )
+        }
 
-        val ppgRrv = buildRrvResultFromIntervals(
-            source = RrvSource.PPG,
-            intervalsSec = ppg?.intervalsSec,
-            respirationQuality = ppg?.qualityScore
-        )
-
-        return when (rrFusion.source) {
-            RrFusionSource.BOTH_WEIGHTED,
-            RrFusionSource.PPG_ONLY,
-            RrFusionSource.PPG_PREFERRED_DISAGREE -> {
-                ppgRrv ?: imuRrv
-            }
-
-            RrFusionSource.IMU_ONLY,
-            RrFusionSource.IMU_PREFERRED_DISAGREE -> {
-                imuRrv ?: ppgRrv
-            }
-
-            RrFusionSource.NONE -> {
-                chooseBetterRrvResult(imuRrv, ppgRrv)
-            }
+        if (imu != null) {
+            appendRespirationIntervalsForRrvSource(
+                source = RrvSource.IMU,
+                intervals = imu.intervals,
+                qualityScore = imu.qualityScore
+            )
         }
     }
 
     /**
-     * 선택된 호흡 interval 리스트 하나를 RRV 결과로 변환한다.
-     *
-     * interval 품질, 최소 개수, outlier 제거를 거친 뒤
-     * RMSSD, score, qualityScore를 계산한다.
+     * rolling RR 계산으로 동일 interval이 매초 다시 전달되므로
+     * source별 마지막 endSamplePosition보다 새로운 interval만 추가한다.
+     */
+    private fun appendRespirationIntervalsForRrvSource(
+        source: RrvSource,
+        intervals: List<RespirationInterval>,
+        qualityScore: Double
+    ): Int {
+        if (source == RrvSource.NONE) return 0
+        if (qualityScore < config.rrvMinUsableQuality) return 0
+
+        val buffer =
+            when (source) {
+                RrvSource.PPG -> ppgRrvIntervalBuffer
+                RrvSource.IMU -> imuRrvIntervalBuffer
+                RrvSource.NONE -> return 0
+            }
+
+        var lastAcceptedEnd =
+            when (source) {
+                RrvSource.PPG -> lastAcceptedPpgRrvEndSamplePosition
+                RrvSource.IMU -> lastAcceptedImuRrvEndSamplePosition
+                RrvSource.NONE -> Long.MAX_VALUE
+            }
+
+        // 같은 peak를 rolling window에서 몇 sample 다르게 다시 찾는 경우를 중복으로 보지 않는다.
+        // 새 호흡 peak는 최소 허용 호흡 간격의 절반 이상 진행된 뒤에만 받는다.
+        val minimumNewPeakAdvanceSamples =
+            (config.sampleRateHz * (60.0 / config.rrMaxBpm) * 0.5)
+                .toLong()
+                .coerceAtLeast(1L)
+
+        // 양/음 peak 방향이 바뀌면서 이전 interval과 겹치는 후보가 들어오는 것을 막는다.
+        val allowedPeakPositionJitterSamples =
+            (config.sampleRateHz * 0.15)
+                .toLong()
+                .coerceAtLeast(1L)
+
+        var acceptedCount = 0
+
+        intervals
+            .asSequence()
+            .filter { it.segmentId == currentAnalysisSegmentId }
+            .sortedBy { it.endSamplePosition }
+            .forEach { interval ->
+                if (!interval.intervalSec.isFinite() || interval.intervalSec <= 0.0) {
+                    return@forEach
+                }
+
+                if (lastAcceptedEnd != Long.MIN_VALUE) {
+                    val endAdvance =
+                        interval.endSamplePosition - lastAcceptedEnd
+
+                    if (endAdvance < minimumNewPeakAdvanceSamples) {
+                        return@forEach
+                    }
+
+                    // 이전에 수락한 호흡 peak보다 훨씬 앞에서 시작한 interval은
+                    // 반대 polarity에서 나온 겹치는 interval일 가능성이 높다.
+                    if (
+                        interval.startSamplePosition <
+                        lastAcceptedEnd - allowedPeakPositionJitterSamples
+                    ) {
+                        return@forEach
+                    }
+                }
+
+                buffer.addLast(
+                    BufferedRespirationInterval(
+                        interval = interval,
+                        qualityScore = qualityScore.coerceIn(0.0, 1.0)
+                    )
+                )
+
+                lastAcceptedEnd = interval.endSamplePosition
+                acceptedCount += 1
+            }
+
+        when (source) {
+            RrvSource.PPG ->
+                lastAcceptedPpgRrvEndSamplePosition = lastAcceptedEnd
+            RrvSource.IMU ->
+                lastAcceptedImuRrvEndSamplePosition = lastAcceptedEnd
+            RrvSource.NONE -> Unit
+        }
+
+        return acceptedCount
+    }
+
+    /**
+     * source별 RRV buffer에서 최근 config.rrvWindowSeconds 밖의 interval을 제거한다.
+     */
+    private fun trimRespirationVariabilityBuffers() {
+        trimRespirationVariabilityBuffer(
+            buffer = ppgRrvIntervalBuffer,
+            newestSamplePosition = totalPpgRespSampleCount
+        )
+
+        trimRespirationVariabilityBuffer(
+            buffer = imuRrvIntervalBuffer,
+            newestSamplePosition = totalImuRespSampleCount
+        )
+    }
+
+    private fun trimRespirationVariabilityBuffer(
+        buffer: ArrayDeque<BufferedRespirationInterval>,
+        newestSamplePosition: Long
+    ) {
+        val windowSamples =
+            (config.sampleRateHz * config.rrvWindowSeconds)
+                .toLong()
+                .coerceAtLeast(1L)
+
+        val minimumEndSamplePosition =
+            newestSamplePosition - windowSamples
+
+        while (
+            buffer.isNotEmpty() &&
+            buffer.first().interval.endSamplePosition < minimumEndSamplePosition
+        ) {
+            buffer.removeFirst()
+        }
+    }
+
+    private fun clearRespirationVariabilityBuffers(
+        resetSampleCounters: Boolean
+    ) {
+        ppgRrvIntervalBuffer.clear()
+        imuRrvIntervalBuffer.clear()
+
+        lastAcceptedPpgRrvEndSamplePosition = Long.MIN_VALUE
+        lastAcceptedImuRrvEndSamplePosition = Long.MIN_VALUE
+
+        if (resetSampleCounters) {
+            totalPpgRespSampleCount = 0L
+            totalImuRespSampleCount = 0L
+        }
+    }
+
+    /**
+     * PPG/IMU의 최근 3분 interval buffer에서 각각 RRV를 계산한 뒤,
+     * 현재 RR fusion source에 맞는 결과를 최종 선택한다.
+     */
+    private fun calculateRrvRmssd(
+        rrFusion: RrFusionResult
+    ): RrvCalculationBundle {
+        val ppgRrv = buildRrvResultFromIntervals(
+            source = RrvSource.PPG,
+            bufferedIntervals = ppgRrvIntervalBuffer.toList()
+        )
+
+        val imuRrv = buildRrvResultFromIntervals(
+            source = RrvSource.IMU,
+            bufferedIntervals = imuRrvIntervalBuffer.toList()
+        )
+
+        val selected =
+            when (rrFusion.source) {
+                RrFusionSource.BOTH_WEIGHTED,
+                RrFusionSource.PPG_ONLY,
+                RrFusionSource.PPG_PREFERRED_DISAGREE -> {
+                    ppgRrv ?: imuRrv
+                }
+
+                RrFusionSource.IMU_ONLY,
+                RrFusionSource.IMU_PREFERRED_DISAGREE -> {
+                    imuRrv ?: ppgRrv
+                }
+
+                // 현재 프레임에서 RR 자체가 유효하지 않으면 오래된 RRV를 재사용하지 않는다.
+                RrFusionSource.NONE -> null
+            }
+
+        return RrvCalculationBundle(
+            ppg = ppgRrv,
+            imu = imuRrv,
+            selected = selected
+        )
+    }
+
+    /**
+     * 선택된 source의 RRV 전용 rolling interval buffer로 RMSSD를 계산한다.
      */
     private fun buildRrvResultFromIntervals(
         source: RrvSource,
-        intervalsSec: List<Double>?,
-        respirationQuality: Double?
+        bufferedIntervals: List<BufferedRespirationInterval>
     ): RrvResult? {
-        if (intervalsSec == null) return null
-        if (respirationQuality == null) return null
+        if (bufferedIntervals.isEmpty()) return null
 
-        if (respirationQuality < config.rrvMinUsableQuality) {
-            return null
-        }
+        val orderedIntervals =
+            bufferedIntervals
+                .filter {
+                    it.interval.segmentId == currentAnalysisSegmentId &&
+                            it.qualityScore >= config.rrvMinUsableQuality
+                }
+                .sortedBy { it.interval.endSamplePosition }
 
-        val cleanedIntervals = removeRrvIntervalOutliers(intervalsSec)
+        val cleanedIntervals =
+            removeRrvIntervalOutliers(orderedIntervals)
 
         if (cleanedIntervals.size < config.rrvMinIntervalCount) {
             return null
         }
 
-        val successiveDiffs = mutableListOf<Double>()
+        val intervalValues =
+            cleanedIntervals.map { it.interval.intervalSec }
 
-        for (i in 1 until cleanedIntervals.size) {
-            val diff = cleanedIntervals[i] - cleanedIntervals[i - 1]
-            successiveDiffs.add(diff)
-        }
+        val successiveDiffs =
+            intervalValues.zipWithNext { previous, current ->
+                current - previous
+            }
 
         if (successiveDiffs.isEmpty()) {
             return null
         }
 
-        var sumSquaredDiff = 0.0
+        val rmssdSec =
+            sqrt(
+                successiveDiffs
+                    .map { diff -> diff * diff }
+                    .average()
+            )
 
-        for (diff in successiveDiffs) {
-            sumSquaredDiff += diff * diff
-        }
-
-        val rmssdSec = sqrt(sumSquaredDiff / successiveDiffs.size)
         val rmssdMs = rmssdSec * 1000.0
-        val meanIntervalSec = cleanedIntervals.average()
-
+        val meanIntervalSec = intervalValues.average()
         val score = scoreRrvRmssd(rmssdSec)
 
+        val meanRespirationQuality =
+            cleanedIntervals
+                .map { it.qualityScore }
+                .average()
+                .coerceIn(0.0, 1.0)
+
+        val preferredCount =
+            config.rrvPreferredIntervalCount
+                .coerceAtLeast(config.rrvMinIntervalCount)
+                .toDouble()
+
         val intervalCountScore =
-            (cleanedIntervals.size / 8.0).coerceIn(0.0, 1.0)
+            (cleanedIntervals.size / preferredCount)
+                .coerceIn(0.0, 1.0)
 
         val qualityScore =
-            (respirationQuality * 0.7 + intervalCountScore * 0.3)
+            (meanRespirationQuality * 0.7 +
+                    intervalCountScore * 0.3)
                 .coerceIn(0.0, 1.0)
 
         return RrvResult(
@@ -2903,7 +3247,9 @@ class PotchArousalCalculator(
             meanIntervalSec = meanIntervalSec,
             score = score,
             qualityScore = qualityScore,
-            log = "RRV ${source.name}: rmssd=${"%.3f".format(rmssdSec)}s, intervals=${cleanedIntervals.size}"
+            log = "RRV ${source.name}: rmssd=${"%.3f".format(rmssdSec)}s, " +
+                    "intervals=${cleanedIntervals.size}, " +
+                    "window=${config.rrvWindowSeconds}s"
         )
     }
 
@@ -2914,13 +3260,14 @@ class PotchArousalCalculator(
      * 중앙값 기준 허용 범위 밖의 값을 제외한다.
      */
     private fun removeRrvIntervalOutliers(
-        intervals: List<Double>
-    ): List<Double> {
+        intervals: List<BufferedRespirationInterval>
+    ): List<BufferedRespirationInterval> {
         if (intervals.size < 3) {
             return intervals
         }
 
-        val sorted = intervals.sorted()
+        val sorted =
+            intervals.map { it.interval.intervalSec }.sorted()
         val median = sorted[sorted.size / 2]
 
         if (!median.isFinite() || median <= 0.0) {
@@ -2932,7 +3279,9 @@ class PotchArousalCalculator(
             return emptyList()
         }
 
-        return intervals.filter { interval ->
+        return intervals.filter { buffered ->
+            val interval = buffered.interval.intervalSec
+
             interval.isFinite() &&
                     interval > 0.0 &&
                     abs(interval - median) / median <= tolerance

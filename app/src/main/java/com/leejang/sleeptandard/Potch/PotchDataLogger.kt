@@ -117,11 +117,23 @@ class PotchDataLogger(
                 "rr_fusion_confidence",
                 "rr_fusion_log",
 
+                "rr_analysis_segment_id",
+                "ppg_resp_peak_sample_positions",
+                "ppg_resp_intervals_sec",
+                "imu_resp_peak_sample_positions",
+                "imu_resp_intervals_sec",
+
                 "rrv_rmssd_sec",
                 "rrv_rmssd_ms",
                 "rrv_score",
                 "rrv_source",
                 "rrv_quality",
+                "rrv_from_ppg_rmssd_sec",
+                "rrv_from_imu_rmssd_sec",
+                "rrv_ppg_interval_count",
+                "rrv_imu_interval_count",
+                "rrv_ppg_quality",
+                "rrv_imu_quality",
 
                 "hr_bpm",
                 "hr_gradient",
@@ -265,11 +277,23 @@ class PotchDataLogger(
             formatDouble(arousalState.rrFusionConfidence),
             escapeCsv(arousalState.rrFusionLog.orEmpty()),
 
+            arousalState.rrAnalysisSegmentId.toString(),
+            formatLongList(arousalState.ppgRespPeakSamplePositions),
+            formatDoubleList(arousalState.ppgRespIntervalsSec),
+            formatLongList(arousalState.imuRespPeakSamplePositions),
+            formatDoubleList(arousalState.imuRespIntervalsSec),
+
             formatDouble(arousalState.rrvRmssd),
             formatDouble(arousalState.rrvRmssdMs),
             formatDouble(arousalState.rrvScore),
             escapeCsv(arousalState.rrvSource.name),
             formatDouble(arousalState.rrvQuality),
+            formatDouble(arousalState.rrvFromPpgRmssdSec),
+            formatDouble(arousalState.rrvFromImuRmssdSec),
+            arousalState.rrvPpgIntervalCount.toString(),
+            arousalState.rrvImuIntervalCount.toString(),
+            formatDouble(arousalState.rrvPpgQuality),
+            formatDouble(arousalState.rrvImuQuality),
 
             arousalState.hrBpm?.toString() ?: "",
             formatDouble(arousalState.hrGradient),
@@ -411,6 +435,25 @@ class PotchDataLogger(
     ): String {
         if (value == null) return ""
         return String.format(Locale.US, "%.${digits}f", value)
+    }
+
+    private fun formatLongList(
+        values: List<Long>
+    ): String {
+        return escapeCsv(
+            values.joinToString(";")
+        )
+    }
+
+    private fun formatDoubleList(
+        values: List<Double>,
+        digits: Int = 4
+    ): String {
+        return escapeCsv(
+            values.joinToString(";") { value ->
+                String.format(Locale.US, "%.${digits}f", value)
+            }
+        )
     }
 
     private fun escapeCsv(value: String): String {
