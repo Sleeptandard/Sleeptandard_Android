@@ -5,9 +5,15 @@ import kotlinx.coroutines.flow.MutableStateFlow
 
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
+import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.ceil
+import kotlin.math.cos
+import kotlin.math.floor
+import kotlin.math.ln
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
+import kotlin.math.sin
 import kotlin.math.sqrt
 
 /**
@@ -37,6 +43,10 @@ enum class HeartRateProcessingState {
     SIGNAL_TOO_WEAK,
     SIGNAL_SATURATED,
     MOTION_ARTIFACT,
+    LOW_SPECTRAL_CONCENTRATION,
+    HIGH_SPECTRAL_ENTROPY,
+    AMPLITUDE_UNSTABLE,
+    ABRUPT_SIGNAL_CHANGE,
     INSUFFICIENT_PEAKS,
     INVALID_IBI,
     BPM_OUT_OF_RANGE,
@@ -72,6 +82,19 @@ data class HeartRateDiagnostics(
     // band-pass 출력의 5~95 percentile 폭. 극단 spike 한두 개에 덜 민감하다.
     val acRobustAmplitude: Double? = null,
 
+    // 최근 window를 1초 단위로 나눈 AC 진폭들의 변동계수.
+    // 자세/접촉 변화로 pulse amplitude가 크게 출렁이는지 확인한다.
+    val amplitudeCoefficientOfVariation: Double? = null,
+
+    // HR 허용 주파수 대역에서 가장 강한 bin이 차지하는 power 비율과
+    // 정규화 spectral entropy. 집중도는 높을수록, entropy는 낮을수록 좋다.
+    val spectralConcentration: Double? = null,
+    val spectralEntropy: Double? = null,
+
+    // raw PPG의 최대 연속 sample 변화량을 robust amplitude로 나눈 값.
+    // 센서 raw scale이 달라도 갑작스러운 spike를 비교할 수 있도록 정규화한다.
+    val abruptChangeRatio: Double? = null,
+
     // 선택된 moving-average threshold의 실제 offset과 백분율.
     val selectedPeakThreshold: Double? = null,
     val selectedThresholdPercent: Double? = null,
@@ -81,7 +104,18 @@ data class HeartRateDiagnostics(
     val rawIbiCount: Int = 0,
     val validIbiCount: Int = 0,
     val acceptedIntervalRatio: Double? = null,
+
+    // 이상치 제거 전 raw IBI의 품질값.
+    val rawSdsdMs: Double? = null,
+    val rawIbiCv: Double? = null,
+    val physiologicalIntervalRatio: Double? = null,
+    val rawIntervalQualityScore: Double? = null,
+
+    // 이전 CSV 호환용. rawSdsdMs와 같은 값이다.
     val sdsdMs: Double? = null,
+
+    // 최종 HR estimate quality. raw interval 품질을 강하게 반영한다.
+    val qualityScore: Double? = null,
 
     // 이번 window에서 새로 계산한 BPM과 실제 화면 표시 BPM을 분리한다.
     val calculatedBpm: Int? = null,
@@ -130,6 +164,13 @@ data class HeartRateEstimate(
     val peakFitSdsdMs: Double? = null,
     val rawIntervalCount: Int = intervalCount,
     val acceptedIntervalRatio: Double = 1.0,
+    val rawIbiCv: Double = 0.0,
+    val physiologicalIntervalRatio: Double = 1.0,
+    val rawIntervalQualityScore: Double = 1.0,
+    val spectralConcentration: Double? = null,
+    val spectralEntropy: Double? = null,
+    val amplitudeCoefficientOfVariation: Double? = null,
+    val abruptChangeRatio: Double? = null,
 
     // 정수 peak index에서 포물선 보간 위치까지 이동한 크기.
     // 측정 정확도 자체를 뜻하지 않고 10ms grid 보정량을 디버깅하기 위한 값이다.
@@ -239,8 +280,23 @@ class PotchDataProcessor(
         private const val HEART_RATE_MIN_BPM = 40
         private const val HEART_RATE_MAX_BPM = 180
         private const val HEART_RATE_MOVING_AVERAGE_SECONDS = 1.5
-        private const val HEART_RATE_MIN_ACCEPTED_INTERVAL_RATIO = 0.50
+
+        // 후보 hard reject 기준.
+        // 정제 후 IBI 4개, 원본 대비 70% 유지, raw SDSD 200ms 이하를 모두 만족해야 한다.
+        private const val HEART_RATE_MIN_USED_INTERVAL_COUNT = 4
+        private const val HEART_RATE_MIN_ACCEPTED_INTERVAL_RATIO = 0.70
+        private const val HEART_RATE_MAX_RAW_SDSD_SEC = 0.200
         private const val HEART_RATE_MIN_PHYSIOLOGICAL_INTERVAL_RATIO = 0.75
+
+        // raw interval quality 점수 기준.
+        private const val HEART_RATE_RAW_IBI_CV_ZERO_SCORE = 0.30
+        private const val HEART_RATE_PREFERRED_USED_INTERVAL_COUNT = 8
+
+        // BVP 주파수/안정성 gate의 초기 기준.
+        private const val HEART_RATE_MIN_SPECTRAL_CONCENTRATION = 0.12
+        private const val HEART_RATE_MAX_SPECTRAL_ENTROPY = 0.82
+        private const val HEART_RATE_MAX_AMPLITUDE_CV = 0.50
+        private const val HEART_RATE_MAX_ABRUPT_CHANGE_RATIO = 1.00
 
         // Potch MAX3010x 계열 PPG는 18-bit 범위를 사용한다.
         private const val HEART_RATE_PPG_ADC_MAX = 262143.0
@@ -275,8 +331,13 @@ class PotchDataProcessor(
         val usedIntervals: List<IbiInterval>,
         val rawBpm: Double,
         val finalBpm: Double,
+
+        // 모두 이상치 제거 전 raw IBI에서 계산한다.
         val sdsdSec: Double,
+        val rawIbiCv: Double,
+        val physiologicalIntervalRatio: Double,
         val acceptedIntervalRatio: Double,
+        val rawIntervalQualityScore: Double,
         val selectionScore: Double,
         val meanInterpolationOffsetMs: Double,
         val maxInterpolationOffsetMs: Double
@@ -284,11 +345,20 @@ class PotchDataProcessor(
 
     private data class HeartRatePeakFitSearchResult(
         val bestCandidate: HeartRatePeakFitCandidate?,
+
+        // hard reject된 후보 중 가장 나았던 후보. 실패 CSV에도 raw 품질을 남기기 위해 보존한다.
+        val bestRejectedCandidate: HeartRatePeakFitCandidate?,
         val maxDetectedPeakCount: Int,
         val maxRawIntervalCount: Int,
         val maxValidIntervalCount: Int,
         val sawInvalidIbi: Boolean,
         val sawBpmOutOfRange: Boolean
+    )
+
+    private data class HeartRateSpectralQuality(
+        val concentration: Double,
+        val entropy: Double,
+        val evaluatedBinCount: Int
     )
 
     private data class HeartRateAnalysisResult(
@@ -828,7 +898,14 @@ class PotchDataProcessor(
                     "polarity=${heartRateEstimate?.selectedPolarity}, " +
                     "maPerc=${heartRateEstimate?.selectedThresholdPercent}, " +
                     "sdsdMs=${heartRateEstimate?.peakFitSdsdMs}, " +
+                    "rawIbiCv=${heartRateEstimate?.rawIbiCv}, " +
                     "ibiAccept=${heartRateEstimate?.acceptedIntervalRatio}, " +
+                    "physRatio=${heartRateEstimate?.physiologicalIntervalRatio}, " +
+                    "rawIbiQ=${heartRateEstimate?.rawIntervalQualityScore}, " +
+                    "spectralConcentration=${heartRateEstimate?.spectralConcentration}, " +
+                    "spectralEntropy=${heartRateEstimate?.spectralEntropy}, " +
+                    "amplitudeCv=${heartRateEstimate?.amplitudeCoefficientOfVariation}, " +
+                    "abruptRatio=${heartRateEstimate?.abruptChangeRatio}, " +
                     "peakOffsetMeanMs=${heartRateEstimate?.meanPeakInterpolationOffsetMs}, " +
                     "peakOffsetMaxMs=${heartRateEstimate?.maxPeakInterpolationOffsetMs}"
         )
@@ -1052,6 +1129,10 @@ class PotchDataProcessor(
             HeartRateProcessingState.SIGNAL_TOO_WEAK,
             HeartRateProcessingState.SIGNAL_SATURATED,
             HeartRateProcessingState.MOTION_ARTIFACT,
+            HeartRateProcessingState.LOW_SPECTRAL_CONCENTRATION,
+            HeartRateProcessingState.HIGH_SPECTRAL_ENTROPY,
+            HeartRateProcessingState.AMPLITUDE_UNSTABLE,
+            HeartRateProcessingState.ABRUPT_SIGNAL_CHANGE,
             HeartRateProcessingState.INSUFFICIENT_PEAKS,
             HeartRateProcessingState.INVALID_IBI,
             HeartRateProcessingState.BPM_OUT_OF_RANGE,
@@ -1119,7 +1200,12 @@ class PotchDataProcessor(
             state: HeartRateProcessingState,
             message: String,
             acRobustAmplitude: Double? = null,
+            amplitudeCoefficientOfVariation: Double? = null,
+            spectralConcentration: Double? = null,
+            spectralEntropy: Double? = null,
+            abruptChangeRatio: Double? = null,
             selectedCandidate: HeartRatePeakFitCandidate? = null,
+            qualityScore: Double? = null,
             detectedPeakCount: Int = 0,
             rawIbiCount: Int = 0,
             validIbiCount: Int = 0
@@ -1134,6 +1220,10 @@ class PotchDataProcessor(
                 irMin = irMin,
                 irMax = irMax,
                 acRobustAmplitude = acRobustAmplitude,
+                amplitudeCoefficientOfVariation = amplitudeCoefficientOfVariation,
+                spectralConcentration = spectralConcentration,
+                spectralEntropy = spectralEntropy,
+                abruptChangeRatio = abruptChangeRatio,
                 selectedPeakThreshold = selectedCandidate?.thresholdOffset,
                 selectedThresholdPercent = selectedCandidate?.thresholdPercent,
                 selectedPolarity = selectedCandidate?.polarity
@@ -1145,7 +1235,12 @@ class PotchDataProcessor(
                 validIbiCount = selectedCandidate?.usedIntervals?.size
                     ?: validIbiCount,
                 acceptedIntervalRatio = selectedCandidate?.acceptedIntervalRatio,
+                rawSdsdMs = selectedCandidate?.sdsdSec?.times(1000.0),
+                rawIbiCv = selectedCandidate?.rawIbiCv,
+                physiologicalIntervalRatio = selectedCandidate?.physiologicalIntervalRatio,
+                rawIntervalQualityScore = selectedCandidate?.rawIntervalQualityScore,
                 sdsdMs = selectedCandidate?.sdsdSec?.times(1000.0),
+                qualityScore = qualityScore,
                 calculatedBpm = selectedCandidate?.finalBpm?.roundToInt(),
                 imuMaxDeltaG = imuMaxDeltaG,
                 maxRawSampleDelta = maxRawSampleDelta
@@ -1220,6 +1315,83 @@ class PotchDataProcessor(
             )
         }
 
+        val amplitudeCoefficientOfVariation =
+            calculateWindowAmplitudeCoefficientOfVariation(
+                signal = bandPassed,
+                sampleRateHz = sampleRateHz
+            )
+
+        val spectralQuality = calculateHeartRateSpectralQuality(
+            signal = bandPassed,
+            sampleRateHz = sampleRateHz
+        )
+
+        val abruptChangeRatio =
+            calculateMaxConsecutiveDifference(signal)
+                ?.div(acRobustAmplitude)
+
+        fun spectralDiagnostics(
+            state: HeartRateProcessingState,
+            message: String
+        ): HeartRateAnalysisResult {
+            return HeartRateAnalysisResult(
+                estimate = null,
+                diagnostics = diagnostics(
+                    state = state,
+                    message = message,
+                    acRobustAmplitude = acRobustAmplitude,
+                    amplitudeCoefficientOfVariation = amplitudeCoefficientOfVariation,
+                    spectralConcentration = spectralQuality?.concentration,
+                    spectralEntropy = spectralQuality?.entropy,
+                    abruptChangeRatio = abruptChangeRatio
+                )
+            )
+        }
+
+        if (
+            spectralQuality != null &&
+            spectralQuality.concentration < HEART_RATE_MIN_SPECTRAL_CONCENTRATION
+        ) {
+            return spectralDiagnostics(
+                state = HeartRateProcessingState.LOW_SPECTRAL_CONCENTRATION,
+                message = "BVP 주파수 집중도 부족: ${"%.4f".format(spectralQuality.concentration)} " +
+                        "< $HEART_RATE_MIN_SPECTRAL_CONCENTRATION"
+            )
+        }
+
+        if (
+            spectralQuality != null &&
+            spectralQuality.entropy > HEART_RATE_MAX_SPECTRAL_ENTROPY
+        ) {
+            return spectralDiagnostics(
+                state = HeartRateProcessingState.HIGH_SPECTRAL_ENTROPY,
+                message = "BVP spectral entropy 과다: ${"%.4f".format(spectralQuality.entropy)} " +
+                        "> $HEART_RATE_MAX_SPECTRAL_ENTROPY"
+            )
+        }
+
+        if (
+            amplitudeCoefficientOfVariation != null &&
+            amplitudeCoefficientOfVariation > HEART_RATE_MAX_AMPLITUDE_CV
+        ) {
+            return spectralDiagnostics(
+                state = HeartRateProcessingState.AMPLITUDE_UNSTABLE,
+                message = "BVP 1초별 진폭 변동 과다: CV=${"%.4f".format(amplitudeCoefficientOfVariation)} " +
+                        "> $HEART_RATE_MAX_AMPLITUDE_CV"
+            )
+        }
+
+        if (
+            abruptChangeRatio != null &&
+            abruptChangeRatio > HEART_RATE_MAX_ABRUPT_CHANGE_RATIO
+        ) {
+            return spectralDiagnostics(
+                state = HeartRateProcessingState.ABRUPT_SIGNAL_CHANGE,
+                message = "BVP 순간 sample 변화 과다: normalized=${"%.4f".format(abruptChangeRatio)} " +
+                        "> $HEART_RATE_MAX_ABRUPT_CHANGE_RATIO"
+            )
+        }
+
         val positiveTop = DoubleArray(bandPassed.size) { i ->
             bandPassed[i].coerceAtLeast(0.0)
         }
@@ -1245,14 +1417,21 @@ class PotchDataProcessor(
             polarity = HeartRatePeakPolarity.NEGATIVE
         )
 
+        val candidateComparator =
+            compareBy<HeartRatePeakFitCandidate> { it.selectionScore }
+                .thenByDescending { it.rawIntervalQualityScore }
+                .thenByDescending { it.usedIntervals.size }
+                .thenByDescending { it.acceptedIntervalRatio }
+
         val bestFit = listOfNotNull(
             positiveSearch.bestCandidate,
             negativeSearch.bestCandidate
-        ).minWithOrNull(
-            compareBy<HeartRatePeakFitCandidate> { it.selectionScore }
-                .thenByDescending { it.usedIntervals.size }
-                .thenByDescending { it.acceptedIntervalRatio }
-        )
+        ).minWithOrNull(candidateComparator)
+
+        val bestRejectedFit = listOfNotNull(
+            positiveSearch.bestRejectedCandidate,
+            negativeSearch.bestRejectedCandidate
+        ).minWithOrNull(candidateComparator)
 
         val maxDetectedPeakCount = maxOf(
             positiveSearch.maxDetectedPeakCount,
@@ -1277,7 +1456,11 @@ class PotchDataProcessor(
                     state = HeartRateProcessingState.MOTION_ARTIFACT,
                     message = "강한 움직임 감지: IMU maxDelta=${"%.4f".format(imuMaxDeltaG)}g",
                     acRobustAmplitude = acRobustAmplitude,
-                    selectedCandidate = bestFit,
+                    amplitudeCoefficientOfVariation = amplitudeCoefficientOfVariation,
+                    spectralConcentration = spectralQuality?.concentration,
+                    spectralEntropy = spectralQuality?.entropy,
+                    abruptChangeRatio = abruptChangeRatio,
+                    selectedCandidate = bestFit ?: bestRejectedFit,
                     detectedPeakCount = maxDetectedPeakCount,
                     rawIbiCount = maxRawIbiCount,
                     validIbiCount = maxValidIbiCount
@@ -1315,8 +1498,18 @@ class PotchDataProcessor(
                 HeartRateProcessingState.INSUFFICIENT_PEAKS ->
                     "유효 peak 부족: 최대 ${maxDetectedPeakCount}개 검출"
 
-                HeartRateProcessingState.INVALID_IBI ->
-                    "peak는 검출됐지만 유효 IBI 부족: raw=$maxRawIbiCount, valid=$maxValidIbiCount"
+                HeartRateProcessingState.INVALID_IBI -> {
+                    val rejected = bestRejectedFit
+                    if (rejected != null) {
+                        "HR 후보 hard reject: valid=${rejected.usedIntervals.size}, " +
+                                "accept=${"%.3f".format(rejected.acceptedIntervalRatio)}, " +
+                                "rawSDSD=${"%.1f".format(rejected.sdsdSec * 1000.0)}ms, " +
+                                "rawCV=${"%.3f".format(rejected.rawIbiCv)}, " +
+                                "phys=${"%.3f".format(rejected.physiologicalIntervalRatio)}"
+                    } else {
+                        "peak는 검출됐지만 유효 IBI 부족: raw=$maxRawIbiCount, valid=$maxValidIbiCount"
+                    }
+                }
 
                 HeartRateProcessingState.BPM_OUT_OF_RANGE ->
                     "검출 후보 BPM이 허용 범위 ${HEART_RATE_MIN_BPM}~${HEART_RATE_MAX_BPM} 밖"
@@ -1330,6 +1523,11 @@ class PotchDataProcessor(
                     state = failureState,
                     message = message,
                     acRobustAmplitude = acRobustAmplitude,
+                    amplitudeCoefficientOfVariation = amplitudeCoefficientOfVariation,
+                    spectralConcentration = spectralQuality?.concentration,
+                    spectralEntropy = spectralQuality?.entropy,
+                    abruptChangeRatio = abruptChangeRatio,
+                    selectedCandidate = bestRejectedFit,
                     detectedPeakCount = maxDetectedPeakCount,
                     rawIbiCount = maxRawIbiCount,
                     validIbiCount = maxValidIbiCount
@@ -1348,6 +1546,10 @@ class PotchDataProcessor(
                     state = HeartRateProcessingState.INVALID_IBI,
                     message = "평균 IBI가 유효하지 않음",
                     acRobustAmplitude = acRobustAmplitude,
+                    amplitudeCoefficientOfVariation = amplitudeCoefficientOfVariation,
+                    spectralConcentration = spectralQuality?.concentration,
+                    spectralEntropy = spectralQuality?.entropy,
+                    abruptChangeRatio = abruptChangeRatio,
                     selectedCandidate = bestFit
                 )
             )
@@ -1362,6 +1564,10 @@ class PotchDataProcessor(
                     state = HeartRateProcessingState.BPM_OUT_OF_RANGE,
                     message = "최종 BPM $bpm 이 허용 범위 밖",
                     acRobustAmplitude = acRobustAmplitude,
+                    amplitudeCoefficientOfVariation = amplitudeCoefficientOfVariation,
+                    spectralConcentration = spectralQuality?.concentration,
+                    spectralEntropy = spectralQuality?.entropy,
+                    abruptChangeRatio = abruptChangeRatio,
                     selectedCandidate = bestFit
                 )
             )
@@ -1381,15 +1587,42 @@ class PotchDataProcessor(
             peakAmplitude = peakAmplitude
         )
 
-        val sdsdQuality =
-            (1.0 - bestFit.sdsdSec / 0.080).coerceIn(0.0, 1.0)
-
-        val fitQuality =
-            (sdsdQuality * 0.65 + bestFit.acceptedIntervalRatio * 0.35)
+        val spectralConcentrationScore =
+            (((spectralQuality?.concentration ?: 0.0) -
+                    HEART_RATE_MIN_SPECTRAL_CONCENTRATION) /
+                    (0.60 - HEART_RATE_MIN_SPECTRAL_CONCENTRATION))
                 .coerceIn(0.0, 1.0)
 
+        val spectralEntropyScore =
+            ((HEART_RATE_MAX_SPECTRAL_ENTROPY -
+                    (spectralQuality?.entropy ?: HEART_RATE_MAX_SPECTRAL_ENTROPY)) /
+                    HEART_RATE_MAX_SPECTRAL_ENTROPY)
+                .coerceIn(0.0, 1.0)
+
+        val amplitudeStabilityScore =
+            (1.0 -
+                    (amplitudeCoefficientOfVariation ?: HEART_RATE_MAX_AMPLITUDE_CV) /
+                    HEART_RATE_MAX_AMPLITUDE_CV)
+                .coerceIn(0.0, 1.0)
+
+        val abruptChangeScore =
+            (1.0 -
+                    (abruptChangeRatio ?: HEART_RATE_MAX_ABRUPT_CHANGE_RATIO) /
+                    HEART_RATE_MAX_ABRUPT_CHANGE_RATIO)
+                .coerceIn(0.0, 1.0)
+
+        val bvpSignalQuality =
+            (spectralConcentrationScore * 0.35 +
+                    spectralEntropyScore * 0.30 +
+                    amplitudeStabilityScore * 0.20 +
+                    abruptChangeScore * 0.15)
+                .coerceIn(0.0, 1.0)
+
+        // 정제된 IBI만 보는 base quality보다 raw interval quality에 더 큰 비중을 둔다.
         val qualityScore =
-            (baseQuality * 0.75 + fitQuality * 0.25)
+            (baseQuality * 0.35 +
+                    bestFit.rawIntervalQualityScore * 0.45 +
+                    bvpSignalQuality * 0.20)
                 .coerceIn(0.0, 1.0)
 
         val estimate = HeartRateEstimate(
@@ -1405,6 +1638,13 @@ class PotchDataProcessor(
             peakFitSdsdMs = bestFit.sdsdSec * 1000.0,
             rawIntervalCount = bestFit.rawIntervals.size,
             acceptedIntervalRatio = bestFit.acceptedIntervalRatio,
+            rawIbiCv = bestFit.rawIbiCv,
+            physiologicalIntervalRatio = bestFit.physiologicalIntervalRatio,
+            rawIntervalQualityScore = bestFit.rawIntervalQualityScore,
+            spectralConcentration = spectralQuality?.concentration,
+            spectralEntropy = spectralQuality?.entropy,
+            amplitudeCoefficientOfVariation = amplitudeCoefficientOfVariation,
+            abruptChangeRatio = abruptChangeRatio,
             meanPeakInterpolationOffsetMs = bestFit.meanInterpolationOffsetMs,
             maxPeakInterpolationOffsetMs = bestFit.maxInterpolationOffsetMs
         )
@@ -1415,7 +1655,12 @@ class PotchDataProcessor(
                 state = HeartRateProcessingState.VALID,
                 message = "합산 PPG 심박수 정상 검출: $bpm bpm",
                 acRobustAmplitude = acRobustAmplitude,
-                selectedCandidate = bestFit
+                amplitudeCoefficientOfVariation = amplitudeCoefficientOfVariation,
+                spectralConcentration = spectralQuality?.concentration,
+                spectralEntropy = spectralQuality?.entropy,
+                abruptChangeRatio = abruptChangeRatio,
+                selectedCandidate = bestFit,
+                qualityScore = qualityScore
             ).copy(
                 calculatedBpm = bpm
             )
@@ -1598,6 +1843,7 @@ class PotchDataProcessor(
         if (signal.size < 3 || sampleRateHz <= 0.0) {
             return HeartRatePeakFitSearchResult(
                 bestCandidate = null,
+                bestRejectedCandidate = null,
                 maxDetectedPeakCount = 0,
                 maxRawIntervalCount = 0,
                 maxValidIntervalCount = 0,
@@ -1620,6 +1866,7 @@ class PotchDataProcessor(
         if (movingAverageMean <= 0.0) {
             return HeartRatePeakFitSearchResult(
                 bestCandidate = null,
+                bestRejectedCandidate = null,
                 maxDetectedPeakCount = 0,
                 maxRawIntervalCount = 0,
                 maxValidIntervalCount = 0,
@@ -1633,7 +1880,9 @@ class PotchDataProcessor(
                 .roundToInt()
                 .coerceAtLeast(1)
 
-        val candidates = mutableListOf<HeartRatePeakFitCandidate>()
+        val acceptedCandidates = mutableListOf<HeartRatePeakFitCandidate>()
+        val rejectedCandidates = mutableListOf<HeartRatePeakFitCandidate>()
+
         var maxDetectedPeakCount = 0
         var maxRawIntervalCount = 0
         var maxValidIntervalCount = 0
@@ -1641,8 +1890,6 @@ class PotchDataProcessor(
         var sawBpmOutOfRange = false
 
         for (thresholdPercent in HEART_RATE_THRESHOLD_PERCENT_CANDIDATES) {
-            // HeartPy의 rol_mean + ma_perc 방식과 비슷하게,
-            // 이동평균 전체의 평균값에 대한 일정 비율을 offset으로 더한다.
             val thresholdOffset =
                 movingAverageMean * thresholdPercent / 100.0
 
@@ -1658,11 +1905,9 @@ class PotchDataProcessor(
                 peakIndices.size
             )
 
-            // SDSD를 평가하려면 최소 4개 peak = 3개 IBI가 필요하다.
+            // raw SDSD 계산에는 최소 4개 peak = 3개 IBI가 필요하다.
             if (peakIndices.size < 4) continue
 
-            // 100Hz 정수 index를 그대로 사용하면 peak timing이 10ms 격자에 고정된다.
-            // 각 peak와 좌우 sample의 포물선을 적합해 정수 index 사이의 peak 위치를 추정한다.
             val peakPositions = refineHeartRatePeakPositions(
                 signal = signal,
                 peakIndices = peakIndices
@@ -1675,14 +1920,12 @@ class PotchDataProcessor(
                         sampleRateHz * 1000.0
             }
 
-            val meanInterpolationOffsetMs =
-                interpolationOffsetsMs.average()
-
+            val meanInterpolationOffsetMs = interpolationOffsetsMs.average()
             val maxInterpolationOffsetMs =
                 interpolationOffsetsMs.maxOrNull() ?: 0.0
 
-            // 후보 fitting 평가에서는 생리 범위 밖 interval도 우선 보존한다.
-            // 먼저 버리면 짧은 가짜 peak가 만든 interval이 사라져 나쁜 후보가 좋아 보일 수 있다.
+            // 먼저 모든 raw interval을 보존해야 가짜 peak와 누락 peak가
+            // SDSD/CV/생리범위 비율에 그대로 불이익으로 반영된다.
             val rawIntervals = buildHeartRateIntervals(
                 peakPositions = peakPositions,
                 bufferStartSampleIndex = bufferStartSampleIndex,
@@ -1701,8 +1944,8 @@ class PotchDataProcessor(
                 continue
             }
 
-            val rawAverageInterval =
-                rawIntervals.map { it.intervalSec }.average()
+            val rawIntervalValues = rawIntervals.map { it.intervalSec }
+            val rawAverageInterval = rawIntervalValues.average()
 
             if (!rawAverageInterval.isFinite() || rawAverageInterval <= 0.0) {
                 sawInvalidIbi = true
@@ -1715,11 +1958,9 @@ class PotchDataProcessor(
                 continue
             }
 
-            // threshold fitting 자체는 생리 범위 제거 및 quotient/median 후처리 전 SDSD로 평가한다.
-            // 그래야 짧은 가짜 IBI나 긴 누락 IBI가 후보 점수에 그대로 불이익을 준다.
-            val sdsdSec = calculateSdsd(
-                rawIntervals.map { it.intervalSec }
-            ) ?: continue
+            val rawSdsdSec = calculateSdsd(rawIntervalValues) ?: continue
+            val rawIbiCv = calculateCoefficientOfVariation(rawIntervalValues)
+                ?: continue
 
             val physiologicalIntervals = rawIntervals.filter { interval ->
                 interval.intervalSec in
@@ -1728,11 +1969,6 @@ class PotchDataProcessor(
 
             val physiologicalIntervalRatio =
                 physiologicalIntervals.size.toDouble() / rawIntervals.size.toDouble()
-
-            if (physiologicalIntervalRatio < HEART_RATE_MIN_PHYSIOLOGICAL_INTERVAL_RATIO) {
-                sawInvalidIbi = true
-                continue
-            }
 
             val usedIntervals = filterHeartRateIntervals(
                 physiologicalIntervals.toMutableList()
@@ -1743,7 +1979,7 @@ class PotchDataProcessor(
                 usedIntervals.size
             )
 
-            if (usedIntervals.size < 2) {
+            if (usedIntervals.isEmpty()) {
                 sawInvalidIbi = true
                 continue
             }
@@ -1751,7 +1987,10 @@ class PotchDataProcessor(
             val usedAverageInterval =
                 usedIntervals.map { it.intervalSec }.average()
 
-            if (usedAverageInterval <= 0.0) continue
+            if (!usedAverageInterval.isFinite() || usedAverageInterval <= 0.0) {
+                sawInvalidIbi = true
+                continue
+            }
 
             val finalBpm = 60.0 / usedAverageInterval
             if (finalBpm !in HEART_RATE_MIN_BPM.toDouble()..HEART_RATE_MAX_BPM.toDouble()) {
@@ -1762,24 +2001,31 @@ class PotchDataProcessor(
             val acceptedIntervalRatio =
                 usedIntervals.size.toDouble() / rawIntervals.size.toDouble()
 
-            // 후처리에서 절반 이상 버려지는 후보는 peak fitting 자체가 불안정하다고 판단한다.
-            if (acceptedIntervalRatio < HEART_RATE_MIN_ACCEPTED_INTERVAL_RATIO) {
-                sawInvalidIbi = true
-                continue
-            }
+            val rawIntervalQualityScore = calculateRawIntervalQualityScore(
+                rawSdsdSec = rawSdsdSec,
+                rawIbiCv = rawIbiCv,
+                acceptedIntervalRatio = acceptedIntervalRatio,
+                usedIntervalCount = usedIntervals.size,
+                physiologicalIntervalRatio = physiologicalIntervalRatio
+            )
 
-            // SDSD가 가장 중요한 평가값이다.
-            // 단, IBI가 적거나 제거 비율이 높은 후보가 우연히 유리해지지 않도록 작은 penalty를 더한다.
             val countPenaltySec =
                 HEART_RATE_COUNT_PENALTY_SEC / sqrt(rawIntervals.size.toDouble())
 
             val rejectionPenaltySec =
                 (1.0 - acceptedIntervalRatio) * HEART_RATE_REJECTION_PENALTY_SEC
 
-            val selectionScore =
-                sdsdSec + countPenaltySec + rejectionPenaltySec
+            // raw interval quality가 낮은 후보는 SDSD만 우연히 좋아도 선택되지 않도록 한다.
+            val rawQualityPenaltySec =
+                (1.0 - rawIntervalQualityScore) * 0.100
 
-            candidates += HeartRatePeakFitCandidate(
+            val selectionScore =
+                rawSdsdSec +
+                        countPenaltySec +
+                        rejectionPenaltySec +
+                        rawQualityPenaltySec
+
+            val candidate = HeartRatePeakFitCandidate(
                 polarity = polarity,
                 thresholdPercent = thresholdPercent,
                 thresholdOffset = thresholdOffset,
@@ -1789,22 +2035,40 @@ class PotchDataProcessor(
                 usedIntervals = usedIntervals,
                 rawBpm = rawBpm,
                 finalBpm = finalBpm,
-                sdsdSec = sdsdSec,
+                sdsdSec = rawSdsdSec,
+                rawIbiCv = rawIbiCv,
+                physiologicalIntervalRatio = physiologicalIntervalRatio,
                 acceptedIntervalRatio = acceptedIntervalRatio,
+                rawIntervalQualityScore = rawIntervalQualityScore,
                 selectionScore = selectionScore,
                 meanInterpolationOffsetMs = meanInterpolationOffsetMs,
                 maxInterpolationOffsetMs = maxInterpolationOffsetMs
             )
+
+            val hardRejected =
+                usedIntervals.size < HEART_RATE_MIN_USED_INTERVAL_COUNT ||
+                        acceptedIntervalRatio < HEART_RATE_MIN_ACCEPTED_INTERVAL_RATIO ||
+                        rawSdsdSec > HEART_RATE_MAX_RAW_SDSD_SEC ||
+                        physiologicalIntervalRatio < HEART_RATE_MIN_PHYSIOLOGICAL_INTERVAL_RATIO
+
+            if (hardRejected) {
+                sawInvalidIbi = true
+                rejectedCandidates += candidate
+                continue
+            }
+
+            acceptedCandidates += candidate
         }
 
-        val bestCandidate = candidates.minWithOrNull(
+        val comparator =
             compareBy<HeartRatePeakFitCandidate> { it.selectionScore }
+                .thenByDescending { it.rawIntervalQualityScore }
                 .thenByDescending { it.usedIntervals.size }
                 .thenByDescending { it.acceptedIntervalRatio }
-        )
 
         return HeartRatePeakFitSearchResult(
-            bestCandidate = bestCandidate,
+            bestCandidate = acceptedCandidates.minWithOrNull(comparator),
+            bestRejectedCandidate = rejectedCandidates.minWithOrNull(comparator),
             maxDetectedPeakCount = maxDetectedPeakCount,
             maxRawIntervalCount = maxRawIntervalCount,
             maxValidIntervalCount = maxValidIntervalCount,
@@ -2009,6 +2273,72 @@ class PotchDataProcessor(
         return if (sdsd.isFinite()) sdsd else null
     }
 
+    private fun calculateCoefficientOfVariation(
+        values: List<Double>
+    ): Double? {
+        if (values.size < 2) return null
+
+        val mean = values.average()
+        if (!mean.isFinite() || mean <= 0.0) return null
+
+        var sumSquaredDeviation = 0.0
+        for (value in values) {
+            val deviation = value - mean
+            sumSquaredDeviation += deviation * deviation
+        }
+
+        val std = sqrt(sumSquaredDeviation / values.size.toDouble())
+        val cv = std / mean
+
+        return if (cv.isFinite()) cv else null
+    }
+
+    /**
+     * 이상치 제거 전 raw IBI 품질을 0~1로 정규화한다.
+     *
+     * 한두 개의 나쁜 IBI를 제거한 뒤 남은 interval만 규칙적인 후보가
+     * 높은 quality를 받지 않도록 raw SDSD/CV/유지율/개수/생리범위를 함께 사용한다.
+     */
+    private fun calculateRawIntervalQualityScore(
+        rawSdsdSec: Double,
+        rawIbiCv: Double,
+        acceptedIntervalRatio: Double,
+        usedIntervalCount: Int,
+        physiologicalIntervalRatio: Double
+    ): Double {
+        val sdsdScore =
+            (1.0 - rawSdsdSec / HEART_RATE_MAX_RAW_SDSD_SEC)
+                .coerceIn(0.0, 1.0)
+
+        val rawCvScore =
+            (1.0 - rawIbiCv / HEART_RATE_RAW_IBI_CV_ZERO_SCORE)
+                .coerceIn(0.0, 1.0)
+
+        val acceptedRatioScore =
+            ((acceptedIntervalRatio - HEART_RATE_MIN_ACCEPTED_INTERVAL_RATIO) /
+                    (1.0 - HEART_RATE_MIN_ACCEPTED_INTERVAL_RATIO))
+                .coerceIn(0.0, 1.0)
+
+        val intervalCountScore =
+            ((usedIntervalCount - HEART_RATE_MIN_USED_INTERVAL_COUNT).toDouble() /
+                    (HEART_RATE_PREFERRED_USED_INTERVAL_COUNT -
+                            HEART_RATE_MIN_USED_INTERVAL_COUNT).toDouble())
+                .coerceIn(0.0, 1.0)
+
+        val physiologicalRatioScore =
+            ((physiologicalIntervalRatio - HEART_RATE_MIN_PHYSIOLOGICAL_INTERVAL_RATIO) /
+                    (1.0 - HEART_RATE_MIN_PHYSIOLOGICAL_INTERVAL_RATIO))
+                .coerceIn(0.0, 1.0)
+
+        return (
+                sdsdScore * 0.30 +
+                        rawCvScore * 0.20 +
+                        acceptedRatioScore * 0.20 +
+                        intervalCountScore * 0.15 +
+                        physiologicalRatioScore * 0.15
+                ).coerceIn(0.0, 1.0)
+    }
+
     private fun buildHeartRateIntervals(
         peakPositions: List<Double>,
         bufferStartSampleIndex: Long,
@@ -2148,6 +2478,118 @@ class PotchDataProcessor(
 
         return sorted[lower] * (1.0 - fraction) +
                 sorted[upper] * fraction
+    }
+
+    /**
+     * 최근 window를 1초 블록으로 나눠 각 블록의 robust AC amplitude를 구한 뒤
+     * 그 amplitude들의 CV를 계산한다. 센서 압력/접촉이 초마다 크게 달라지면 커진다.
+     */
+    private fun calculateWindowAmplitudeCoefficientOfVariation(
+        signal: DoubleArray,
+        sampleRateHz: Double
+    ): Double? {
+        if (signal.isEmpty() || sampleRateHz <= 0.0) return null
+
+        val blockSize = sampleRateHz.roundToInt().coerceAtLeast(1)
+        if (signal.size < blockSize * 3) return null
+
+        val amplitudes = mutableListOf<Double>()
+        var start = 0
+
+        while (start + blockSize <= signal.size) {
+            val block = signal.copyOfRange(start, start + blockSize)
+            val amplitude = calculateRobustAmplitude(block)
+
+            if (amplitude.isFinite() && amplitude > 0.0) {
+                amplitudes += amplitude
+            }
+
+            start += blockSize
+        }
+
+        return calculateCoefficientOfVariation(amplitudes)
+    }
+
+    /**
+     * 8초 이하의 band-pass BVP에서 HR 허용 대역의 간단한 periodogram을 계산한다.
+     *
+     * concentration = 가장 강한 주파수 bin power / 전체 HR 대역 power
+     * entropy       = power 분포의 정규화 Shannon entropy
+     */
+    private fun calculateHeartRateSpectralQuality(
+        signal: DoubleArray,
+        sampleRateHz: Double
+    ): HeartRateSpectralQuality? {
+        if (signal.size < 3 || sampleRateHz <= 0.0) return null
+
+        val n = signal.size
+        val minFrequencyHz = HEART_RATE_MIN_BPM / 60.0
+        val maxFrequencyHz = HEART_RATE_MAX_BPM / 60.0
+
+        val minBin = ceil(minFrequencyHz * n / sampleRateHz)
+            .toInt()
+            .coerceAtLeast(1)
+
+        val maxBin = floor(maxFrequencyHz * n / sampleRateHz)
+            .toInt()
+            .coerceAtMost(n / 2)
+
+        if (maxBin < minBin) return null
+
+        val mean = signal.average()
+        val powers = mutableListOf<Double>()
+
+        for (bin in minBin..maxBin) {
+            var real = 0.0
+            var imaginary = 0.0
+
+            for (i in signal.indices) {
+                val hamming = if (n == 1) {
+                    1.0
+                } else {
+                    0.54 - 0.46 * cos(2.0 * PI * i / (n - 1).toDouble())
+                }
+
+                val sample = (signal[i] - mean) * hamming
+                val angle = 2.0 * PI * bin * i / n.toDouble()
+
+                real += sample * cos(angle)
+                imaginary -= sample * sin(angle)
+            }
+
+            val power = real * real + imaginary * imaginary
+            powers += power.coerceAtLeast(0.0)
+        }
+
+        val totalPower = powers.sum()
+        if (!totalPower.isFinite() || totalPower <= 1e-12) return null
+
+        val concentration =
+            (powers.maxOrNull() ?: 0.0) / totalPower
+
+        var entropy = 0.0
+        for (power in powers) {
+            val probability = power / totalPower
+            if (probability > 0.0) {
+                entropy -= probability * ln(probability)
+            }
+        }
+
+        val normalizedEntropy = if (powers.size > 1) {
+            entropy / ln(powers.size.toDouble())
+        } else {
+            0.0
+        }
+
+        if (!concentration.isFinite() || !normalizedEntropy.isFinite()) {
+            return null
+        }
+
+        return HeartRateSpectralQuality(
+            concentration = concentration.coerceIn(0.0, 1.0),
+            entropy = normalizedEntropy.coerceIn(0.0, 1.0),
+            evaluatedBinCount = powers.size
+        )
     }
 
     private fun calculateMaxConsecutiveDifference(
