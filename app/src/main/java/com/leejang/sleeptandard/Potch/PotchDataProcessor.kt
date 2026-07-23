@@ -73,6 +73,42 @@ enum class HeartRateFusionSource {
 }
 
 /**
+ * HR peak source를 매 frame마다 다시 경쟁시키지 않고 안정적으로 유지하기 위한 경로.
+ *
+ * 기본 경로는 IR 양의 peak다. RED 양의 peak는 검증 및 첫 번째 fallback으로만 사용하며,
+ * 음의 peak 경로는 양의 peak 경로가 지속해서 실패했을 때만 활성화한다.
+ */
+private enum class HeartRateDetectionPath(
+    val source: HeartRateFusionSource,
+    val polarity: HeartRatePeakPolarity,
+    val label: String
+) {
+    IR_POSITIVE(
+        source = HeartRateFusionSource.IR,
+        polarity = HeartRatePeakPolarity.POSITIVE,
+        label = "IR positive"
+    ),
+    RED_POSITIVE(
+        source = HeartRateFusionSource.RED,
+        polarity = HeartRatePeakPolarity.POSITIVE,
+        label = "RED positive"
+    ),
+    IR_NEGATIVE(
+        source = HeartRateFusionSource.IR,
+        polarity = HeartRatePeakPolarity.NEGATIVE,
+        label = "IR negative"
+    ),
+    RED_NEGATIVE(
+        source = HeartRateFusionSource.RED,
+        polarity = HeartRatePeakPolarity.NEGATIVE,
+        label = "RED negative"
+    );
+
+    val isNegative: Boolean
+        get() = polarity == HeartRatePeakPolarity.NEGATIVE
+}
+
+/**
  * 매 SuperFrame마다 HR 계산에 사용된 신호 특징과 성공/실패 사유를 저장한다.
  *
  * 이 객체는 UI 상태와 potch_hr_diagnostic_log CSV에 그대로 사용된다.
@@ -227,6 +263,40 @@ data class HeartRateEstimate(
     val maxPeakInterpolationOffsetMs: Double = 0.0
 )
 
+
+/**
+ * ExperimentScreen에서 HR 분석 파형을 그대로 시각화하기 위한 snapshot.
+ *
+ * 이 데이터는 raw IR/RED 평균이 아니라 PotchDataProcessor의 실제 HR 경로와 동일하게
+ * latest clean tail -> 짧은 spike 보간 -> 0.75~3.5Hz band-pass를 적용한 결과다.
+ *
+ * FUSED_IR_RED는 sample을 합쳐서 HR을 계산하는 방식이 아니라 각 채널의 HR/IBI를
+ * late fusion하는 방식이므로 primary/secondary에 전처리된 IR/RED 파형을 함께 제공한다.
+ */
+data class HeartRateGraphData(
+    val source: HeartRateFusionSource = HeartRateFusionSource.NONE,
+    val processingState: HeartRateProcessingState = HeartRateProcessingState.COLLECTING,
+    val selectedPolarity: HeartRatePeakPolarity = HeartRatePeakPolarity.NONE,
+
+    val primaryLabel: String = "IR",
+    val primarySamples: List<Double> = emptyList(),
+
+    val secondaryLabel: String? = null,
+    val secondarySamples: List<Double> = emptyList(),
+
+    // 최종 estimate의 IBI 종료 peak 위치를 현재 graph window 기준 index로 변환한 값.
+    val peakSampleIndices: List<Int> = emptyList(),
+
+    val retainedBufferSampleCount: Int = 0,
+    val cleanSegmentSampleCount: Int = 0,
+    val interpolatedSampleCount: Int = 0,
+    val excludedPeakSampleCount: Int = 0,
+
+    val calculatedBpm: Int? = null,
+    val qualityScore: Double? = null,
+    val description: String = "HR 분석용 PPG 수집 중"
+)
+
 data class DataProcessorState(
     // 마지막으로 정상 파싱된 센서 데이터
     // 아직 수신된 데이터가 없거나 파싱 전이면 null
@@ -251,6 +321,9 @@ data class DataProcessorState(
         state = MetricCalculationState.COLLECTING,
         message = "IR/RED PPG 심박 신호 수집 중"
     ),
+
+    // ExperimentScreen에 노출하는 실제 HR 전처리/채널 선택 결과 파형.
+    val heartRateGraphData: HeartRateGraphData = HeartRateGraphData(),
 
     // CRC 검증 실패 횟수
     // 패킷 데이터가 손상되었을 가능성을 확인하기 위한 누적 카운트
@@ -394,6 +467,17 @@ class PotchDataProcessor(
         private const val HEART_RATE_FUSION_MIN_MATCHED_INTERVALS = 4
         private const val HEART_RATE_FUSION_HARMONIC_RATIO_TOLERANCE = 0.10
 
+        // Stable HR path selection.
+        // IR positive를 primary로 고정하고, 즉시 source/polarity가 교대되지 않도록 한다.
+        private const val HEART_RATE_PRIMARY_FAILURES_BEFORE_FALLBACK = 3
+        private const val HEART_RATE_FALLBACK_CONFIRM_FRAMES = 3
+        private const val HEART_RATE_PRIMARY_RECOVERY_CONFIRM_FRAMES = 3
+
+        // IR/RED positive가 충분히 오래 실패한 뒤에만 negative peak 탐색 결과를 사용한다.
+        // primary 3회 실패 + positive fallback 확인 실패 3회를 합친 값이다.
+        private const val HEART_RATE_NEGATIVE_ENABLE_FAILURE_COUNT = 6
+        private const val HEART_RATE_PENDING_BPM_TOLERANCE = 8
+
         // HeartPy의 ma_perc 후보 범위를 참고한 moving-average 상승률 목록.
         private val HEART_RATE_THRESHOLD_PERCENT_CANDIDATES = doubleArrayOf(
             5.0, 10.0, 15.0, 20.0, 25.0, 30.0,
@@ -473,6 +557,16 @@ class PotchDataProcessor(
         val longArtifactSampleCount: Int
     )
 
+    private data class PreparedHeartRateGraphChannel(
+        val label: String,
+        val samples: List<Double>,
+        val startSamplePosition: Long,
+        val retainedBufferSampleCount: Int,
+        val cleanSegmentSampleCount: Int,
+        val interpolatedSampleCount: Int,
+        val excludedPeakSampleCount: Int
+    )
+
     private data class HeartRateAnalysisResult(
         val estimate: HeartRateEstimate?,
         val diagnostics: HeartRateDiagnostics
@@ -482,6 +576,15 @@ class PotchDataProcessor(
         val estimate: HeartRateEstimate?,
         val source: HeartRateFusionSource,
         val log: String
+    )
+
+
+    private data class HeartRatePathDecision(
+        val estimate: HeartRateEstimate?,
+        val analysis: HeartRateAnalysisResult,
+        val path: HeartRateDetectionPath,
+        val log: String,
+        val waitingForConfirmation: Boolean = false
     )
 
     // 각성지표 연산기
@@ -573,6 +676,16 @@ class PotchDataProcessor(
     private var lastValidHeartRateInputTimestampMillis: Long? = null
     private var lastValidHeartRateEstimateTimestampMillis: Long? = null
     private var lastValidHeartRateEstimate: HeartRateEstimate? = null
+
+    // HR source/polarity hysteresis state.
+    private var activeHeartRatePath = HeartRateDetectionPath.IR_POSITIVE
+    private var primaryPositiveFailureStreak = 0
+    private var primaryPositiveRecoveryStreak = 0
+    private var activePathFailureStreak = 0
+    private var positiveFallbackUnavailableStreak = 0
+    private var pendingHeartRatePath: HeartRateDetectionPath? = null
+    private var pendingHeartRatePathSuccessStreak = 0
+    private var pendingHeartRatePathLastBpm: Int? = null
 
     // CRC 정상 PPG가 끊긴 채 과거 raw buffer를 반복 계산하지 않도록 하는 제한.
     private val heartRateInputStaleTimeoutMillis = 3 * 1000L
@@ -796,6 +909,7 @@ class PotchDataProcessor(
         lastValidHeartRateInputTimestampMillis = null
         lastValidHeartRateEstimateTimestampMillis = null
         lastValidHeartRateEstimate = null
+        resetHeartRatePathSelection()
 
         arousalCalculator.reset(initialSegmentId = currentAnalysisSegmentId)
 
@@ -1022,6 +1136,11 @@ class PotchDataProcessor(
         val heartRateCalculationStatus =
             buildHeartRateCalculationStatus(heartRateDiagnostics)
 
+        val heartRateGraphData = buildHeartRateGraphData(
+            estimate = heartRateEstimate,
+            diagnostics = heartRateDiagnostics
+        )
+
         Log.d(
             TAG,
             "SuperFrame parsed timestamp=$timestamp, segment=$currentAnalysisSegmentId, " +
@@ -1146,6 +1265,7 @@ class PotchDataProcessor(
                 heartRateAgeMillis = heartRateDiagnostics.heartRateAgeMillis,
                 heartRateDiagnostics = heartRateDiagnostics,
                 heartRateCalculationStatus = heartRateCalculationStatus,
+                heartRateGraphData = heartRateGraphData,
 
                 arousalState = arousalState,
                 lastIrMax =
@@ -1374,6 +1494,162 @@ class PotchDataProcessor(
         heartRateSampleMotionMaskedBuffer.addAll(motion)
     }
 
+
+    /**
+     * HR 분석 함수와 동일한 clean window 및 preprocessPpgForHeartRate()를 사용해
+     * ExperimentScreen용 파형 snapshot을 만든다.
+     */
+    private fun buildHeartRateGraphData(
+        estimate: HeartRateEstimate?,
+        diagnostics: HeartRateDiagnostics
+    ): HeartRateGraphData {
+        fun prepare(
+            label: String,
+            signalBuffer: ArrayDeque<Int>,
+            contactBuffer: ArrayDeque<Int>
+        ): PreparedHeartRateGraphChannel {
+            val cleanWindow = buildLatestCleanHeartRateWindow(
+                signalBuffer = signalBuffer,
+                contactBuffer = contactBuffer
+            )
+
+            if (cleanWindow.signal.isEmpty()) {
+                return PreparedHeartRateGraphChannel(
+                    label = label,
+                    samples = emptyList(),
+                    startSamplePosition = cleanWindow.startSamplePosition,
+                    retainedBufferSampleCount = cleanWindow.retainedBufferSampleCount,
+                    cleanSegmentSampleCount = cleanWindow.cleanSegmentSampleCount,
+                    interpolatedSampleCount = 0,
+                    excludedPeakSampleCount = 0
+                )
+            }
+
+            val preprocess = preprocessPpgForHeartRate(cleanWindow.signal)
+
+            return PreparedHeartRateGraphChannel(
+                label = label,
+                samples = preprocess.bandPassed.toList(),
+                startSamplePosition = cleanWindow.startSamplePosition,
+                retainedBufferSampleCount = cleanWindow.retainedBufferSampleCount,
+                cleanSegmentSampleCount = cleanWindow.cleanSegmentSampleCount,
+                interpolatedSampleCount = preprocess.interpolatedSampleCount,
+                excludedPeakSampleCount = preprocess.excludedPeakSampleCount
+            )
+        }
+
+        val ir = prepare(
+            label = "IR processed",
+            signalBuffer = heartRateIrBuffer,
+            contactBuffer = heartRateIrBuffer
+        )
+        val red = prepare(
+            label = "RED processed",
+            signalBuffer = heartRateRedBuffer,
+            contactBuffer = heartRateRedBuffer
+        )
+        val combined = prepare(
+            label = "IR/RED average fallback",
+            signalBuffer = heartRateCombinedBuffer,
+            contactBuffer = heartRateIrBuffer
+        )
+
+        val source =
+            estimate?.source
+                ?: diagnostics.fusionSource
+
+        val primary: PreparedHeartRateGraphChannel
+        val secondary: PreparedHeartRateGraphChannel?
+        val description: String
+
+        when (source) {
+            HeartRateFusionSource.IR -> {
+                primary = ir
+                secondary = null
+                description =
+                    "IR positive를 primary로 고정한 HR 경로. " +
+                            "RED positive는 검증용이며 source를 매 frame 교대시키지 않음. " +
+                            "현재 polarity=${estimate?.selectedPolarity ?: diagnostics.selectedPolarity}"
+            }
+
+            HeartRateFusionSource.RED -> {
+                primary = red
+                secondary = null
+                description =
+                    "IR positive가 연속 실패하고 RED fallback이 3회 확인된 뒤 선택된 경로. " +
+                            "현재 polarity=${estimate?.selectedPolarity ?: diagnostics.selectedPolarity}"
+            }
+
+            HeartRateFusionSource.FUSED_IR_RED -> {
+                primary = ir
+                secondary = red
+                description =
+                    "IR/RED를 각각 전처리·peak fitting한 뒤 HR/IBI를 late fusion함. " +
+                            "단일 sample 합성 파형이 아니므로 두 처리 파형을 함께 표시"
+            }
+
+            HeartRateFusionSource.COMBINED_FALLBACK -> {
+                primary = combined
+                secondary = null
+                description =
+                    "IR/RED 독립 분석으로 결론을 내리지 못해 (IR+RED)/2 fallback 신호에 " +
+                            "동일한 spike 보간·0.75~3.5Hz BPF를 적용한 결과"
+            }
+
+            HeartRateFusionSource.NONE -> {
+                primary = ir
+                secondary = null
+                description =
+                    "유효한 새 HR이 없지만 primary 정책에 따라 IR 처리 파형만 표시. " +
+                            "fallback/negative 경로는 연속 실패 및 3회 확인 후에만 전환"
+            }
+        }
+
+        val graphLength = primary.samples.size
+        val peakSampleIndices =
+            estimate
+                ?.ibiIntervals
+                ?.mapNotNull { interval ->
+                    val relative =
+                        (interval.endSamplePosition - primary.startSamplePosition)
+                            .roundToInt()
+
+                    relative.takeIf { it in 0 until graphLength }
+                }
+                ?.distinct()
+                ?: emptyList()
+
+        return HeartRateGraphData(
+            source = source,
+            processingState = diagnostics.processingState,
+            selectedPolarity = estimate?.selectedPolarity ?: diagnostics.selectedPolarity,
+            primaryLabel = primary.label,
+            primarySamples = primary.samples,
+            secondaryLabel = secondary?.label,
+            secondarySamples = secondary?.samples ?: emptyList(),
+            peakSampleIndices = peakSampleIndices,
+            retainedBufferSampleCount =
+                maxOf(
+                    primary.retainedBufferSampleCount,
+                    secondary?.retainedBufferSampleCount ?: 0
+                ),
+            cleanSegmentSampleCount =
+                maxOf(
+                    primary.cleanSegmentSampleCount,
+                    secondary?.cleanSegmentSampleCount ?: 0
+                ),
+            interpolatedSampleCount =
+                primary.interpolatedSampleCount +
+                        (secondary?.interpolatedSampleCount ?: 0),
+            excludedPeakSampleCount =
+                primary.excludedPeakSampleCount +
+                        (secondary?.excludedPeakSampleCount ?: 0),
+            calculatedBpm = estimate?.bpm ?: diagnostics.calculatedBpm,
+            qualityScore = estimate?.qualityScore ?: diagnostics.qualityScore,
+            description = description
+        )
+    }
+
     private fun buildHeartRateCalculationStatus(
         diagnostics: HeartRateDiagnostics
     ): MetricCalculationStatus {
@@ -1427,90 +1703,91 @@ class PotchDataProcessor(
     private fun estimateHeartRate(
         imuMotion: ImuMotionSummary?
     ): HeartRateAnalysisResult {
-        val irAnalysis = estimateHeartRateFromBuffer(
+        // Primary와 검증 채널은 항상 positive peak만 분석한다.
+        val irPositiveAnalysis = estimateHeartRateFromBuffer(
             signalBuffer = heartRateIrBuffer,
             contactBuffer = heartRateIrBuffer,
             imuMotion = imuMotion,
             source = HeartRateFusionSource.IR,
-            channelLabel = "IR"
+            channelLabel = "IR positive",
+            requiredPolarity = HeartRatePeakPolarity.POSITIVE
         )
 
-        val redAnalysis = estimateHeartRateFromBuffer(
+        val redPositiveAnalysis = estimateHeartRateFromBuffer(
             signalBuffer = heartRateRedBuffer,
             contactBuffer = heartRateRedBuffer,
             imuMotion = imuMotion,
             source = HeartRateFusionSource.RED,
-            channelLabel = "RED"
+            channelLabel = "RED positive",
+            requiredPolarity = HeartRatePeakPolarity.POSITIVE
         )
 
-        val previousBpm = lastValidHeartRateEstimate?.bpm?.toDouble()
-        val irRedDecision = fuseIrAndRedHeartRates(
-            ir = irAnalysis.estimate,
-            red = redAnalysis.estimate,
-            previousBpm = previousBpm
-        )
+        // Negative peak는 positive 경로가 지속적으로 실패한 시점에만 계산·사용한다.
+        // 현재 frame이 임계 횟수에 도달하는 경우를 고려해 -1부터 미리 계산한다.
+        val shouldAnalyzeNegative =
+            activeHeartRatePath.isNegative ||
+                    primaryPositiveFailureStreak >=
+                    HEART_RATE_NEGATIVE_ENABLE_FAILURE_COUNT - 1 ||
+                    positiveFallbackUnavailableStreak >=
+                    HEART_RATE_FALLBACK_CONFIRM_FRAMES - 1 ||
+                    (
+                            activeHeartRatePath == HeartRateDetectionPath.RED_POSITIVE &&
+                                    activePathFailureStreak >=
+                                    HEART_RATE_PRIMARY_FAILURES_BEFORE_FALLBACK - 1
+                            )
 
-        var combinedAnalysis: HeartRateAnalysisResult? = null
-        var finalDecision = irRedDecision
-
-        // IR/RED에서 신뢰할 결론을 내리지 못한 경우에만 기존 평균 신호를 fallback으로 분석한다.
-        if (finalDecision.estimate == null) {
-            combinedAnalysis = estimateHeartRateFromBuffer(
-                signalBuffer = heartRateCombinedBuffer,
-                contactBuffer = heartRateIrBuffer,
-                imuMotion = imuMotion,
-                source = HeartRateFusionSource.COMBINED_FALLBACK,
-                channelLabel = "IR/RED 평균"
-            )
-
-            val combinedEstimate = combinedAnalysis.estimate
-            if (combinedEstimate != null) {
-                finalDecision = HeartRateFusionDecision(
-                    estimate = combinedEstimate.copy(
-                        source = HeartRateFusionSource.COMBINED_FALLBACK,
-                        fusionLog = "IR/RED 독립 결과로 결론을 내리지 못해 평균 PPG fallback 사용"
-                    ),
-                    source = HeartRateFusionSource.COMBINED_FALLBACK,
-                    log = "IR/RED 독립 결과로 결론을 내리지 못해 평균 PPG fallback 사용"
+        val irNegativeAnalysis =
+            if (shouldAnalyzeNegative) {
+                estimateHeartRateFromBuffer(
+                    signalBuffer = heartRateIrBuffer,
+                    contactBuffer = heartRateIrBuffer,
+                    imuMotion = imuMotion,
+                    source = HeartRateFusionSource.IR,
+                    channelLabel = "IR negative",
+                    requiredPolarity = HeartRatePeakPolarity.NEGATIVE
                 )
+            } else {
+                null
             }
-        }
 
-        val rawFinalEstimate = finalDecision.estimate
+        val redNegativeAnalysis =
+            if (shouldAnalyzeNegative) {
+                estimateHeartRateFromBuffer(
+                    signalBuffer = heartRateRedBuffer,
+                    contactBuffer = heartRateRedBuffer,
+                    imuMotion = imuMotion,
+                    source = HeartRateFusionSource.RED,
+                    channelLabel = "RED negative",
+                    requiredPolarity = HeartRatePeakPolarity.NEGATIVE
+                )
+            } else {
+                null
+            }
+
+        val pathDecision = selectStableHeartRatePath(
+            irPositive = irPositiveAnalysis,
+            redPositive = redPositiveAnalysis,
+            irNegative = irNegativeAnalysis,
+            redNegative = redNegativeAnalysis
+        )
+
+        val rawFinalEstimate = pathDecision.estimate
+        val selectedAnalysis = pathDecision.analysis
         val strongMotion = imuMotion?.isStrongMotion == true
+
+        // 움직임 중 예외 허용은 primary IR positive와 검증 RED positive가 일치할 때만 한다.
         val motionTolerated =
             strongMotion &&
                     canTolerateMotionWithChannelAgreement(
-                        ir = irAnalysis.estimate,
-                        red = redAnalysis.estimate
+                        ir = irPositiveAnalysis.estimate,
+                        red = redPositiveAnalysis.estimate
                     )
 
-        // 단일 IMU spike는 p95/초과비율 조건을 통과하지 않으므로 여기까지 오지 않는다.
-        // 실제로 지속된 움직임은 IR/RED가 강하게 일치할 때만 낮은 confidence로 허용한다.
         if (strongMotion && !motionTolerated) {
             maskRecentHeartRateSamplesForMotion(sampleCount = 100)
             arousalCalculator.onHeartRateDiscontinuity(
                 reason = "strong motion PPG mask"
             )
-
-            val baseMotionDiagnostics =
-                when (finalDecision.source) {
-                    HeartRateFusionSource.IR -> irAnalysis.diagnostics
-                    HeartRateFusionSource.RED -> redAnalysis.diagnostics
-                    HeartRateFusionSource.FUSED_IR_RED -> {
-                        val irQ = irAnalysis.estimate?.qualityScore ?: 0.0
-                        val redQ = redAnalysis.estimate?.qualityScore ?: 0.0
-                        if (irQ >= redQ) irAnalysis.diagnostics else redAnalysis.diagnostics
-                    }
-                    HeartRateFusionSource.COMBINED_FALLBACK ->
-                        combinedAnalysis?.diagnostics ?: irAnalysis.diagnostics
-                    HeartRateFusionSource.NONE ->
-                        selectMostInformativeFailure(
-                            ir = irAnalysis,
-                            red = redAnalysis,
-                            combined = combinedAnalysis
-                        ).diagnostics
-                }
 
             val message =
                 "지속 움직임으로 현재 1초 PPG를 HR buffer에서 mask: " +
@@ -1521,7 +1798,7 @@ class PotchDataProcessor(
             return HeartRateAnalysisResult(
                 estimate = null,
                 diagnostics = decorateFusionDiagnostics(
-                    base = baseMotionDiagnostics.copy(
+                    base = selectedAnalysis.diagnostics.copy(
                         processingState = HeartRateProcessingState.MOTION_ARTIFACT,
                         message = message,
                         calculatedBpm = rawFinalEstimate?.bpm,
@@ -1531,11 +1808,11 @@ class PotchDataProcessor(
                         imuMotionExceedanceRatio = imuMotion?.exceedanceRatio,
                         motionTolerated = false
                     ),
-                    ir = irAnalysis,
-                    red = redAnalysis,
-                    combined = combinedAnalysis,
-                    source = HeartRateFusionSource.NONE,
-                    fusionLog = "$message; ${finalDecision.log}"
+                    ir = irPositiveAnalysis,
+                    red = redPositiveAnalysis,
+                    combined = null,
+                    source = pathDecision.path.source,
+                    fusionLog = "$message; ${pathDecision.log}"
                 )
             )
         }
@@ -1543,7 +1820,7 @@ class PotchDataProcessor(
         val finalEstimate =
             if (rawFinalEstimate != null && motionTolerated) {
                 val log =
-                    "${finalDecision.log}; 움직임 중 IR/RED 일치로 낮은 confidence 허용"
+                    "${pathDecision.log}; 움직임 중 IR/RED positive 일치로 낮은 confidence 허용"
 
                 rawFinalEstimate.copy(
                     qualityScore =
@@ -1557,30 +1834,12 @@ class PotchDataProcessor(
             }
 
         if (finalEstimate != null) {
-            val baseDiagnostics = when (finalDecision.source) {
-                HeartRateFusionSource.IR -> irAnalysis.diagnostics
-                HeartRateFusionSource.RED -> redAnalysis.diagnostics
-                HeartRateFusionSource.FUSED_IR_RED -> {
-                    val irQ = irAnalysis.estimate?.qualityScore ?: 0.0
-                    val redQ = redAnalysis.estimate?.qualityScore ?: 0.0
-                    if (irQ >= redQ) irAnalysis.diagnostics else redAnalysis.diagnostics
-                }
-                HeartRateFusionSource.COMBINED_FALLBACK ->
-                    combinedAnalysis?.diagnostics ?: irAnalysis.diagnostics
-                HeartRateFusionSource.NONE -> irAnalysis.diagnostics
-            }
-
-            val finalLog =
-                if (motionTolerated) {
-                    finalEstimate.fusionLog ?: finalDecision.log
-                } else {
-                    finalDecision.log
-                }
+            val finalLog = finalEstimate.fusionLog ?: pathDecision.log
 
             return HeartRateAnalysisResult(
                 estimate = finalEstimate,
                 diagnostics = decorateFusionDiagnostics(
-                    base = baseDiagnostics.copy(
+                    base = selectedAnalysis.diagnostics.copy(
                         processingState = HeartRateProcessingState.VALID,
                         message = finalLog,
                         calculatedBpm = finalEstimate.bpm,
@@ -1607,66 +1866,380 @@ class PotchDataProcessor(
                         imuMotionExceedanceRatio = imuMotion?.exceedanceRatio,
                         motionTolerated = motionTolerated
                     ),
-                    ir = irAnalysis,
-                    red = redAnalysis,
-                    combined = combinedAnalysis,
-                    source = finalDecision.source,
+                    ir = irPositiveAnalysis,
+                    red = redPositiveAnalysis,
+                    combined = null,
+                    source = pathDecision.path.source,
                     fusionLog = finalLog
                 )
             )
         }
 
-        val disagreementWithValidChannels =
-            irAnalysis.estimate != null || redAnalysis.estimate != null
-
-        val baseFailure =
-            if (disagreementWithValidChannels) {
-                val preferred =
-                    listOf(irAnalysis, redAnalysis)
-                        .maxByOrNull { it.estimate?.qualityScore ?: 0.0 }
-                        ?: irAnalysis
-
-                preferred.copy(
-                    estimate = null,
-                    diagnostics = preferred.diagnostics.copy(
-                        processingState = HeartRateProcessingState.INVALID_IBI,
-                        message = finalDecision.log,
-                        calculatedBpm = null
-                    )
-                )
+        val failureState =
+            if (pathDecision.waitingForConfirmation) {
+                HeartRateProcessingState.COLLECTING
             } else {
-                selectMostInformativeFailure(
-                    ir = irAnalysis,
-                    red = redAnalysis,
-                    combined = combinedAnalysis
-                )
+                selectedAnalysis.diagnostics.processingState
             }
 
         return HeartRateAnalysisResult(
             estimate = null,
             diagnostics = decorateFusionDiagnostics(
-                base = baseFailure.diagnostics.copy(
-                    message = when {
-                        finalDecision.log.isBlank() ->
-                            baseFailure.diagnostics.message
-
-                        baseFailure.diagnostics.message == finalDecision.log ->
-                            finalDecision.log
-
-                        else ->
-                            "${finalDecision.log}; ${baseFailure.diagnostics.message}"
-                    },
+                base = selectedAnalysis.diagnostics.copy(
+                    processingState = failureState,
+                    message = pathDecision.log,
+                    calculatedBpm = null,
                     imuMaxDeltaG = imuMotion?.maxDeltaG,
                     imuP95DeltaG = imuMotion?.p95DeltaG,
                     imuMotionExceedanceRatio = imuMotion?.exceedanceRatio
                 ),
-                ir = irAnalysis,
-                red = redAnalysis,
-                combined = combinedAnalysis,
-                source = HeartRateFusionSource.NONE,
-                fusionLog = finalDecision.log
+                ir = irPositiveAnalysis,
+                red = redPositiveAnalysis,
+                combined = null,
+                source = pathDecision.path.source,
+                fusionLog = pathDecision.log
             )
         )
+    }
+
+
+    private fun selectStableHeartRatePath(
+        irPositive: HeartRateAnalysisResult,
+        redPositive: HeartRateAnalysisResult,
+        irNegative: HeartRateAnalysisResult?,
+        redNegative: HeartRateAnalysisResult?
+    ): HeartRatePathDecision {
+        fun analysisFor(path: HeartRateDetectionPath): HeartRateAnalysisResult? {
+            return when (path) {
+                HeartRateDetectionPath.IR_POSITIVE -> irPositive
+                HeartRateDetectionPath.RED_POSITIVE -> redPositive
+                HeartRateDetectionPath.IR_NEGATIVE -> irNegative
+                HeartRateDetectionPath.RED_NEGATIVE -> redNegative
+            }
+        }
+
+        fun usePath(
+            path: HeartRateDetectionPath,
+            analysis: HeartRateAnalysisResult,
+            log: String
+        ): HeartRatePathDecision {
+            val estimate = requireNotNull(analysis.estimate)
+            return HeartRatePathDecision(
+                estimate = estimate.copy(
+                    source = path.source,
+                    fusionLog = log
+                ),
+                analysis = analysis,
+                path = path,
+                log = log
+            )
+        }
+
+        fun waitForPath(
+            path: HeartRateDetectionPath,
+            analysis: HeartRateAnalysisResult,
+            log: String
+        ): HeartRatePathDecision {
+            return HeartRatePathDecision(
+                estimate = null,
+                analysis = analysis,
+                path = path,
+                log = log,
+                waitingForConfirmation = true
+            )
+        }
+
+        val irEstimate = irPositive.estimate
+        val redEstimate = redPositive.estimate
+
+        if (irEstimate != null) {
+            primaryPositiveFailureStreak = 0
+            positiveFallbackUnavailableStreak = 0
+
+            if (activeHeartRatePath == HeartRateDetectionPath.IR_POSITIVE) {
+                primaryPositiveRecoveryStreak = 0
+                activePathFailureStreak = 0
+                clearPendingHeartRatePath()
+
+                val validationLog = buildRedPositiveValidationLog(
+                    ir = irEstimate,
+                    red = redEstimate
+                )
+                return usePath(
+                    path = HeartRateDetectionPath.IR_POSITIVE,
+                    analysis = irPositive,
+                    log = validationLog
+                )
+            }
+
+            primaryPositiveRecoveryStreak += 1
+            val activeAnalysis = analysisFor(activeHeartRatePath)
+
+            if (
+                primaryPositiveRecoveryStreak >=
+                HEART_RATE_PRIMARY_RECOVERY_CONFIRM_FRAMES ||
+                activeAnalysis?.estimate == null
+            ) {
+                val previousPath = activeHeartRatePath
+                activeHeartRatePath = HeartRateDetectionPath.IR_POSITIVE
+                primaryPositiveRecoveryStreak = 0
+                activePathFailureStreak = 0
+                clearPendingHeartRatePath()
+
+                val validationLog = buildRedPositiveValidationLog(
+                    ir = irEstimate,
+                    red = redEstimate
+                )
+                return usePath(
+                    path = HeartRateDetectionPath.IR_POSITIVE,
+                    analysis = irPositive,
+                    log = "IR positive primary 복귀: ${previousPath.label} → IR positive; " +
+                            validationLog
+                )
+            }
+
+            activePathFailureStreak = 0
+            return usePath(
+                path = activeHeartRatePath,
+                analysis = requireNotNull(activeAnalysis),
+                log = "IR positive 복귀 확인 중 " +
+                        "$primaryPositiveRecoveryStreak/" +
+                        "$HEART_RATE_PRIMARY_RECOVERY_CONFIRM_FRAMES; " +
+                        "현재 ${activeHeartRatePath.label} 유지"
+            )
+        } else {
+            primaryPositiveRecoveryStreak = 0
+            primaryPositiveFailureStreak += 1
+        }
+
+        // Primary가 아직 3회 연속 실패하지 않았으면 다른 source를 즉시 선택하지 않는다.
+        if (
+            activeHeartRatePath == HeartRateDetectionPath.IR_POSITIVE &&
+            primaryPositiveFailureStreak <
+            HEART_RATE_PRIMARY_FAILURES_BEFORE_FALLBACK
+        ) {
+            clearPendingHeartRatePath()
+            return waitForPath(
+                path = HeartRateDetectionPath.IR_POSITIVE,
+                analysis = irPositive,
+                log = "IR positive primary 실패 " +
+                        "$primaryPositiveFailureStreak/" +
+                        "$HEART_RATE_PRIMARY_FAILURES_BEFORE_FALLBACK; " +
+                        "source 전환 없이 마지막 정상 HR 유지"
+            )
+        }
+
+        // 이미 확정된 fallback 경로가 유효하면 frame마다 다시 경쟁시키지 않고 그대로 유지한다.
+        if (activeHeartRatePath != HeartRateDetectionPath.IR_POSITIVE) {
+            val activeAnalysis = analysisFor(activeHeartRatePath)
+            if (activeAnalysis?.estimate != null) {
+                activePathFailureStreak = 0
+                clearPendingHeartRatePath()
+                return usePath(
+                    path = activeHeartRatePath,
+                    analysis = activeAnalysis,
+                    log = "확정된 fallback ${activeHeartRatePath.label} 유지; " +
+                            "IR positive failure=$primaryPositiveFailureStreak"
+                )
+            }
+
+            activePathFailureStreak += 1
+            if (
+                activePathFailureStreak <
+                HEART_RATE_PRIMARY_FAILURES_BEFORE_FALLBACK
+            ) {
+                return waitForPath(
+                    path = activeHeartRatePath,
+                    analysis = activeAnalysis ?: irPositive,
+                    log = "현재 fallback ${activeHeartRatePath.label} 실패 " +
+                            "$activePathFailureStreak/" +
+                            "$HEART_RATE_PRIMARY_FAILURES_BEFORE_FALLBACK; " +
+                            "즉시 다른 경로로 교대하지 않음"
+                )
+            }
+        }
+
+        // 첫 번째 fallback은 RED positive다. 유효하더라도 3회 연속 확인 전에는 전환하지 않는다.
+        if (
+            activeHeartRatePath != HeartRateDetectionPath.RED_POSITIVE &&
+            redEstimate != null
+        ) {
+            positiveFallbackUnavailableStreak = 0
+            val confirmed = confirmPendingHeartRatePath(
+                path = HeartRateDetectionPath.RED_POSITIVE,
+                bpm = redEstimate.bpm
+            )
+
+            if (confirmed) {
+                activeHeartRatePath = HeartRateDetectionPath.RED_POSITIVE
+                activePathFailureStreak = 0
+                return usePath(
+                    path = HeartRateDetectionPath.RED_POSITIVE,
+                    analysis = redPositive,
+                    log = "IR positive ${primaryPositiveFailureStreak}회 연속 실패 후 " +
+                            "RED positive ${HEART_RATE_FALLBACK_CONFIRM_FRAMES}회 확인, fallback 전환"
+                )
+            }
+
+            return waitForPath(
+                path = HeartRateDetectionPath.RED_POSITIVE,
+                analysis = redPositive,
+                log = "RED positive fallback 확인 중 " +
+                        "$pendingHeartRatePathSuccessStreak/" +
+                        "$HEART_RATE_FALLBACK_CONFIRM_FRAMES; " +
+                        "IR positive failure=$primaryPositiveFailureStreak"
+            )
+        }
+
+        if (redEstimate == null) {
+            positiveFallbackUnavailableStreak += 1
+        }
+
+        val negativeAllowed =
+            primaryPositiveFailureStreak >=
+            HEART_RATE_NEGATIVE_ENABLE_FAILURE_COUNT &&
+                    positiveFallbackUnavailableStreak >=
+                    HEART_RATE_FALLBACK_CONFIRM_FRAMES
+
+        if (!negativeAllowed) {
+            clearPendingHeartRatePath()
+            return waitForPath(
+                path = HeartRateDetectionPath.IR_POSITIVE,
+                analysis = irPositive,
+                log = "positive 경로 지속성 확인 중: " +
+                        "IR failure=$primaryPositiveFailureStreak/" +
+                        "$HEART_RATE_NEGATIVE_ENABLE_FAILURE_COUNT, " +
+                        "RED unavailable=$positiveFallbackUnavailableStreak/" +
+                        "$HEART_RATE_FALLBACK_CONFIRM_FRAMES; " +
+                        "negative peak는 아직 사용하지 않음"
+            )
+        }
+
+        // Positive 경로가 충분히 오래 실패한 뒤에만 negative 후보를 확인한다.
+        val negativeCandidate = when {
+            irNegative?.estimate != null ->
+                HeartRateDetectionPath.IR_NEGATIVE to irNegative
+
+            redNegative?.estimate != null ->
+                HeartRateDetectionPath.RED_NEGATIVE to redNegative
+
+            else -> null
+        }
+
+        if (negativeCandidate != null) {
+            val (path, analysis) = negativeCandidate
+            val estimate = requireNotNull(analysis.estimate)
+            val confirmed = confirmPendingHeartRatePath(
+                path = path,
+                bpm = estimate.bpm
+            )
+
+            if (confirmed) {
+                activeHeartRatePath = path
+                activePathFailureStreak = 0
+                return usePath(
+                    path = path,
+                    analysis = analysis,
+                    log = "IR/RED positive 지속 실패 후 ${path.label} " +
+                            "${HEART_RATE_FALLBACK_CONFIRM_FRAMES}회 확인, negative fallback 전환"
+                )
+            }
+
+            return waitForPath(
+                path = path,
+                analysis = analysis,
+                log = "${path.label} fallback 확인 중 " +
+                        "$pendingHeartRatePathSuccessStreak/" +
+                        "$HEART_RATE_FALLBACK_CONFIRM_FRAMES; " +
+                        "positive 경로가 지속 실패한 경우에만 negative 사용"
+            )
+        }
+
+        clearPendingHeartRatePath()
+        val informativeFailure =
+            listOfNotNull(irNegative, redNegative, redPositive, irPositive)
+                .maxWithOrNull(
+                    compareBy<HeartRateAnalysisResult> {
+                        failureInformationRank(it.diagnostics.processingState)
+                    }.thenBy { it.diagnostics.validIbiCount }
+                ) ?: irPositive
+
+        return HeartRatePathDecision(
+            estimate = null,
+            analysis = informativeFailure,
+            path = activeHeartRatePath,
+            log = "IR/RED positive와 허용된 negative fallback 모두 유효 후보 없음; " +
+                    "active=${activeHeartRatePath.label}",
+            waitingForConfirmation = false
+        )
+    }
+
+    private fun buildRedPositiveValidationLog(
+        ir: HeartRateEstimate,
+        red: HeartRateEstimate?
+    ): String {
+        if (red == null) {
+            return "IR positive primary 사용: ${ir.bpm} bpm; RED positive 검증 후보 없음"
+        }
+
+        val difference = abs(ir.bpm - red.bpm)
+        val reference = maxOf(ir.bpm, red.bpm).toDouble().coerceAtLeast(1.0)
+        val agree =
+            difference <= HEART_RATE_FUSION_AGREE_BPM ||
+                    difference / reference <= HEART_RATE_FUSION_AGREE_RATIO
+
+        return if (agree) {
+            "IR positive primary 사용: ${ir.bpm} bpm; " +
+                    "RED positive=${red.bpm} bpm 일치, 검증 통과(융합하지 않음)"
+        } else {
+            "IR positive primary 사용: ${ir.bpm} bpm; " +
+                    "RED positive=${red.bpm} bpm 불일치는 source 전환에 사용하지 않음"
+        }
+    }
+
+    private fun confirmPendingHeartRatePath(
+        path: HeartRateDetectionPath,
+        bpm: Int
+    ): Boolean {
+        val samePath = pendingHeartRatePath == path
+        val bpmConsistent =
+            pendingHeartRatePathLastBpm?.let { previous ->
+                abs(previous - bpm) <= HEART_RATE_PENDING_BPM_TOLERANCE
+            } ?: true
+
+        if (samePath && bpmConsistent) {
+            pendingHeartRatePathSuccessStreak += 1
+        } else {
+            pendingHeartRatePath = path
+            pendingHeartRatePathSuccessStreak = 1
+        }
+
+        pendingHeartRatePathLastBpm = bpm
+
+        if (
+            pendingHeartRatePathSuccessStreak >=
+            HEART_RATE_FALLBACK_CONFIRM_FRAMES
+        ) {
+            clearPendingHeartRatePath()
+            return true
+        }
+
+        return false
+    }
+
+    private fun clearPendingHeartRatePath() {
+        pendingHeartRatePath = null
+        pendingHeartRatePathSuccessStreak = 0
+        pendingHeartRatePathLastBpm = null
+    }
+
+    private fun resetHeartRatePathSelection() {
+        activeHeartRatePath = HeartRateDetectionPath.IR_POSITIVE
+        primaryPositiveFailureStreak = 0
+        primaryPositiveRecoveryStreak = 0
+        activePathFailureStreak = 0
+        positiveFallbackUnavailableStreak = 0
+        clearPendingHeartRatePath()
     }
 
     private fun canTolerateMotionWithChannelAgreement(
@@ -2216,15 +2789,16 @@ class PotchDataProcessor(
     /**
      * 최근 최대 8초의 단일 PPG 채널 window에서 HR과 상세 실패 사유를 함께 계산한다.
      *
-     * 양/음 방향 peak를 각각 모든 threshold 후보로 평가하고,
-     * SDSD + IBI 유지율이 가장 좋은 방향/threshold 조합을 선택한다.
+     * requiredPolarity가 지정되면 해당 방향 peak만 평가한다.
+     * stable path selector가 IR positive를 primary로 고정하고 fallback 시점만 제어한다.
      */
     private fun estimateHeartRateFromBuffer(
         signalBuffer: ArrayDeque<Int>,
         contactBuffer: ArrayDeque<Int>,
         imuMotion: ImuMotionSummary?,
         source: HeartRateFusionSource,
-        channelLabel: String
+        channelLabel: String,
+        requiredPolarity: HeartRatePeakPolarity? = null
     ): HeartRateAnalysisResult {
         val sampleRateHz = 100.0
         val cleanWindow = buildLatestCleanHeartRateWindow(
@@ -2490,23 +3064,39 @@ class PotchDataProcessor(
 
         val bufferStartSampleIndex = cleanWindow.startSamplePosition
 
-        val positiveSearch = findBestHeartRatePeakFit(
-            signal = positiveTop,
-            sampleRateHz = sampleRateHz,
-            bufferStartSampleIndex = bufferStartSampleIndex,
-            segmentId = currentAnalysisSegmentId,
-            polarity = HeartRatePeakPolarity.POSITIVE,
-            excludedPeakMask = preprocessResult.excludedPeakMask
-        )
+        val positiveSearch =
+            if (
+                requiredPolarity == null ||
+                requiredPolarity == HeartRatePeakPolarity.POSITIVE
+            ) {
+                findBestHeartRatePeakFit(
+                    signal = positiveTop,
+                    sampleRateHz = sampleRateHz,
+                    bufferStartSampleIndex = bufferStartSampleIndex,
+                    segmentId = currentAnalysisSegmentId,
+                    polarity = HeartRatePeakPolarity.POSITIVE,
+                    excludedPeakMask = preprocessResult.excludedPeakMask
+                )
+            } else {
+                null
+            }
 
-        val negativeSearch = findBestHeartRatePeakFit(
-            signal = negativeTop,
-            sampleRateHz = sampleRateHz,
-            bufferStartSampleIndex = bufferStartSampleIndex,
-            segmentId = currentAnalysisSegmentId,
-            polarity = HeartRatePeakPolarity.NEGATIVE,
-            excludedPeakMask = preprocessResult.excludedPeakMask
-        )
+        val negativeSearch =
+            if (
+                requiredPolarity == null ||
+                requiredPolarity == HeartRatePeakPolarity.NEGATIVE
+            ) {
+                findBestHeartRatePeakFit(
+                    signal = negativeTop,
+                    sampleRateHz = sampleRateHz,
+                    bufferStartSampleIndex = bufferStartSampleIndex,
+                    segmentId = currentAnalysisSegmentId,
+                    polarity = HeartRatePeakPolarity.NEGATIVE,
+                    excludedPeakMask = preprocessResult.excludedPeakMask
+                )
+            } else {
+                null
+            }
 
         val candidateComparator =
             compareBy<HeartRatePeakFitCandidate> { it.selectionScore }
@@ -2515,26 +3105,26 @@ class PotchDataProcessor(
                 .thenByDescending { it.acceptedIntervalRatio }
 
         val bestFit = listOfNotNull(
-            positiveSearch.bestCandidate,
-            negativeSearch.bestCandidate
+            positiveSearch?.bestCandidate,
+            negativeSearch?.bestCandidate
         ).minWithOrNull(candidateComparator)
 
         val bestRejectedFit = listOfNotNull(
-            positiveSearch.bestRejectedCandidate,
-            negativeSearch.bestRejectedCandidate
+            positiveSearch?.bestRejectedCandidate,
+            negativeSearch?.bestRejectedCandidate
         ).minWithOrNull(candidateComparator)
 
         val maxDetectedPeakCount = maxOf(
-            positiveSearch.maxDetectedPeakCount,
-            negativeSearch.maxDetectedPeakCount
+            positiveSearch?.maxDetectedPeakCount ?: 0,
+            negativeSearch?.maxDetectedPeakCount ?: 0
         )
         val maxRawIbiCount = maxOf(
-            positiveSearch.maxRawIntervalCount,
-            negativeSearch.maxRawIntervalCount
+            positiveSearch?.maxRawIntervalCount ?: 0,
+            negativeSearch?.maxRawIntervalCount ?: 0
         )
         val maxValidIbiCount = maxOf(
-            positiveSearch.maxValidIntervalCount,
-            negativeSearch.maxValidIntervalCount
+            positiveSearch?.maxValidIntervalCount ?: 0,
+            negativeSearch?.maxValidIntervalCount ?: 0
         )
 
         if (bestFit == null) {
@@ -2549,13 +3139,13 @@ class PotchDataProcessor(
 
                 // 정상 범위 BPM 후보가 hard reject된 경우 실제 원인은 BPM 범위가 아니라 IBI 품질이다.
                 bestRejectedFit != null ||
-                        positiveSearch.sawInvalidIbi ||
-                        negativeSearch.sawInvalidIbi ||
+                        positiveSearch?.sawInvalidIbi == true ||
+                        negativeSearch?.sawInvalidIbi == true ||
                         maxRawIbiCount > 0 ->
                     HeartRateProcessingState.INVALID_IBI
 
-                positiveSearch.sawBpmOutOfRange ||
-                        negativeSearch.sawBpmOutOfRange ->
+                positiveSearch?.sawBpmOutOfRange == true ||
+                        negativeSearch?.sawBpmOutOfRange == true ->
                     HeartRateProcessingState.BPM_OUT_OF_RANGE
 
                 else ->
@@ -4204,6 +4794,7 @@ class PotchDataProcessor(
      */
     private fun advanceAnalysisSegment(reason: String) {
         currentAnalysisSegmentId += 1L
+        resetHeartRatePathSelection()
 
         // HR raw ring buffer는 보존하지만 새 sample에는 증가된 segment ID가 기록된다.
         // HR 계산은 최신 segment의 연속 clean tail만 사용하므로 gap 전후 IBI가 연결되지 않는다.
@@ -4280,6 +4871,17 @@ class PotchDataProcessor(
                 heartRateCalculationStatus = MetricCalculationStatus(
                     state = MetricCalculationState.REJECTED,
                     message = packetLossDiagnostics.message
+                ),
+                heartRateGraphData = HeartRateGraphData(
+                    source = HeartRateFusionSource.NONE,
+                    processingState = HeartRateProcessingState.PACKET_LOSS,
+                    retainedBufferSampleCount = heartRateCombinedBuffer.size,
+                    cleanSegmentSampleCount = 0,
+                    calculatedBpm =
+                        if (canHoldPrevious) lastValidHeartRateEstimate?.bpm else null,
+                    qualityScore =
+                        if (canHoldPrevious) lastValidHeartRateEstimate?.qualityScore else null,
+                    description = "데이터 연속성 중단으로 새 clean segment 수집 대기: $reason"
                 ),
                 arousalState = gapState,
                 analysisSegmentId = currentAnalysisSegmentId,

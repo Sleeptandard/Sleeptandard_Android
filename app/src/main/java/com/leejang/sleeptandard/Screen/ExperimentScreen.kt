@@ -43,6 +43,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.leejang.sleeptandard.Potch.ArousalState
+import com.leejang.sleeptandard.Potch.HeartRateFusionSource
+import com.leejang.sleeptandard.Potch.HeartRateGraphData
+import com.leejang.sleeptandard.Potch.HeartRateProcessingState
+import com.leejang.sleeptandard.Potch.HeartRatePeakPolarity
 import com.leejang.sleeptandard.Potch.MetricCalculationState
 import com.leejang.sleeptandard.Potch.MetricCalculationStatus
 import com.leejang.sleeptandard.Potch.PacketErrorLog
@@ -238,6 +242,11 @@ fun ExperimentScreen(
             irSamples = ppgIrSamples,
             redSamples = ppgRedSamples,
             frameSummary = latestPpgFrameSummary,
+            isConnected = bleState.isConnected
+        )
+
+        HeartRateProcessedPpgGraphCard(
+            graphData = processorState.heartRateGraphData,
             isConnected = bleState.isConnected
         )
 
@@ -625,6 +634,325 @@ private fun PpgRealtimeGraphCard(
             fontFamily = FontFamily.Monospace
         )
     }
+}
+
+@Composable
+private fun HeartRateProcessedPpgGraphCard(
+    graphData: HeartRateGraphData,
+    isConnected: Boolean
+) {
+    val primaryColor = when (graphData.source) {
+        HeartRateFusionSource.IR -> Color(0xFF4CD3FF)
+        HeartRateFusionSource.RED -> Color(0xFFFF4B55)
+        HeartRateFusionSource.FUSED_IR_RED -> Color(0xFF4CD3FF)
+        HeartRateFusionSource.COMBINED_FALLBACK -> Color(0xFFB7A7FF)
+        HeartRateFusionSource.NONE -> Color(0xFF4CD3FF)
+    }
+
+    val secondaryColor = Color(0xFFFF4B55)
+
+    val statusColor = when (graphData.processingState) {
+        HeartRateProcessingState.VALID -> Color(0xFF3DFF78)
+        HeartRateProcessingState.COLLECTING -> Color(0xFFFFD166)
+        HeartRateProcessingState.HELD_PREVIOUS -> Color(0xFFFFC46B)
+        else -> Color(0xFFFF5C68)
+    }
+
+    val sourceText = when (graphData.source) {
+        HeartRateFusionSource.IR -> "IR"
+        HeartRateFusionSource.RED -> "RED"
+        HeartRateFusionSource.FUSED_IR_RED -> "IR + RED LATE FUSION"
+        HeartRateFusionSource.COMBINED_FALLBACK -> "AVERAGE FALLBACK"
+        HeartRateFusionSource.NONE -> "NO FINAL SOURCE"
+    }
+
+    val polarityText = when (graphData.selectedPolarity) {
+        HeartRatePeakPolarity.POSITIVE -> "POSITIVE"
+        HeartRatePeakPolarity.NEGATIVE -> "NEGATIVE"
+        HeartRatePeakPolarity.NONE -> "NONE"
+    }
+
+    val statusText = when (graphData.processingState) {
+        HeartRateProcessingState.VALID -> "VALID"
+        HeartRateProcessingState.COLLECTING -> "수집 중"
+        HeartRateProcessingState.HELD_PREVIOUS -> "이전값 유지"
+        else -> "분석 불가"
+    }
+
+    val allSamples =
+        if (graphData.secondarySamples.isEmpty()) {
+            graphData.primarySamples
+        } else {
+            graphData.primarySamples + graphData.secondarySamples
+        }
+
+    val graphMin = allSamples.minOrNull()
+    val graphMax = allSamples.maxOrNull()
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(26.dp))
+            .background(Color(0xFF1E1E25))
+            .border(
+                width = 1.dp,
+                color = Color(0xFFB7A7FF).copy(alpha = 0.45f),
+                shape = RoundedCornerShape(26.dp)
+            )
+            .padding(18.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "🫀 HR 분석 PPG 결과",
+                color = Color(0xFFB7A7FF),
+                fontSize = 21.sp,
+                fontWeight = FontWeight.Bold
+            )
+
+            Spacer(Modifier.weight(1f))
+
+            Text(
+                text = if (isConnected) statusText else "대기",
+                color = if (isConnected) statusColor
+                else Color.White.copy(alpha = 0.45f),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(100.dp))
+                    .background(
+                        if (isConnected) statusColor.copy(alpha = 0.14f)
+                        else Color.White.copy(alpha = 0.07f)
+                    )
+                    .padding(horizontal = 10.dp, vertical = 5.dp)
+            )
+        }
+
+        Spacer(Modifier.height(10.dp))
+
+        Text(
+            text = graphData.description,
+            color = Color.White.copy(alpha = 0.58f),
+            fontSize = 13.sp,
+            lineHeight = 18.sp
+        )
+
+        Spacer(Modifier.height(8.dp))
+
+        Text(
+            text = "DataProcessor clean tail · spike 보간 · 0.75~3.5Hz BPF · peak/IBI fitting",
+            color = Color.White.copy(alpha = 0.42f),
+            fontSize = 12.sp,
+            fontFamily = FontFamily.Monospace
+        )
+
+        Spacer(Modifier.height(12.dp))
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(210.dp)
+                .clip(RoundedCornerShape(18.dp))
+                .background(Color.Black.copy(alpha = 0.24f))
+                .border(
+                    width = 1.dp,
+                    color = Color.White.copy(alpha = 0.06f),
+                    shape = RoundedCornerShape(18.dp)
+                )
+                .padding(10.dp)
+        ) {
+            Canvas(
+                modifier = Modifier.fillMaxSize()
+            ) {
+                drawPpgGrid()
+
+                if (graphData.primarySamples.size >= 2) {
+                    drawProcessedPpgPath(
+                        samples = graphData.primarySamples,
+                        color = primaryColor,
+                        strokeWidthPx = 2.6f,
+                        sharedMin = graphMin,
+                        sharedMax = graphMax
+                    )
+                }
+
+                if (graphData.secondarySamples.size >= 2) {
+                    drawProcessedPpgPath(
+                        samples = graphData.secondarySamples,
+                        color = secondaryColor,
+                        strokeWidthPx = 2.1f,
+                        sharedMin = graphMin,
+                        sharedMax = graphMax
+                    )
+                }
+
+                if (
+                    graphData.primarySamples.size >= 2 &&
+                    graphData.peakSampleIndices.isNotEmpty()
+                ) {
+                    drawProcessedPpgPeakMarkers(
+                        samples = graphData.primarySamples,
+                        peakIndices = graphData.peakSampleIndices,
+                        color = Color(0xFFFFD166),
+                        sharedMin = graphMin,
+                        sharedMax = graphMax
+                    )
+                }
+            }
+
+            if (graphData.primarySamples.isEmpty()) {
+                Text(
+                    text = "HR 분석용 clean PPG 수집 대기 중",
+                    color = Color.White.copy(alpha = 0.45f),
+                    fontSize = 14.sp,
+                    modifier = Modifier.align(Alignment.Center)
+                )
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            PpgLegendChip(
+                modifier = Modifier.weight(1f),
+                title = graphData.primaryLabel,
+                value = processedRangeText(graphData.primarySamples),
+                color = primaryColor
+            )
+
+            val secondaryLabel = graphData.secondaryLabel
+            if (
+                secondaryLabel != null &&
+                graphData.secondarySamples.isNotEmpty()
+            ) {
+                PpgLegendChip(
+                    modifier = Modifier.weight(1f),
+                    title = secondaryLabel,
+                    value = processedRangeText(graphData.secondarySamples),
+                    color = secondaryColor
+                )
+            } else {
+                PpgLegendChip(
+                    modifier = Modifier.weight(1f),
+                    title = "SOURCE",
+                    value = sourceText,
+                    color = Color(0xFFB7A7FF)
+                )
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        Text(
+            text = buildString {
+                append("source=$sourceText")
+                append(" · polarity=$polarityText")
+                append(" · clean=${graphData.cleanSegmentSampleCount}")
+                append(" / retained=${graphData.retainedBufferSampleCount} samples")
+                append(" · interpolated=${graphData.interpolatedSampleCount}")
+                append(" · peak-excluded=${graphData.excludedPeakSampleCount}")
+                graphData.calculatedBpm?.let { append(" · bpm=$it") }
+                graphData.qualityScore?.let {
+                    append(" · quality=${"%.3f".format(it)}")
+                }
+            },
+            color = Color.White.copy(alpha = 0.42f),
+            fontSize = 12.sp,
+            lineHeight = 17.sp,
+            fontFamily = FontFamily.Monospace
+        )
+    }
+}
+
+private fun DrawScope.drawProcessedPpgPath(
+    samples: List<Double>,
+    color: Color,
+    strokeWidthPx: Float,
+    sharedMin: Double?,
+    sharedMax: Double?
+) {
+    if (samples.size < 2) return
+
+    val minValue = sharedMin ?: samples.minOrNull() ?: return
+    val maxValue = sharedMax ?: samples.maxOrNull() ?: return
+    val range = (maxValue - minValue).takeIf { it > 0.0 } ?: 1.0
+
+    val path = Path()
+
+    samples.forEachIndexed { index, value ->
+        val x =
+            size.width * index.toFloat() /
+                    (samples.size - 1).toFloat()
+
+        val normalized =
+            ((value - minValue) / range)
+                .coerceIn(0.0, 1.0)
+                .toFloat()
+
+        val y = size.height - normalized * size.height
+
+        if (index == 0) {
+            path.moveTo(x, y)
+        } else {
+            path.lineTo(x, y)
+        }
+    }
+
+    drawPath(
+        path = path,
+        color = color,
+        style = Stroke(width = strokeWidthPx)
+    )
+}
+
+private fun DrawScope.drawProcessedPpgPeakMarkers(
+    samples: List<Double>,
+    peakIndices: List<Int>,
+    color: Color,
+    sharedMin: Double?,
+    sharedMax: Double?
+) {
+    if (samples.size < 2) return
+
+    val minValue = sharedMin ?: samples.minOrNull() ?: return
+    val maxValue = sharedMax ?: samples.maxOrNull() ?: return
+    val range = (maxValue - minValue).takeIf { it > 0.0 } ?: 1.0
+
+    peakIndices.forEach { index ->
+        if (index !in samples.indices) return@forEach
+
+        val x =
+            size.width * index.toFloat() /
+                    (samples.size - 1).toFloat()
+
+        val normalized =
+            ((samples[index] - minValue) / range)
+                .coerceIn(0.0, 1.0)
+                .toFloat()
+
+        val y = size.height - normalized * size.height
+
+        drawCircle(
+            color = color,
+            radius = 4.5f,
+            center = Offset(x, y)
+        )
+    }
+}
+
+private fun processedRangeText(
+    samples: List<Double>
+): String {
+    if (samples.isEmpty()) return "-"
+
+    val minValue = samples.minOrNull() ?: return "-"
+    val maxValue = samples.maxOrNull() ?: return "-"
+
+    return "${"%.1f".format(minValue)} ~ ${"%.1f".format(maxValue)}"
 }
 
 @Composable
