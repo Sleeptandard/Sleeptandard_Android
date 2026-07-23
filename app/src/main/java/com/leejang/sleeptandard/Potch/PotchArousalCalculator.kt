@@ -1560,6 +1560,37 @@ class PotchArousalCalculator(
     }
 
     /**
+     * packet은 정상 수신됐지만 강한 움직임으로 현재 PPG 구간을 HR에서 제외할 때 호출한다.
+     *
+     * RR/micro movement의 raw buffer는 유지하고, HRV IBI 연속성만 끊는다.
+     * 따라서 움직임 전 IBI와 움직임 후 IBI가 RMSSD에서 이웃 값으로 연결되지 않는다.
+     */
+    fun onHeartRateDiscontinuity(reason: String): ArousalState {
+        hrvIbiBuffer.clear()
+        lastAcceptedHrvIbiSegmentId = Long.MIN_VALUE
+        lastAcceptedHrvIbiEndSamplePosition = Double.NEGATIVE_INFINITY
+        lastValidHrvTimestampMillis = null
+        hrvBufferExpiredByGap = true
+
+        lastState = lastState.copy(
+            hrvRmssd = null,
+            hrvRmssdMs = null,
+            hrvLf = null,
+            hrvHf = null,
+            hrvLfHf = null,
+            hrvScore = null,
+            hrvQuality = 0.0,
+            hrvLog = "HR artifact 구간으로 HRV IBI 연속성 중단: $reason",
+            hrvCalculationStatus = MetricCalculationStatus(
+                state = MetricCalculationState.REJECTED,
+                message = "HR artifact 이후 새 IBI를 다시 수집해야 함"
+            )
+        )
+
+        return lastState
+    }
+
+    /**
      * 패킷 누락/CRC 오류로 샘플 연속성이 끊겼을 때 호출한다.
      *
      * sample-domain 신호(PPG/IMU/micro filter)는 즉시 비워 누락 전후 파형이
