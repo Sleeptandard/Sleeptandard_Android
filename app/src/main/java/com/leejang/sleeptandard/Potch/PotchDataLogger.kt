@@ -91,22 +91,24 @@ class PotchDataLogger(
             File(dir, "potch_hr_diagnostic_log_$timestamp.csv")
 
         workingDebugLogFile?.writeText(
-            "Potch debug log started at $timestamp\n"
+            text = "Potch debug log started at $timestamp\n",
+            charset = Charsets.UTF_8
         )
 
         workingLogFile?.writeText(
-            listOf(
+            text = UTF8_BOM + listOf(
                 "phone_time",
                 "timestamp",
                 "super_frame_hex",
                 "complete",
                 "miss_packet_num",
                 "error_log"
-            ).joinToString(",") + "\n"
+            ).joinToString(",") + "\n",
+            charset = Charsets.UTF_8
         )
 
         workingArousalLogFile?.writeText(
-            listOf(
+            text = UTF8_BOM + listOf(
                 "phone_time",
                 "timestamp",
 
@@ -164,11 +166,12 @@ class PotchDataLogger(
                 "miss_packet_num",
                 "error_log",
                 "last_log"
-            ).joinToString(",") + "\n"
+            ).joinToString(",") + "\n",
+            charset = Charsets.UTF_8
         )
 
         workingHeartRateDiagnosticLogFile?.writeText(
-            listOf(
+            text = UTF8_BOM + listOf(
                 "phone_time",
                 "timestamp",
                 "analysis_segment_id",
@@ -207,7 +210,8 @@ class PotchDataLogger(
                 "crc_error_count",
                 "sequence_loss_count",
                 "estimated_lost_packet_count"
-            ).joinToString(",") + "\n"
+            ).joinToString(",") + "\n",
+            charset = Charsets.UTF_8
         )
     }
 
@@ -244,7 +248,7 @@ class PotchDataLogger(
 
         val line = "$phoneTimeText $level/$tag: $message"
 
-        file.appendText(line + "\n")
+        file.appendText(line + "\n", Charsets.UTF_8)
     }
 
     /**
@@ -283,7 +287,7 @@ class PotchDataLogger(
             escapeCsv(errorLog)
         ).joinToString(",")
 
-        file.appendText(row + "\n")
+        file.appendText(row + "\n", Charsets.UTF_8)
     }
 
     /**
@@ -347,7 +351,7 @@ class PotchDataLogger(
             diagnostics.estimatedLostPacketCount.toString()
         ).joinToString(",")
 
-        file.appendText(row + "\n")
+        file.appendText(row + "\n", Charsets.UTF_8)
     }
 
     /**
@@ -433,7 +437,7 @@ class PotchDataLogger(
             escapeCsv(arousalState.lastLog)
         ).joinToString(",")
 
-        file.appendText(row + "\n")
+        file.appendText(row + "\n", Charsets.UTF_8)
     }
 
     /**
@@ -464,7 +468,7 @@ class PotchDataLogger(
             escapeCsv(message)
         ).joinToString(",")
 
-        file.appendText(row + "\n")
+        file.appendText(row + "\n", Charsets.UTF_8)
     }
 
     /**
@@ -596,6 +600,8 @@ class PotchDataLogger(
     }
 
     companion object {
+        // Windows Excel이 CSV를 UTF-8로 자동 인식하도록 파일 맨 앞에 기록한다.
+        private const val UTF8_BOM = "\uFEFF"
         private const val INTERNAL_LOG_DIR_NAME = "PotchLogs"
         private const val DOWNLOAD_LOG_DIR_NAME = "PotchLogs"
 

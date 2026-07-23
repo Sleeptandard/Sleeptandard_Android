@@ -91,8 +91,8 @@ data class HeartRateDiagnostics(
     val spectralConcentration: Double? = null,
     val spectralEntropy: Double? = null,
 
-    // raw PPG의 최대 연속 sample 변화량을 robust amplitude로 나눈 값.
-    // 센서 raw scale이 달라도 갑작스러운 spike를 비교할 수 있도록 정규화한다.
+    // raw PPG 연속 sample 변화량의 99 percentile을 robust amplitude로 나눈 값.
+    // 최대값 하나에 과민하게 반응하지 않으면서 갑작스러운 변화 정도를 정규화한다.
     val abruptChangeRatio: Double? = null,
 
     // 선택된 moving-average threshold의 실제 offset과 백분율.
@@ -281,11 +281,10 @@ class PotchDataProcessor(
         private const val HEART_RATE_MAX_BPM = 180
         private const val HEART_RATE_MOVING_AVERAGE_SECONDS = 1.5
 
-        // 후보 hard reject 기준(완화 롤백).
-        // 이전 수준처럼 정제 후 IBI 2개, 원본 대비 50% 유지만 요구한다.
-        // raw SDSD 200ms는 hard reject가 아니라 quality 점수 계산에만 사용한다.
-        private const val HEART_RATE_MIN_USED_INTERVAL_COUNT = 2
-        private const val HEART_RATE_MIN_ACCEPTED_INTERVAL_RATIO = 0.50
+        // 후보 hard reject 기준.
+        // 정제 후 IBI 4개, 원본 대비 70% 유지, raw SDSD 200ms 이하를 모두 만족해야 한다.
+        private const val HEART_RATE_MIN_USED_INTERVAL_COUNT = 4
+        private const val HEART_RATE_MIN_ACCEPTED_INTERVAL_RATIO = 0.70
         private const val HEART_RATE_MAX_RAW_SDSD_SEC = 0.200
         private const val HEART_RATE_MIN_PHYSIOLOGICAL_INTERVAL_RATIO = 0.75
 
@@ -297,7 +296,12 @@ class PotchDataProcessor(
         private const val HEART_RATE_MIN_SPECTRAL_CONCENTRATION = 0.12
         private const val HEART_RATE_MAX_SPECTRAL_ENTROPY = 0.82
         private const val HEART_RATE_MAX_AMPLITUDE_CV = 0.50
-        private const val HEART_RATE_MAX_ABRUPT_CHANGE_RATIO = 1.00
+
+        // raw PPG의 단 한 번의 최대 변화량이 아니라 연속 변화량의 99 percentile을 사용한다.
+        // 1.0 이상부터 quality를 감점하고, 1.5를 넘을 때만 hard reject한다.
+        private const val HEART_RATE_ABRUPT_CHANGE_PERCENTILE = 0.99
+        private const val HEART_RATE_ABRUPT_CHANGE_SCORE_ZERO_RATIO = 1.00
+        private const val HEART_RATE_MAX_ABRUPT_CHANGE_RATIO = 1.50
 
         // Potch MAX3010x 계열 PPG는 18-bit 범위를 사용한다.
         private const val HEART_RATE_PPG_ADC_MAX = 262143.0
@@ -1327,9 +1331,14 @@ class PotchDataProcessor(
             sampleRateHz = sampleRateHz
         )
 
+        val robustRawSampleDelta =
+            calculateConsecutiveDifferencePercentile(
+                values = signal,
+                percentile = HEART_RATE_ABRUPT_CHANGE_PERCENTILE
+            )
+
         val abruptChangeRatio =
-            calculateMaxConsecutiveDifference(signal)
-                ?.div(acRobustAmplitude)
+            robustRawSampleDelta?.div(acRobustAmplitude)
 
         fun spectralDiagnostics(
             state: HeartRateProcessingState,
@@ -1388,7 +1397,7 @@ class PotchDataProcessor(
         ) {
             return spectralDiagnostics(
                 state = HeartRateProcessingState.ABRUPT_SIGNAL_CHANGE,
-                message = "BVP 순간 sample 변화 과다: normalized=${"%.4f".format(abruptChangeRatio)} " +
+                message = "BVP 연속 sample 변화 p99 과다: normalized=${"%.4f".format(abruptChangeRatio)} " +
                         "> $HEART_RATE_MAX_ABRUPT_CHANGE_RATIO"
             )
         }
@@ -1608,8 +1617,8 @@ class PotchDataProcessor(
 
         val abruptChangeScore =
             (1.0 -
-                    (abruptChangeRatio ?: HEART_RATE_MAX_ABRUPT_CHANGE_RATIO) /
-                    HEART_RATE_MAX_ABRUPT_CHANGE_RATIO)
+                    (abruptChangeRatio ?: HEART_RATE_ABRUPT_CHANGE_SCORE_ZERO_RATIO) /
+                    HEART_RATE_ABRUPT_CHANGE_SCORE_ZERO_RATIO)
                 .coerceIn(0.0, 1.0)
 
         val bvpSignalQuality =
@@ -2046,11 +2055,10 @@ class PotchDataProcessor(
                 maxInterpolationOffsetMs = maxInterpolationOffsetMs
             )
 
-            // raw SDSD는 quality와 후보 선택 점수에 반영하되,
-            // 값이 200ms를 넘었다는 이유만으로 후보를 완전히 차단하지 않는다.
             val hardRejected =
                 usedIntervals.size < HEART_RATE_MIN_USED_INTERVAL_COUNT ||
                         acceptedIntervalRatio < HEART_RATE_MIN_ACCEPTED_INTERVAL_RATIO ||
+                        rawSdsdSec > HEART_RATE_MAX_RAW_SDSD_SEC ||
                         physiologicalIntervalRatio < HEART_RATE_MIN_PHYSIOLOGICAL_INTERVAL_RATIO
 
             if (hardRejected) {
@@ -2609,6 +2617,39 @@ class PotchDataProcessor(
         }
 
         return maxDelta
+    }
+
+    /**
+     * 연속 sample 변화량의 지정 percentile을 계산한다.
+     *
+     * 최대값 하나만 사용하면 정상 맥파의 가파른 한 지점이나 단발성 spike 때문에
+     * 전체 HR window가 거부될 수 있으므로, abrupt-change gate에는 robust percentile을 쓴다.
+     */
+    private fun calculateConsecutiveDifferencePercentile(
+        values: List<Double>,
+        percentile: Double
+    ): Double? {
+        if (values.size < 2) return null
+
+        val deltas = DoubleArray(values.size - 1)
+        for (i in 1 until values.size) {
+            deltas[i - 1] = abs(values[i] - values[i - 1])
+        }
+
+        deltas.sort()
+
+        val clampedPercentile = percentile.coerceIn(0.0, 1.0)
+        val position = clampedPercentile * deltas.lastIndex.toDouble()
+        val lowerIndex = floor(position).toInt()
+        val upperIndex = ceil(position).toInt()
+
+        if (lowerIndex == upperIndex) {
+            return deltas[lowerIndex]
+        }
+
+        val fraction = position - lowerIndex.toDouble()
+        return deltas[lowerIndex] * (1.0 - fraction) +
+                deltas[upperIndex] * fraction
     }
 
     private fun calculateImuMaxDeltaG(
