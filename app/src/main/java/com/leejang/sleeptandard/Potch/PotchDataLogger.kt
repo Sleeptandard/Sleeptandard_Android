@@ -180,6 +180,28 @@ class PotchDataLogger(
                 "message",
                 "heart_rate_fresh",
                 "heart_rate_age_ms",
+
+                "fusion_source",
+                "fusion_log",
+
+                "ir_processing_state",
+                "ir_calculated_bpm",
+                "ir_quality_score",
+                "ir_accepted_interval_ratio",
+                "ir_raw_sdsd_ms",
+
+                "red_processing_state",
+                "red_calculated_bpm",
+                "red_quality_score",
+                "red_accepted_interval_ratio",
+                "red_raw_sdsd_ms",
+
+                "combined_processing_state",
+                "combined_calculated_bpm",
+                "combined_quality_score",
+                "combined_accepted_interval_ratio",
+                "combined_raw_sdsd_ms",
+
                 "window_sample_count",
                 "window_seconds",
                 "ir_dc_mean",
@@ -319,6 +341,28 @@ class PotchDataLogger(
             escapeCsv(diagnostics.message),
             diagnostics.heartRateFresh.toString(),
             diagnostics.heartRateAgeMillis?.toString() ?: "",
+
+            escapeCsv(diagnostics.fusionSource.name),
+            escapeCsv(diagnostics.fusionLog.orEmpty()),
+
+            escapeCsv(diagnostics.irProcessingState?.name.orEmpty()),
+            diagnostics.irCalculatedBpm?.toString() ?: "",
+            formatDouble(diagnostics.irQualityScore, digits = 6),
+            formatDouble(diagnostics.irAcceptedIntervalRatio, digits = 6),
+            formatDouble(diagnostics.irRawSdsdMs, digits = 3),
+
+            escapeCsv(diagnostics.redProcessingState?.name.orEmpty()),
+            diagnostics.redCalculatedBpm?.toString() ?: "",
+            formatDouble(diagnostics.redQualityScore, digits = 6),
+            formatDouble(diagnostics.redAcceptedIntervalRatio, digits = 6),
+            formatDouble(diagnostics.redRawSdsdMs, digits = 3),
+
+            escapeCsv(diagnostics.combinedProcessingState?.name.orEmpty()),
+            diagnostics.combinedCalculatedBpm?.toString() ?: "",
+            formatDouble(diagnostics.combinedQualityScore, digits = 6),
+            formatDouble(diagnostics.combinedAcceptedIntervalRatio, digits = 6),
+            formatDouble(diagnostics.combinedRawSdsdMs, digits = 3),
+
             diagnostics.windowSampleCount.toString(),
             formatDouble(diagnostics.windowSeconds, digits = 3),
             formatDouble(diagnostics.irDcMean, digits = 3),
