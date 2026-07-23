@@ -281,10 +281,11 @@ class PotchDataProcessor(
         private const val HEART_RATE_MAX_BPM = 180
         private const val HEART_RATE_MOVING_AVERAGE_SECONDS = 1.5
 
-        // 후보 hard reject 기준.
-        // 정제 후 IBI 4개, 원본 대비 70% 유지, raw SDSD 200ms 이하를 모두 만족해야 한다.
-        private const val HEART_RATE_MIN_USED_INTERVAL_COUNT = 4
-        private const val HEART_RATE_MIN_ACCEPTED_INTERVAL_RATIO = 0.70
+        // 후보 hard reject 기준(완화 롤백).
+        // 이전 수준처럼 정제 후 IBI 2개, 원본 대비 50% 유지만 요구한다.
+        // raw SDSD 200ms는 hard reject가 아니라 quality 점수 계산에만 사용한다.
+        private const val HEART_RATE_MIN_USED_INTERVAL_COUNT = 2
+        private const val HEART_RATE_MIN_ACCEPTED_INTERVAL_RATIO = 0.50
         private const val HEART_RATE_MAX_RAW_SDSD_SEC = 0.200
         private const val HEART_RATE_MIN_PHYSIOLOGICAL_INTERVAL_RATIO = 0.75
 
@@ -2045,10 +2046,11 @@ class PotchDataProcessor(
                 maxInterpolationOffsetMs = maxInterpolationOffsetMs
             )
 
+            // raw SDSD는 quality와 후보 선택 점수에 반영하되,
+            // 값이 200ms를 넘었다는 이유만으로 후보를 완전히 차단하지 않는다.
             val hardRejected =
                 usedIntervals.size < HEART_RATE_MIN_USED_INTERVAL_COUNT ||
                         acceptedIntervalRatio < HEART_RATE_MIN_ACCEPTED_INTERVAL_RATIO ||
-                        rawSdsdSec > HEART_RATE_MAX_RAW_SDSD_SEC ||
                         physiologicalIntervalRatio < HEART_RATE_MIN_PHYSIOLOGICAL_INTERVAL_RATIO
 
             if (hardRejected) {
