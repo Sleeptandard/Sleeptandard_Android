@@ -52,6 +52,9 @@ data class ArousalState(
     val imuRespPeakSamplePositions: List<Long> = emptyList(),
     val imuRespIntervalsSec: List<Double> = emptyList(),
 
+    // ExperimentScreen에서 실제 RR 전처리 파형과 peak 분류를 시각화하기 위한 snapshot.
+    val ppgRespirationGraphData: PpgRespirationGraphData = PpgRespirationGraphData(),
+
     // 3. Respiratory Rate Variability
     val rrvRmssd: Double? = null,        // 최종 선택된 source의 seconds 기준 RMSSD
     val rrvRmssdMs: Double? = null,      // 로그/UI 확인용 ms
@@ -385,6 +388,50 @@ enum class PpgRespirationChannel {
     RED
 }
 
+/** RR 호흡 파형에서 현재 사용하는 peak 방향. */
+enum class RespirationPeakPolarity {
+    POSITIVE,
+    NEGATIVE,
+    NONE
+}
+
+/**
+ * ExperimentScreen에 노출하는 PPG 기반 RR 분석 파형 snapshot.
+ *
+ * samples는 실제 RR 계산과 동일하게 DC 제거 -> 0.1~0.5Hz BPF -> 2초 warm-up 제거를
+ * 적용한 뒤, 선택된 polarity가 위쪽 peak가 되도록 정렬한 파형이다.
+ */
+data class PpgRespirationGraphData(
+    val channel: PpgRespirationChannel? = null,
+    val selectedPolarity: RespirationPeakPolarity = RespirationPeakPolarity.NONE,
+    val processingState: MetricCalculationState = MetricCalculationState.COLLECTING,
+
+    val samples: List<Double> = emptyList(),
+    val windowSeconds: Double = 0.0,
+    val minimumWindowSeconds: Int = 25,
+
+    // 현재 graph window 기준 marker index.
+    // detected: threshold를 넘은 전체 호흡 peak
+    // accepted: 최종 RR 평균에 사용된 interval의 종료 peak
+    // rejected: 생리 범위 또는 median outlier filter에서 탈락한 interval의 종료 peak
+    // reference: 첫 번째 검출 peak이며 첫 호흡 interval의 시작 기준점
+    val detectedPeakSampleIndices: List<Int> = emptyList(),
+    val acceptedPeakSampleIndices: List<Int> = emptyList(),
+    val rejectedPeakSampleIndices: List<Int> = emptyList(),
+    val referencePeakSampleIndex: Int? = null,
+
+    val detectedPeakCount: Int = 0,
+    val rawIntervalCount: Int = 0,
+    val acceptedIntervalCount: Int = 0,
+    val rejectedIntervalCount: Int = 0,
+
+    val peakThreshold: Double? = null,
+    val peakToPeakAmplitude: Double? = null,
+    val calculatedRrBpm: Double? = null,
+    val qualityScore: Double? = null,
+    val description: String = "RR 분석용 PPG 수집 중"
+)
+
 /**
  * PPG RR 검출 경로 우선순위.
  *
@@ -411,9 +458,14 @@ private enum class ImuRespirationDetectionPath(
     NEGATIVE(true, "IMU negative")
 }
 
+private data class PpgRespirationCandidateAnalysis(
+    val result: PpgRespirationResult?,
+    val graphData: PpgRespirationGraphData
+)
+
 private data class PpgRespirationCandidates(
-    val positive: PpgRespirationResult?,
-    val negative: PpgRespirationResult?
+    val positive: PpgRespirationCandidateAnalysis,
+    val negative: PpgRespirationCandidateAnalysis
 )
 
 /**
@@ -671,6 +723,11 @@ class PotchArousalCalculator(
     private var pendingPpgRespirationLastRr: Double? = null
     private var ppgPrimaryRecoveryStreak: Int = 0
     private var ppgPrimaryRecoveryLastRr: Double? = null
+
+    // UI에는 선택된 PPG RR 경로의 실제 후처리 파형을 매 frame snapshot으로 노출한다.
+    private var latestPpgRespirationGraphData = PpgRespirationGraphData(
+        minimumWindowSeconds = config.ppgRespMinWindowSeconds
+    )
 
     // IMU RR polarity hysteresis state.
     private var activeImuRespirationPath =
@@ -942,6 +999,7 @@ class PotchArousalCalculator(
             ppgRespIntervalsSec = ppgRespiration?.intervalsSec ?: emptyList(),
             imuRespPeakSamplePositions = imuRespiration?.peakSamplePositions ?: emptyList(),
             imuRespIntervalsSec = imuRespiration?.intervalsSec ?: emptyList(),
+            ppgRespirationGraphData = latestPpgRespirationGraphData,
 
             rrvRmssd = rrvResult?.rmssdSec,
             rrvRmssdMs = rrvResult?.rmssdMs,
@@ -2016,11 +2074,6 @@ class PotchArousalCalculator(
         val minSampleCount =
             (config.sampleRateHz * config.ppgRespMinWindowSeconds).toInt()
 
-        // 초기 window 수집 중인 상태를 primary 실패로 누적하지 않는다.
-        if (ppgIrBuffer.size < minSampleCount && ppgRedBuffer.size < minSampleCount) {
-            return null
-        }
-
         val irCandidates = calculatePpgRespirationCandidatesFromBuffer(
             channel = PpgRespirationChannel.IR,
             buffer = ppgIrBuffer
@@ -2029,35 +2082,99 @@ class PotchArousalCalculator(
         var redCandidatesCalculated = false
         var redCandidates: PpgRespirationCandidates? = null
 
-        fun candidateFor(
-            path: PpgRespirationDetectionPath
-        ): PpgRespirationResult? {
-            val candidates =
-                when (path.channel) {
-                    PpgRespirationChannel.IR -> irCandidates
-                    PpgRespirationChannel.RED -> {
-                        if (!redCandidatesCalculated) {
-                            redCandidates = calculatePpgRespirationCandidatesFromBuffer(
-                                channel = PpgRespirationChannel.RED,
-                                buffer = ppgRedBuffer
-                            )
-                            redCandidatesCalculated = true
-                        }
-                        redCandidates
+        fun candidatesForChannel(
+            channel: PpgRespirationChannel
+        ): PpgRespirationCandidates? {
+            return when (channel) {
+                PpgRespirationChannel.IR -> irCandidates
+                PpgRespirationChannel.RED -> {
+                    if (!redCandidatesCalculated) {
+                        redCandidates = calculatePpgRespirationCandidatesFromBuffer(
+                            channel = PpgRespirationChannel.RED,
+                            buffer = ppgRedBuffer
+                        )
+                        redCandidatesCalculated = true
                     }
+                    redCandidates
                 }
-
-            return if (path.inverted) {
-                candidates?.negative
-            } else {
-                candidates?.positive
             }
         }
 
-        return selectStablePpgRespirationPath(
+        fun analysisFor(
+            path: PpgRespirationDetectionPath
+        ): PpgRespirationCandidateAnalysis? {
+            val candidates = candidatesForChannel(path.channel) ?: return null
+            return if (path.inverted) candidates.negative else candidates.positive
+        }
+
+        fun candidateFor(
+            path: PpgRespirationDetectionPath
+        ): PpgRespirationResult? {
+            return analysisFor(path)?.result
+        }
+
+        // 초기 window 수집은 primary 실패 streak로 누적하지 않는다.
+        val enoughWindow =
+            ppgIrBuffer.size >= minSampleCount || ppgRedBuffer.size >= minSampleCount
+
+        if (!enoughWindow) {
+            latestPpgRespirationGraphData =
+                analysisFor(activePpgRespirationPath)?.graphData
+                    ?: PpgRespirationGraphData(
+                        channel = activePpgRespirationPath.channel,
+                        selectedPolarity = activePpgRespirationPath.toPublicPolarity(),
+                        minimumWindowSeconds = config.ppgRespMinWindowSeconds,
+                        description = "RR 분석창 수집 중: " +
+                                "${maxOf(ppgIrBuffer.size, ppgRedBuffer.size)}/${minSampleCount} samples"
+                    )
+            return null
+        }
+
+        val selectedResult = selectStablePpgRespirationPath(
             candidateFor = ::candidateFor,
             nowMillis = System.currentTimeMillis()
         )
+
+        val graphPath = selectedResult?.let { result ->
+            ppgRespirationPathOf(result)
+        } ?: activePpgRespirationPath
+
+        latestPpgRespirationGraphData =
+            analysisFor(graphPath)?.graphData
+                ?: PpgRespirationGraphData(
+                    channel = graphPath.channel,
+                    selectedPolarity = graphPath.toPublicPolarity(),
+                    processingState = MetricCalculationState.REJECTED,
+                    minimumWindowSeconds = config.ppgRespMinWindowSeconds,
+                    description = "선택된 RR 경로의 후처리 파형을 만들 수 없음"
+                )
+
+        return selectedResult
+    }
+
+    private fun PpgRespirationDetectionPath.toPublicPolarity(): RespirationPeakPolarity {
+        return if (inverted) {
+            RespirationPeakPolarity.NEGATIVE
+        } else {
+            RespirationPeakPolarity.POSITIVE
+        }
+    }
+
+    private fun ppgRespirationPathOf(
+        result: PpgRespirationResult
+    ): PpgRespirationDetectionPath {
+        return when {
+            result.channel == PpgRespirationChannel.IR && !result.inverted ->
+                PpgRespirationDetectionPath.IR_POSITIVE
+
+            result.channel == PpgRespirationChannel.RED && !result.inverted ->
+                PpgRespirationDetectionPath.RED_POSITIVE
+
+            result.channel == PpgRespirationChannel.IR && result.inverted ->
+                PpgRespirationDetectionPath.IR_NEGATIVE
+
+            else -> PpgRespirationDetectionPath.RED_NEGATIVE
+        }
     }
 
     /**
@@ -2085,10 +2202,6 @@ class PotchArousalCalculator(
         val minSampleCount =
             (config.sampleRateHz * config.ppgRespMinWindowSeconds).toInt()
 
-        if (buffer.size < minSampleCount) {
-            return null
-        }
-
         val rawWindow =
             if (buffer.size > windowSampleCount) {
                 buffer.takeLast(windowSampleCount)
@@ -2096,12 +2209,13 @@ class PotchArousalCalculator(
                 buffer.toList()
             }
 
-        val windowStartSamplePosition =
-            totalPpgRespSampleCount - rawWindow.size.toLong()
-
-        if (rawWindow.size < minSampleCount) {
+        val warmupSamples = (config.sampleRateHz * 2.0).toInt()
+        if (rawWindow.size <= warmupSamples + 10) {
             return null
         }
+
+        val windowStartSamplePosition =
+            totalPpgRespSampleCount - rawWindow.size.toLong()
 
         // 1. DC 제거
         val mean = rawWindow.average()
@@ -2109,9 +2223,7 @@ class PotchArousalCalculator(
             rawWindow[i] - mean
         }
 
-        // 2. 호흡 대역 BPF: 0.1~0.5Hz
-        // 주의: 계산할 때마다 window 전체를 새로 필터링한다.
-        // append 시점에 상태형 필터를 계속 적용하는 방식은 나중에 최적화 가능.
+        // 2. 실제 RR 계산과 동일한 0.1~0.5Hz BPF
         val respBpf = SimpleBandPassFilter(
             sampleRateHz = config.sampleRateHz,
             lowCutHz = config.respLowCutHz,
@@ -2122,75 +2234,79 @@ class PotchArousalCalculator(
             respBpf.filter(acSignal[i])
         }
 
-        // 3. 필터 초기 구간은 안정화 전이라 버림
-        val warmupSamples = (config.sampleRateHz * 2.0).toInt()
-        if (filtered.size <= warmupSamples + 10) {
-            return null
-        }
-
-        val usableStartIndex = warmupSamples
-        val usableValues = filtered.drop(usableStartIndex)
-
+        val usableValues = filtered.drop(warmupSamples)
         val maxValue = usableValues.maxOrNull() ?: return null
         val minValue = usableValues.minOrNull() ?: return null
         val peakToPeakAmplitude = maxValue - minValue
+        val enoughWindow = rawWindow.size >= minSampleCount
 
-        // 4. 호흡 파형 진폭이 너무 작으면 실패
-        if (peakToPeakAmplitude < config.ppgRespMinPeakToPeakAmplitude) {
-            return null
-        }
-
-        // 5. 양의 peak와 음의 peak 후보를 모두 생성한다.
-        // 매 frame quality 경쟁은 하지 않고 stable path selector가 primary/fallback을 결정한다.
-        val positiveResult = calculateRrFromRespWave(
+        val positiveAnalysis = analyzeRrFromRespWave(
             channel = channel,
             filtered = filtered,
-            usableStartIndex = usableStartIndex,
+            usableStartIndex = warmupSamples,
             peakToPeakAmplitude = peakToPeakAmplitude,
             invert = false,
-            windowStartSamplePosition = windowStartSamplePosition
+            windowStartSamplePosition = windowStartSamplePosition,
+            enoughWindow = enoughWindow
         )
 
-        val negativeResult = calculateRrFromRespWave(
+        val negativeAnalysis = analyzeRrFromRespWave(
             channel = channel,
             filtered = filtered,
-            usableStartIndex = usableStartIndex,
+            usableStartIndex = warmupSamples,
             peakToPeakAmplitude = peakToPeakAmplitude,
             invert = true,
-            windowStartSamplePosition = windowStartSamplePosition
+            windowStartSamplePosition = windowStartSamplePosition,
+            enoughWindow = enoughWindow
         )
 
         return PpgRespirationCandidates(
-            positive = positiveResult,
-            negative = negativeResult
+            positive = positiveAnalysis,
+            negative = negativeAnalysis
         )
     }
 
     /**
-     * 필터링된 PPG 호흡 후보 파형에서 peak interval 기반 RR을 계산한다.
-     *
-     * peak threshold, 최소 peak 간격, 생리적 호흡수 범위를 적용해
-     * 노이즈 peak를 줄이고 RR bpm과 interval 리스트를 산출한다.
+     * 선택 경로의 실제 RR 후처리 파형, 전체 peak, 채택 interval, 탈락 interval을 함께 만든다.
      */
-    private fun calculateRrFromRespWave(
+    private fun analyzeRrFromRespWave(
         channel: PpgRespirationChannel,
         filtered: DoubleArray,
         usableStartIndex: Int,
         peakToPeakAmplitude: Double,
         invert: Boolean,
-        windowStartSamplePosition: Long
-    ): PpgRespirationResult? {
+        windowStartSamplePosition: Long,
+        enoughWindow: Boolean
+    ): PpgRespirationCandidateAnalysis {
         val wave = if (invert) {
             DoubleArray(filtered.size) { i -> -filtered[i] }
         } else {
             filtered
         }
 
-        val usable = wave.drop(usableStartIndex)
-        if (usable.isEmpty()) return null
+        val usableSamples = wave.drop(usableStartIndex)
+        val graphStartSamplePosition =
+            windowStartSamplePosition + usableStartIndex.toLong()
 
-        val maxValue = usable.maxOrNull() ?: return null
-        val minValue = usable.minOrNull() ?: return null
+        if (usableSamples.isEmpty()) {
+            return PpgRespirationCandidateAnalysis(
+                result = null,
+                graphData = PpgRespirationGraphData(
+                    channel = channel,
+                    selectedPolarity = if (invert) {
+                        RespirationPeakPolarity.NEGATIVE
+                    } else {
+                        RespirationPeakPolarity.POSITIVE
+                    },
+                    processingState = MetricCalculationState.COLLECTING,
+                    minimumWindowSeconds = config.ppgRespMinWindowSeconds,
+                    description = "RR BPF warm-up 구간 수집 중"
+                )
+            )
+        }
+
+        val maxValue = usableSamples.maxOrNull() ?: 0.0
+        val minValue = usableSamples.minOrNull() ?: 0.0
         val threshold = minValue + (maxValue - minValue) * 0.55
 
         val minPeakDistanceSamples =
@@ -2208,14 +2324,11 @@ class PotchArousalCalculator(
             if (!isPeak) continue
 
             val distance = i - lastPeakIndex
-
             if (distance >= minPeakDistanceSamples) {
                 peakIndices.add(i)
                 lastPeakIndex = i
             } else if (peakIndices.isNotEmpty()) {
                 val last = peakIndices.last()
-
-                // 너무 가까운 peak가 여러 개 잡히면 더 높은 peak로 교체
                 if (wave[i] > wave[last]) {
                     peakIndices[peakIndices.lastIndex] = i
                     lastPeakIndex = i
@@ -2223,79 +2336,181 @@ class PotchArousalCalculator(
             }
         }
 
-        if (peakIndices.size < 3) {
-            return null
-        }
-
         val peakSamplePositions = peakIndices.map { index ->
             windowStartSamplePosition + index.toLong()
         }
 
-        val intervals = mutableListOf<RespirationInterval>()
-
+        // 모든 인접 peak interval을 먼저 보존한다. 이후 생리 범위와 median filter 결과를
+        // 비교하여 UI의 빨간 X marker를 정확하게 만든다.
+        val allIntervals = mutableListOf<RespirationInterval>()
         for (i in 1 until peakSamplePositions.size) {
             val startPosition = peakSamplePositions[i - 1]
             val endPosition = peakSamplePositions[i]
             val intervalSec =
                 (endPosition - startPosition) / config.sampleRateHz
 
-            val minIntervalSec = 60.0 / config.rrMaxBpm
-            val maxIntervalSec = 60.0 / config.rrMinBpm
-
-            if (intervalSec in minIntervalSec..maxIntervalSec) {
-                intervals.add(
-                    RespirationInterval(
-                        intervalSec = intervalSec,
-                        startSamplePosition = startPosition,
-                        endSamplePosition = endPosition,
-                        segmentId = currentAnalysisSegmentId
-                    )
+            allIntervals.add(
+                RespirationInterval(
+                    intervalSec = intervalSec,
+                    startSamplePosition = startPosition,
+                    endSamplePosition = endPosition,
+                    segmentId = currentAnalysisSegmentId
                 )
-            }
+            )
         }
 
-        if (intervals.size < 2) {
-            return null
+        val minIntervalSec = 60.0 / config.rrMaxBpm
+        val maxIntervalSec = 60.0 / config.rrMinBpm
+        val physiologicalIntervals = allIntervals.filter { interval ->
+            interval.intervalSec in minIntervalSec..maxIntervalSec
         }
-
-        val usedIntervals = removeRespIntervalOutliers(intervals)
-
-        if (usedIntervals.size < 2) {
-            return null
-        }
+        val usedIntervals = removeRespIntervalOutliers(physiologicalIntervals)
 
         val usedIntervalValues = usedIntervals.map { it.intervalSec }
-        val averageIntervalSec = usedIntervalValues.average()
-        if (averageIntervalSec <= 0.0) {
-            return null
-        }
+        val averageIntervalSec =
+            usedIntervalValues.takeIf { it.isNotEmpty() }?.average()
+        val rrBpm = averageIntervalSec
+            ?.takeIf { it.isFinite() && it > 0.0 }
+            ?.let { 60.0 / it }
 
-        val rrBpm = 60.0 / averageIntervalSec
+        val amplitudeValid =
+            peakToPeakAmplitude >= config.ppgRespMinPeakToPeakAmplitude
+        val peakCountValid = peakIndices.size >= 3
+        val intervalCountValid = physiologicalIntervals.size >= 2
+        val usedIntervalCountValid = usedIntervals.size >= 2
+        val rrValid = rrBpm != null && rrBpm in config.rrMinBpm..config.rrMaxBpm
 
-        if (rrBpm !in config.rrMinBpm..config.rrMaxBpm) {
-            return null
-        }
-
-        val intervalRegularityScore = calculateIntervalRegularityScore(usedIntervalValues)
+        val intervalRegularityScore =
+            if (usedIntervalValues.size >= 2) {
+                calculateIntervalRegularityScore(usedIntervalValues)
+            } else {
+                0.0
+            }
         val amplitudeScore =
             (peakToPeakAmplitude / config.ppgRespMinPeakToPeakAmplitude)
                 .coerceIn(0.0, 3.0) / 3.0
-
         val qualityScore =
             (intervalRegularityScore * 0.7 + amplitudeScore * 0.3)
                 .coerceIn(0.0, 1.0)
 
-        return PpgRespirationResult(
-            channel = channel,
-            rrBpm = rrBpm,
-            peakCount = peakIndices.size,
-            intervalCount = usedIntervals.size,
-            averageIntervalSec = averageIntervalSec,
-            peakToPeakAmplitude = peakToPeakAmplitude,
-            qualityScore = qualityScore,
-            inverted = invert,
-            peakSamplePositions = peakSamplePositions,
-            intervals = usedIntervals
+        val result =
+            if (
+                enoughWindow && amplitudeValid && peakCountValid &&
+                intervalCountValid && usedIntervalCountValid && rrValid
+            ) {
+                PpgRespirationResult(
+                    channel = channel,
+                    rrBpm = rrBpm!!,
+                    peakCount = peakIndices.size,
+                    intervalCount = usedIntervals.size,
+                    averageIntervalSec = averageIntervalSec,
+                    peakToPeakAmplitude = peakToPeakAmplitude,
+                    qualityScore = qualityScore,
+                    inverted = invert,
+                    peakSamplePositions = peakSamplePositions,
+                    intervals = usedIntervals
+                )
+            } else {
+                null
+            }
+
+        val acceptedEndPositions =
+            usedIntervals.map { it.endSamplePosition }.toSet()
+        val rejectedEndPositions =
+            allIntervals
+                .map { it.endSamplePosition }
+                .filterNot { it in acceptedEndPositions }
+                .distinct()
+
+        fun toGraphIndex(position: Long): Int? {
+            val relative = position - graphStartSamplePosition
+            return relative.toInt().takeIf { it in usableSamples.indices }
+        }
+
+        val detectedPeakSampleIndices =
+            peakSamplePositions.mapNotNull(::toGraphIndex).distinct().sorted()
+        val acceptedPeakSampleIndices =
+            acceptedEndPositions.mapNotNull(::toGraphIndex).distinct().sorted()
+        val rejectedPeakSampleIndices =
+            rejectedEndPositions.mapNotNull(::toGraphIndex).distinct().sorted()
+        val referencePeakSampleIndex =
+            peakSamplePositions.firstOrNull()?.let(::toGraphIndex)
+
+        val state: MetricCalculationState
+        val description: String
+        when {
+            !enoughWindow -> {
+                state = MetricCalculationState.COLLECTING
+                description = "RR 분석창 수집 중: " +
+                        "${"%.1f".format(usableSamples.size / config.sampleRateHz)}초 / " +
+                        "최소 ${config.ppgRespMinWindowSeconds}초"
+            }
+
+            !amplitudeValid -> {
+                state = MetricCalculationState.REJECTED
+                description = "호흡 파형 진폭 부족: " +
+                        "${"%.2f".format(peakToPeakAmplitude)} < " +
+                        "${"%.2f".format(config.ppgRespMinPeakToPeakAmplitude)}"
+            }
+
+            !peakCountValid -> {
+                state = MetricCalculationState.REJECTED
+                description = "호흡 peak 부족: ${peakIndices.size}개 / 최소 3개"
+            }
+
+            !intervalCountValid -> {
+                state = MetricCalculationState.REJECTED
+                description = "2~10초 생리 범위 호흡 interval 부족: " +
+                        "${physiologicalIntervals.size}개"
+            }
+
+            !usedIntervalCountValid -> {
+                state = MetricCalculationState.REJECTED
+                description = "median ±${(config.ppgRespIntervalOutlierTolerance * 100).toInt()}% " +
+                        "필터 통과 interval 부족: ${usedIntervals.size}개"
+            }
+
+            !rrValid -> {
+                state = MetricCalculationState.REJECTED
+                description = "RR 범위 초과: " +
+                        "${rrBpm?.let { "%.1f".format(it) } ?: "--"} bpm"
+            }
+
+            else -> {
+                state = MetricCalculationState.VALID
+                description = "${channel.name} " +
+                        "${if (invert) "negative" else "positive"} 호흡 peak로 " +
+                        "RR ${"%.1f".format(rrBpm)} bpm 계산"
+            }
+        }
+
+        return PpgRespirationCandidateAnalysis(
+            result = result,
+            graphData = PpgRespirationGraphData(
+                channel = channel,
+                selectedPolarity = if (invert) {
+                    RespirationPeakPolarity.NEGATIVE
+                } else {
+                    RespirationPeakPolarity.POSITIVE
+                },
+                processingState = state,
+                samples = usableSamples,
+                windowSeconds = usableSamples.size / config.sampleRateHz,
+                minimumWindowSeconds = config.ppgRespMinWindowSeconds,
+                detectedPeakSampleIndices = detectedPeakSampleIndices,
+                acceptedPeakSampleIndices = acceptedPeakSampleIndices,
+                rejectedPeakSampleIndices = rejectedPeakSampleIndices,
+                referencePeakSampleIndex = referencePeakSampleIndex,
+                detectedPeakCount = peakIndices.size,
+                rawIntervalCount = allIntervals.size,
+                acceptedIntervalCount = usedIntervals.size,
+                rejectedIntervalCount = rejectedEndPositions.size,
+                peakThreshold = threshold,
+                peakToPeakAmplitude = peakToPeakAmplitude,
+                calculatedRrBpm = result?.rrBpm,
+                qualityScore = result?.qualityScore,
+                description = description
+            )
         )
     }
 
@@ -2970,6 +3185,9 @@ class PotchArousalCalculator(
         ppgPrimaryRecoveryStreak = 0
         ppgPrimaryRecoveryLastRr = null
         clearPendingPpgRespirationPath()
+        latestPpgRespirationGraphData = PpgRespirationGraphData(
+            minimumWindowSeconds = config.ppgRespMinWindowSeconds
+        )
 
         activeImuRespirationPath = ImuRespirationDetectionPath.POSITIVE
         activeImuRespirationPathSinceMillis = 0L

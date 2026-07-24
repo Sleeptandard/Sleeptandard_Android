@@ -50,6 +50,8 @@ import com.leejang.sleeptandard.Potch.HeartRatePeakPolarity
 import com.leejang.sleeptandard.Potch.MetricCalculationState
 import com.leejang.sleeptandard.Potch.MetricCalculationStatus
 import com.leejang.sleeptandard.Potch.PacketErrorLog
+import com.leejang.sleeptandard.Potch.PpgRespirationGraphData
+import com.leejang.sleeptandard.Potch.RespirationPeakPolarity
 import com.leejang.sleeptandard.Potch.PotchBleState
 import com.leejang.sleeptandard.Potch.PotchBleViewModel
 import kotlin.math.abs
@@ -247,6 +249,11 @@ fun ExperimentScreen(
 
         HeartRateProcessedPpgGraphCard(
             graphData = processorState.heartRateGraphData,
+            isConnected = bleState.isConnected
+        )
+
+        RespirationProcessedPpgGraphCard(
+            graphData = arousalState.ppgRespirationGraphData,
             isConnected = bleState.isConnected
         )
 
@@ -906,6 +913,244 @@ private fun HeartRateProcessedPpgGraphCard(
     }
 }
 
+@Composable
+private fun RespirationProcessedPpgGraphCard(
+    graphData: PpgRespirationGraphData,
+    isConnected: Boolean
+) {
+    val graphColor = when (graphData.channel?.name) {
+        "RED" -> Color(0xFFFF4B55)
+        else -> Color(0xFF55E6C1)
+    }
+
+    val statusColor = when (graphData.processingState) {
+        MetricCalculationState.VALID -> Color(0xFF3DFF78)
+        MetricCalculationState.COLLECTING -> Color(0xFFFFD166)
+        MetricCalculationState.REJECTED -> Color(0xFFFF5C68)
+    }
+
+    val statusText = when (graphData.processingState) {
+        MetricCalculationState.VALID -> "VALID"
+        MetricCalculationState.COLLECTING -> "수집 중"
+        MetricCalculationState.REJECTED -> "분석 불가"
+    }
+
+    val channelText = graphData.channel?.name ?: "IR"
+    val polarityText = when (graphData.selectedPolarity) {
+        RespirationPeakPolarity.POSITIVE -> "POSITIVE"
+        RespirationPeakPolarity.NEGATIVE -> "NEGATIVE"
+        RespirationPeakPolarity.NONE -> "NONE"
+    }
+
+    val graphMin = graphData.samples.minOrNull()
+    val graphMax = graphData.samples.maxOrNull()
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(26.dp))
+            .background(Color(0xFF1E1E25))
+            .border(
+                width = 1.dp,
+                color = Color(0xFF55E6C1).copy(alpha = 0.45f),
+                shape = RoundedCornerShape(26.dp)
+            )
+            .padding(18.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "🫁 RR 분석 PPG 결과",
+                color = Color(0xFF55E6C1),
+                fontSize = 21.sp,
+                fontWeight = FontWeight.Bold
+            )
+
+            Spacer(Modifier.weight(1f))
+
+            Text(
+                text = if (isConnected) statusText else "대기",
+                color = if (isConnected) statusColor
+                else Color.White.copy(alpha = 0.45f),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(100.dp))
+                    .background(
+                        if (isConnected) statusColor.copy(alpha = 0.14f)
+                        else Color.White.copy(alpha = 0.07f)
+                    )
+                    .padding(horizontal = 10.dp, vertical = 5.dp)
+            )
+        }
+
+        Spacer(Modifier.height(10.dp))
+
+        Text(
+            text = graphData.description,
+            color = Color.White.copy(alpha = 0.58f),
+            fontSize = 13.sp,
+            lineHeight = 18.sp
+        )
+
+        Spacer(Modifier.height(8.dp))
+
+        Text(
+            text = "ArousalCalculator DC 제거 · 0.1~0.5Hz BPF · 2초 warm-up 제거 · 호흡 interval fitting",
+            color = Color.White.copy(alpha = 0.42f),
+            fontSize = 12.sp,
+            fontFamily = FontFamily.Monospace
+        )
+
+        Spacer(Modifier.height(12.dp))
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(210.dp)
+                .clip(RoundedCornerShape(18.dp))
+                .background(Color.Black.copy(alpha = 0.24f))
+                .border(
+                    width = 1.dp,
+                    color = Color.White.copy(alpha = 0.06f),
+                    shape = RoundedCornerShape(18.dp)
+                )
+                .padding(10.dp)
+        ) {
+            Canvas(
+                modifier = Modifier.fillMaxSize()
+            ) {
+                drawPpgGrid()
+
+                if (graphData.samples.size >= 2) {
+                    drawProcessedPpgPath(
+                        samples = graphData.samples,
+                        color = graphColor,
+                        strokeWidthPx = 2.6f,
+                        sharedMin = graphMin,
+                        sharedMax = graphMax
+                    )
+
+                    // threshold에서 검출된 전체 peak
+                    drawProcessedPpgCircleMarkers(
+                        samples = graphData.samples,
+                        peakIndices = graphData.detectedPeakSampleIndices,
+                        color = Color.White.copy(alpha = 0.55f),
+                        radiusPx = 4.2f,
+                        filled = false,
+                        strokeWidthPx = 1.5f,
+                        sharedMin = graphMin,
+                        sharedMax = graphMax
+                    )
+
+                    // 첫 호흡 interval의 시작 기준 peak
+                    graphData.referencePeakSampleIndex?.let { referenceIndex ->
+                        drawProcessedPpgReferenceMarker(
+                            samples = graphData.samples,
+                            peakIndex = referenceIndex,
+                            color = Color(0xFF5EE7E7),
+                            sharedMin = graphMin,
+                            sharedMax = graphMax
+                        )
+                    }
+
+                    // 생리 범위/median filter 탈락 interval의 종료 peak
+                    drawProcessedPpgRejectedMarkers(
+                        samples = graphData.samples,
+                        peakIndices = graphData.rejectedPeakSampleIndices,
+                        color = Color(0xFFFF5C68),
+                        sharedMin = graphMin,
+                        sharedMax = graphMax
+                    )
+
+                    // 최종 RR 평균에 사용된 interval의 종료 peak
+                    drawProcessedPpgCircleMarkers(
+                        samples = graphData.samples,
+                        peakIndices = graphData.acceptedPeakSampleIndices,
+                        color = Color(0xFFFFD166),
+                        radiusPx = 4.5f,
+                        filled = true,
+                        strokeWidthPx = 1.5f,
+                        sharedMin = graphMin,
+                        sharedMax = graphMax
+                    )
+                }
+            }
+
+            if (graphData.samples.isEmpty()) {
+                Text(
+                    text = "RR 분석용 PPG 수집 대기 중",
+                    color = Color.White.copy(alpha = 0.45f),
+                    fontSize = 14.sp,
+                    modifier = Modifier.align(Alignment.Center)
+                )
+            }
+        }
+
+        Spacer(Modifier.height(10.dp))
+
+        RespirationPeakMarkerLegend()
+
+        Spacer(Modifier.height(12.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            PpgLegendChip(
+                modifier = Modifier.weight(1f),
+                title = "$channelText · $polarityText",
+                value = processedRangeText(graphData.samples),
+                color = graphColor
+            )
+
+            PpgLegendChip(
+                modifier = Modifier.weight(1f),
+                title = "WINDOW",
+                value = "${"%.1f".format(graphData.windowSeconds)} / ${graphData.minimumWindowSeconds}s",
+                color = Color(0xFF55E6C1)
+            )
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        Text(
+            text = buildString {
+                append("source=$channelText")
+                append(" · polarity=$polarityText")
+                append(" · samples=${graphData.samples.size}")
+                append(
+                    " · peaks=${graphData.detectedPeakSampleIndices.size}" +
+                            "/${graphData.acceptedPeakSampleIndices.size}" +
+                            "/${graphData.rejectedPeakSampleIndices.size}"
+                )
+                append(
+                    " · intervals=${graphData.rawIntervalCount}" +
+                            "/${graphData.acceptedIntervalCount}" +
+                            "/${graphData.rejectedIntervalCount}"
+                )
+                graphData.calculatedRrBpm?.let {
+                    append(" · rr=${"%.1f".format(it)} bpm")
+                }
+                graphData.qualityScore?.let {
+                    append(" · quality=${"%.3f".format(it)}")
+                }
+                graphData.peakToPeakAmplitude?.let {
+                    append(" · amp=${"%.2f".format(it)}")
+                }
+                graphData.peakThreshold?.let {
+                    append(" · threshold=${"%.2f".format(it)}")
+                }
+            },
+            color = Color.White.copy(alpha = 0.42f),
+            fontSize = 12.sp,
+            lineHeight = 17.sp,
+            fontFamily = FontFamily.Monospace
+        )
+    }
+}
+
 private fun DrawScope.drawProcessedPpgPath(
     samples: List<Double>,
     color: Color,
@@ -1072,6 +1317,39 @@ private enum class HeartRatePeakLegendStyle {
     ACCEPTED,
     REJECTED,
     REFERENCE
+}
+
+@Composable
+private fun RespirationPeakMarkerLegend() {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        HeartRatePeakMarkerLegendItem(
+            modifier = Modifier.weight(1f),
+            text = "전체 검출",
+            color = Color.White.copy(alpha = 0.65f),
+            style = HeartRatePeakLegendStyle.DETECTED
+        )
+        HeartRatePeakMarkerLegendItem(
+            modifier = Modifier.weight(1f),
+            text = "RR 통과",
+            color = Color(0xFFFFD166),
+            style = HeartRatePeakLegendStyle.ACCEPTED
+        )
+        HeartRatePeakMarkerLegendItem(
+            modifier = Modifier.weight(1f),
+            text = "구간 탈락",
+            color = Color(0xFFFF5C68),
+            style = HeartRatePeakLegendStyle.REJECTED
+        )
+        HeartRatePeakMarkerLegendItem(
+            modifier = Modifier.weight(1f),
+            text = "시작 기준",
+            color = Color(0xFF5EE7E7),
+            style = HeartRatePeakLegendStyle.REFERENCE
+        )
+    }
 }
 
 @Composable
