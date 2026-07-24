@@ -306,7 +306,7 @@ data class HeartRateGraphData(
     // 현재 graph window 기준 marker index.
     // detected: 선택된 threshold에서 검출된 전체 peak
     // accepted: 최종 HR 계산에 남은 IBI의 종료 peak
-    // rejected: 생리 범위/quotient/median filter에서 탈락한 IBI의 종료 peak
+    // rejected: 생리 범위/median filter에서 탈락한 IBI의 종료 peak
     // reference: 첫 번째 검출 peak이며 첫 IBI의 시작 기준점
     val detectedPeakSampleIndices: List<Int> = emptyList(),
     val acceptedPeakSampleIndices: List<Int> = emptyList(),
@@ -2169,7 +2169,7 @@ class PotchDataProcessor(
 
         val negativeAllowed =
             primaryPositiveFailureStreak >=
-            HEART_RATE_NEGATIVE_ENABLE_FAILURE_COUNT &&
+                    HEART_RATE_NEGATIVE_ENABLE_FAILURE_COUNT &&
                     positiveFallbackUnavailableStreak >=
                     HEART_RATE_FALLBACK_CONFIRM_FRAMES
 
@@ -4302,57 +4302,29 @@ class PotchDataProcessor(
     private fun filterHeartRateIntervals(
         intervals: MutableList<IbiInterval>
     ): List<IbiInterval> {
-        if (intervals.size < 2) return intervals
+        if (intervals.size < 3) return intervals
 
-        // HeartPy quotient_filter 아이디어:
-        // 연속 RR interval의 비율이 0.8~1.2 범위를 벗어나면 튄 interval로 본다.
-        var quotientFiltered = intervals.toList()
+        // Quotient filter는 제거한다.
+        // 인접 IBI의 비율만으로 앞쪽 interval을 일방적으로 제거하면
+        // 정상 IBI까지 연쇄적으로 탈락할 수 있기 때문이다.
+        // 현재는 생리 범위 필터를 통과한 IBI에 대해 median 기반 outlier만 제거한다.
+        val intervalMedian = median(intervals.map { it.intervalSec })
 
-        repeat(2) {
-            if (quotientFiltered.size < 2) return@repeat
-
-            val reject = BooleanArray(quotientFiltered.size)
-
-            for (i in 0 until quotientFiltered.size - 1) {
-                val current = quotientFiltered[i].intervalSec
-                val next = quotientFiltered[i + 1].intervalSec
-
-                if (current <= 0.0 || next <= 0.0) {
-                    reject[i] = true
-                    continue
-                }
-
-                val ratio = current / next
-
-                if (ratio < 0.8 || ratio > 1.2) {
-                    reject[i] = true
-                }
-            }
-
-            val nextFiltered = quotientFiltered.filterIndexed { index, _ ->
-                !reject[index]
-            }
-
-            // 너무 많이 버리면 원래 interval을 유지한다.
-            if (nextFiltered.size >= 2) {
-                quotientFiltered = nextFiltered
-            }
+        if (!intervalMedian.isFinite() || intervalMedian <= 0.0) {
+            return intervals
         }
 
-        // 기존 코드의 median 40% outlier filter도 유지한다.
-        if (quotientFiltered.size >= 3) {
-            val median = median(quotientFiltered.map { it.intervalSec })
-
-            val medianFiltered = quotientFiltered.filter {
-                median > 0.0 && abs(it.intervalSec - median) / median < 0.40
-            }
-
-            if (medianFiltered.size >= 2) {
-                return medianFiltered
-            }
+        val medianFiltered = intervals.filter { interval ->
+            abs(interval.intervalSec - intervalMedian) / intervalMedian < 0.40
         }
 
-        return quotientFiltered
+        // 필터 결과가 2개 미만이면 HR 계산에 필요한 정보가 지나치게 줄어드므로
+        // 생리 범위를 통과한 원본 interval을 그대로 유지한다.
+        return if (medianFiltered.size >= 2) {
+            medianFiltered
+        } else {
+            intervals
+        }
     }
 
     private fun median(values: List<Double>): Double {
