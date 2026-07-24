@@ -997,7 +997,7 @@ private fun RespirationProcessedPpgGraphCard(
         Spacer(Modifier.height(8.dp))
 
         Text(
-            text = "ArousalCalculator DC 제거 · 0.1~0.5Hz BPF · 2초 warm-up 제거 · 호흡 interval fitting",
+            text = "gap-aware 접촉 mask · 짧은 gap 보간 · segment별 DC/BPF · robust threshold · 호흡 interval fitting",
             color = Color.White.copy(alpha = 0.42f),
             fontSize = 12.sp,
             fontFamily = FontFamily.Monospace
@@ -1029,7 +1029,8 @@ private fun RespirationProcessedPpgGraphCard(
                         color = graphColor,
                         strokeWidthPx = 2.6f,
                         sharedMin = graphMin,
-                        sharedMax = graphMax
+                        sharedMax = graphMax,
+                        segmentBreakIndices = graphData.segmentBreakSampleIndices.toSet()
                     )
 
                     // threshold에서 검출된 전체 peak
@@ -1045,7 +1046,11 @@ private fun RespirationProcessedPpgGraphCard(
                     )
 
                     // 첫 호흡 interval의 시작 기준 peak
-                    graphData.referencePeakSampleIndex?.let { referenceIndex ->
+                    val referenceIndices =
+                        graphData.referencePeakSampleIndices.ifEmpty {
+                            listOfNotNull(graphData.referencePeakSampleIndex)
+                        }
+                    referenceIndices.forEach { referenceIndex ->
                         drawProcessedPpgReferenceMarker(
                             samples = graphData.samples,
                             peakIndex = referenceIndex,
@@ -1107,7 +1112,7 @@ private fun RespirationProcessedPpgGraphCard(
 
             PpgLegendChip(
                 modifier = Modifier.weight(1f),
-                title = "WINDOW",
+                title = "VALID WINDOW",
                 value = "${"%.1f".format(graphData.windowSeconds)} / ${graphData.minimumWindowSeconds}s",
                 color = Color(0xFF55E6C1)
             )
@@ -1120,6 +1125,15 @@ private fun RespirationProcessedPpgGraphCard(
                 append("source=$channelText")
                 append(" · polarity=$polarityText")
                 append(" · samples=${graphData.samples.size}")
+                append(" · raw=${"%.1f".format(graphData.rawWindowSeconds)}s")
+                append(" · valid=${"%.1f".format(graphData.windowSeconds)}s")
+                append(" · segments=${graphData.segmentCount}")
+                append(" · interp=${graphData.interpolatedSampleCount}")
+                append(" · settleDrop=${graphData.settlingDiscardedSampleCount}")
+                append(
+                    " · gaps=${graphData.shortGapCount}/" +
+                            "${graphData.mediumGapCount}/${graphData.longGapCount}"
+                )
                 append(
                     " · peaks=${graphData.detectedPeakSampleIndices.size}" +
                             "/${graphData.acceptedPeakSampleIndices.size}" +
@@ -1156,7 +1170,8 @@ private fun DrawScope.drawProcessedPpgPath(
     color: Color,
     strokeWidthPx: Float,
     sharedMin: Double?,
-    sharedMax: Double?
+    sharedMax: Double?,
+    segmentBreakIndices: Set<Int> = emptySet()
 ) {
     if (samples.size < 2) return
 
@@ -1178,7 +1193,7 @@ private fun DrawScope.drawProcessedPpgPath(
 
         val y = size.height - normalized * size.height
 
-        if (index == 0) {
+        if (index == 0 || index in segmentBreakIndices) {
             path.moveTo(x, y)
         } else {
             path.lineTo(x, y)

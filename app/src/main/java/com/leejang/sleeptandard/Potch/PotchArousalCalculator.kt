@@ -132,6 +132,29 @@ data class ArousalConfig(
     // interval 튄 값 제거 기준
     val ppgRespIntervalOutlierTolerance: Double = 0.40,
 
+    // PPG RR 접촉/gap-aware 전처리.
+    // 0 또는 접촉 임계값 미만 샘플을 호흡 파형으로 그대로 연결하지 않는다.
+    val ppgRespContactMinValue: Double = 10_000.0,
+    val ppgRespSaturationHighValue: Double = 260_000.0,
+
+    // 짧은 gap은 선형 보간하고, 중간 gap은 BPF 연속성만 위해 보간하되
+    // gap을 가로지르는 호흡 interval은 최종 RR에서 제외한다.
+    val ppgRespShortGapMaxSeconds: Double = 0.20,
+    val ppgRespMediumGapMaxSeconds: Double = 0.50,
+
+    // gap 전후 local DC 수준 차이가 이 비율보다 크면 접촉 변화로 보고 보간하지 않는다.
+    val ppgRespGapEdgeMaxRelativeDifference: Double = 0.15,
+
+    // 보간 구간 및 주변에서는 인공 peak가 검출되지 않도록 제외한다.
+    val ppgRespPeakExclusionMarginSeconds: Double = 0.20,
+
+    // leading invalid 또는 긴 contact gap 뒤 첫 1초는 센서 LED/접촉 안정화 구간으로 제외한다.
+    val ppgRespContactSettleSeconds: Double = 1.0,
+
+    // 한 개의 큰 transient가 threshold와 진폭을 지배하지 않도록 robust percentile 사용.
+    val ppgRespRobustLowPercentile: Double = 0.05,
+    val ppgRespRobustHighPercentile: Double = 0.95,
+
     // IMU 기반 RR 계산용
     val imuRespWindowSeconds: Int = 45,
     val imuRespMinWindowSeconds: Int = 25,
@@ -364,7 +387,16 @@ data class RespirationInterval(
     val intervalSec: Double,
     val startSamplePosition: Long,
     val endSamplePosition: Long,
-    val segmentId: Long
+
+    // packet/CRC discontinuity로 나뉘는 상위 분석 segment.
+    val segmentId: Long,
+
+    // 같은 packet segment 안에서도 PPG 접촉이 길게 끊기면 별도 continuity group으로 나눈다.
+    // RR은 group 내부 interval만 만들고, RRV도 group 경계를 넘는 연속 차이를 계산하지 않는다.
+    val continuityGroupId: Long = segmentId,
+
+    // 0.2~0.5초 중간 gap을 가로지르는 interval은 파형 표시에는 남겨도 RR 평균에는 쓰지 않는다.
+    val crossesInvalidGap: Boolean = false
 )
 
 private data class BufferedRespirationInterval(
@@ -420,6 +452,24 @@ data class PpgRespirationGraphData(
     val rejectedPeakSampleIndices: List<Int> = emptyList(),
     val referencePeakSampleIndex: Int? = null,
 
+    // 여러 contact segment를 한 카드에 이어 보여줄 때 각 segment의 첫 peak와 경계를 표시한다.
+    val referencePeakSampleIndices: List<Int> = emptyList(),
+    val segmentBreakSampleIndices: List<Int> = emptyList(),
+
+    // 보간된 sample은 peak 후보에서는 제외되며 디버깅용 위치만 노출한다.
+    val interpolatedSampleIndices: List<Int> = emptyList(),
+
+    // window 품질/구성 진단.
+    val rawWindowSeconds: Double = 0.0,
+    val validOriginalSampleCount: Int = 0,
+    val invalidSampleCount: Int = 0,
+    val interpolatedSampleCount: Int = 0,
+    val settlingDiscardedSampleCount: Int = 0,
+    val segmentCount: Int = 0,
+    val shortGapCount: Int = 0,
+    val mediumGapCount: Int = 0,
+    val longGapCount: Int = 0,
+
     val detectedPeakCount: Int = 0,
     val rawIntervalCount: Int = 0,
     val acceptedIntervalCount: Int = 0,
@@ -466,6 +516,31 @@ private data class PpgRespirationCandidateAnalysis(
 private data class PpgRespirationCandidates(
     val positive: PpgRespirationCandidateAnalysis,
     val negative: PpgRespirationCandidateAnalysis
+)
+
+
+/**
+ * 최근 RR window에서 접촉 불량/0값 gap을 정리한 하나의 연속 PPG segment.
+ */
+private data class GapAwarePpgRespirationSegment(
+    val startSamplePosition: Long,
+    val continuityGroupId: Long,
+    val values: DoubleArray,
+    val interpolatedMask: BooleanArray,
+    val peakExcludedMask: BooleanArray,
+    val mediumGapMask: BooleanArray
+)
+
+private data class GapAwarePpgRespirationWindow(
+    val segments: List<GapAwarePpgRespirationSegment>,
+    val rawWindowSampleCount: Int,
+    val validOriginalSampleCount: Int,
+    val invalidSampleCount: Int,
+    val interpolatedSampleCount: Int,
+    val settlingDiscardedSampleCount: Int,
+    val shortGapCount: Int,
+    val mediumGapCount: Int,
+    val longGapCount: Int
 )
 
 /**
@@ -1082,7 +1157,9 @@ class PotchArousalCalculator(
         val imuMinSamples =
             (config.sampleRateHz * config.imuRespMinWindowSeconds).toInt()
 
-        val ppgSampleCount = maxOf(ppgIrBuffer.size, ppgRedBuffer.size)
+        // raw buffer 길이가 아니라 contact/gap-aware 전처리 후 실제 유효 PPG sample 수를 사용한다.
+        // 연결 직후 0값이나 긴 contact loss가 25초 수집량으로 잘못 계산되지 않게 한다.
+        val ppgSampleCount = latestPpgRespirationGraphData.validOriginalSampleCount
         val imuSampleCount = imuGBuffer.size
 
         val hasEnoughPpg = ppgSampleCount >= ppgMinSamples
@@ -2113,9 +2190,25 @@ class PotchArousalCalculator(
             return analysisFor(path)?.result
         }
 
-        // 초기 window 수집은 primary 실패 streak로 누적하지 않는다.
+        val irValidSampleCount =
+            irCandidates?.positive?.graphData?.validOriginalSampleCount ?: 0
+
+        // IR 접촉 유효량이 부족하면 RED가 실제로 25초를 확보했는지도 확인한다.
+        val redValidSampleCount =
+            if (irValidSampleCount < minSampleCount) {
+                candidatesForChannel(PpgRespirationChannel.RED)
+                    ?.positive
+                    ?.graphData
+                    ?.validOriginalSampleCount
+                    ?: 0
+            } else {
+                0
+            }
+
+        // raw 25초가 아니라 최근 45초 안의 실제 original-valid PPG 총량을 기준으로 한다.
+        // 중간의 긴 gap은 segment로 분리하지만, gap 전 정상 interval을 버리지는 않는다.
         val enoughWindow =
-            ppgIrBuffer.size >= minSampleCount || ppgRedBuffer.size >= minSampleCount
+            maxOf(irValidSampleCount, redValidSampleCount) >= minSampleCount
 
         if (!enoughWindow) {
             latestPpgRespirationGraphData =
@@ -2124,8 +2217,7 @@ class PotchArousalCalculator(
                         channel = activePpgRespirationPath.channel,
                         selectedPolarity = activePpgRespirationPath.toPublicPolarity(),
                         minimumWindowSeconds = config.ppgRespMinWindowSeconds,
-                        description = "RR 분석창 수집 중: " +
-                                "${maxOf(ppgIrBuffer.size, ppgRedBuffer.size)}/${minSampleCount} samples"
+                        description = "유효 PPG 접촉 구간 수집 중"
                     )
             return null
         }
@@ -2146,7 +2238,7 @@ class PotchArousalCalculator(
                     selectedPolarity = graphPath.toPublicPolarity(),
                     processingState = MetricCalculationState.REJECTED,
                     minimumWindowSeconds = config.ppgRespMinWindowSeconds,
-                    description = "선택된 RR 경로의 후처리 파형을 만들 수 없음"
+                    description = "선택된 RR 경로의 gap-aware 파형을 만들 수 없음"
                 )
 
         return selectedResult
@@ -2179,18 +2271,14 @@ class PotchArousalCalculator(
 
     /**
      * PPG 기반 RR bpm만 간단히 얻기 위한 helper.
-     *
-     * 상세 품질 정보가 필요한 경우에는 calculatePpgRespiration() 결과를 직접 사용한다.
      */
     private fun calculateRrFromPpg(): Double? {
         return calculatePpgRespiration()?.rrBpm
     }
 
     /**
-     * 지정된 PPG 채널 buffer에서 호흡 파형을 추출한다.
-     *
-     * 최근 window를 가져와 DC 제거 후 0.1~0.5Hz BPF를 적용하고,
-     * 양/음 후보를 만든다. 실제 선택은 IR positive primary 기반 hysteresis가 담당한다.
+     * 지정 채널의 최근 45초 raw PPG에서 contact/gap-aware segment를 만들고,
+     * segment별로 DC 제거 -> 0.1~0.5Hz BPF -> 2초 warm-up 제거를 적용한다.
      */
     private fun calculatePpgRespirationCandidatesFromBuffer(
         channel: PpgRespirationChannel,
@@ -2209,160 +2297,475 @@ class PotchArousalCalculator(
                 buffer.toList()
             }
 
-        val warmupSamples = (config.sampleRateHz * 2.0).toInt()
-        if (rawWindow.size <= warmupSamples + 10) {
+        if (rawWindow.isEmpty()) {
             return null
         }
 
         val windowStartSamplePosition =
             totalPpgRespSampleCount - rawWindow.size.toLong()
 
-        // 1. DC 제거
-        val mean = rawWindow.average()
-        val acSignal = DoubleArray(rawWindow.size) { i ->
-            rawWindow[i] - mean
-        }
-
-        // 2. 실제 RR 계산과 동일한 0.1~0.5Hz BPF
-        val respBpf = SimpleBandPassFilter(
-            sampleRateHz = config.sampleRateHz,
-            lowCutHz = config.respLowCutHz,
-            highCutHz = config.respHighCutHz
+        val prepared = prepareGapAwarePpgRespirationWindow(
+            rawWindow = rawWindow,
+            windowStartSamplePosition = windowStartSamplePosition
         )
 
-        val filtered = DoubleArray(acSignal.size) { i ->
-            respBpf.filter(acSignal[i])
-        }
-
-        val usableValues = filtered.drop(warmupSamples)
-        val maxValue = usableValues.maxOrNull() ?: return null
-        val minValue = usableValues.minOrNull() ?: return null
-        val peakToPeakAmplitude = maxValue - minValue
-        val enoughWindow = rawWindow.size >= minSampleCount
-
-        val positiveAnalysis = analyzeRrFromRespWave(
-            channel = channel,
-            filtered = filtered,
-            usableStartIndex = warmupSamples,
-            peakToPeakAmplitude = peakToPeakAmplitude,
-            invert = false,
-            windowStartSamplePosition = windowStartSamplePosition,
-            enoughWindow = enoughWindow
-        )
-
-        val negativeAnalysis = analyzeRrFromRespWave(
-            channel = channel,
-            filtered = filtered,
-            usableStartIndex = warmupSamples,
-            peakToPeakAmplitude = peakToPeakAmplitude,
-            invert = true,
-            windowStartSamplePosition = windowStartSamplePosition,
-            enoughWindow = enoughWindow
-        )
+        val enoughWindow = prepared.validOriginalSampleCount >= minSampleCount
 
         return PpgRespirationCandidates(
-            positive = positiveAnalysis,
-            negative = negativeAnalysis
+            positive = analyzeGapAwareRrFromRespSegments(
+                channel = channel,
+                prepared = prepared,
+                invert = false,
+                enoughWindow = enoughWindow
+            ),
+            negative = analyzeGapAwareRrFromRespSegments(
+                channel = channel,
+                prepared = prepared,
+                invert = true,
+                enoughWindow = enoughWindow
+            )
         )
     }
 
     /**
-     * 선택 경로의 실제 RR 후처리 파형, 전체 peak, 채택 interval, 탈락 interval을 함께 만든다.
+     * sample 값 자체가 실제 PPG 접촉값으로 사용할 수 있는지 판정한다.
+     * 0/저접촉 값과 ADC 상단 포화값은 RR 파형에 직접 넣지 않는다.
      */
-    private fun analyzeRrFromRespWave(
-        channel: PpgRespirationChannel,
-        filtered: DoubleArray,
-        usableStartIndex: Int,
-        peakToPeakAmplitude: Double,
-        invert: Boolean,
-        windowStartSamplePosition: Long,
-        enoughWindow: Boolean
-    ): PpgRespirationCandidateAnalysis {
-        val wave = if (invert) {
-            DoubleArray(filtered.size) { i -> -filtered[i] }
-        } else {
-            filtered
+    private fun isValidPpgRespirationSample(value: Double): Boolean {
+        return value.isFinite() &&
+                value >= config.ppgRespContactMinValue &&
+                value < config.ppgRespSaturationHighValue
+    }
+
+    /**
+     * 짧은/중간 invalid gap은 양쪽 local DC가 비슷할 때만 보간하고,
+     * 긴 gap 또는 접촉 수준이 달라진 gap은 segment 경계로 남긴다.
+     */
+    private fun prepareGapAwarePpgRespirationWindow(
+        rawWindow: List<Double>,
+        windowStartSamplePosition: Long
+    ): GapAwarePpgRespirationWindow {
+        val size = rawWindow.size
+        val values = rawWindow.toDoubleArray()
+        val originalValid = BooleanArray(size) { index ->
+            isValidPpgRespirationSample(values[index])
+        }
+        val preparedValid = originalValid.copyOf()
+        val interpolatedMask = BooleanArray(size)
+        val peakExcludedMask = BooleanArray(size)
+        val mediumGapMask = BooleanArray(size)
+
+        val shortGapMaxSamples =
+            (config.sampleRateHz * config.ppgRespShortGapMaxSeconds)
+                .toInt()
+                .coerceAtLeast(1)
+        val mediumGapMaxSamples =
+            (config.sampleRateHz * config.ppgRespMediumGapMaxSeconds)
+                .toInt()
+                .coerceAtLeast(shortGapMaxSamples)
+        val peakExclusionMarginSamples =
+            (config.sampleRateHz * config.ppgRespPeakExclusionMarginSeconds)
+                .toInt()
+                .coerceAtLeast(0)
+
+        fun localMedian(startInclusive: Int, endExclusive: Int): Double? {
+            if (startInclusive >= endExclusive) return null
+            val local = mutableListOf<Double>()
+            for (index in startInclusive until endExclusive) {
+                if (index in values.indices && originalValid[index]) {
+                    local.add(values[index])
+                }
+            }
+            if (local.isEmpty()) return null
+            local.sort()
+            val middle = local.size / 2
+            return if (local.size % 2 == 0) {
+                (local[middle - 1] + local[middle]) / 2.0
+            } else {
+                local[middle]
+            }
         }
 
-        val usableSamples = wave.drop(usableStartIndex)
-        val graphStartSamplePosition =
-            windowStartSamplePosition + usableStartIndex.toLong()
+        fun edgeLevelsAreCompatible(
+            gapStart: Int,
+            gapEndExclusive: Int
+        ): Boolean {
+            val localSpan = (config.sampleRateHz * 0.20).toInt().coerceAtLeast(3)
+            val leftLevel = localMedian(
+                startInclusive = (gapStart - localSpan).coerceAtLeast(0),
+                endExclusive = gapStart
+            ) ?: return false
+            val rightLevel = localMedian(
+                startInclusive = gapEndExclusive,
+                endExclusive = (gapEndExclusive + localSpan).coerceAtMost(size)
+            ) ?: return false
 
-        if (usableSamples.isEmpty()) {
-            return PpgRespirationCandidateAnalysis(
-                result = null,
-                graphData = PpgRespirationGraphData(
-                    channel = channel,
-                    selectedPolarity = if (invert) {
-                        RespirationPeakPolarity.NEGATIVE
-                    } else {
-                        RespirationPeakPolarity.POSITIVE
-                    },
-                    processingState = MetricCalculationState.COLLECTING,
-                    minimumWindowSeconds = config.ppgRespMinWindowSeconds,
-                    description = "RR BPF warm-up 구간 수집 중"
+            val denominator =
+                maxOf(
+                    (kotlin.math.abs(leftLevel) + kotlin.math.abs(rightLevel)) / 2.0,
+                    config.ppgRespContactMinValue
                 )
-            )
+            val relativeDifference =
+                kotlin.math.abs(leftLevel - rightLevel) / denominator
+
+            return relativeDifference <= config.ppgRespGapEdgeMaxRelativeDifference
         }
 
-        val maxValue = usableSamples.maxOrNull() ?: 0.0
-        val minValue = usableSamples.minOrNull() ?: 0.0
-        val threshold = minValue + (maxValue - minValue) * 0.55
+        var shortGapCount = 0
+        var mediumGapCount = 0
+        var longGapCount = 0
+        var cursor = 0
 
-        val minPeakDistanceSamples =
-            (config.sampleRateHz * (60.0 / config.rrMaxBpm)).toInt()
+        while (cursor < size) {
+            if (originalValid[cursor]) {
+                cursor += 1
+                continue
+            }
 
-        val peakIndices = mutableListOf<Int>()
-        var lastPeakIndex = -minPeakDistanceSamples
+            val gapStart = cursor
+            while (cursor < size && !originalValid[cursor]) {
+                cursor += 1
+            }
+            val gapEndExclusive = cursor
+            val gapLength = gapEndExclusive - gapStart
 
-        for (i in usableStartIndex + 1 until wave.size - 1) {
-            val isPeak =
-                wave[i] > wave[i - 1] &&
-                        wave[i] > wave[i + 1] &&
-                        wave[i] > threshold
+            val boundedByValidSamples =
+                gapStart > 0 &&
+                        gapEndExclusive < size &&
+                        originalValid[gapStart - 1] &&
+                        originalValid[gapEndExclusive]
 
-            if (!isPeak) continue
+            val canBridge =
+                boundedByValidSamples &&
+                        gapLength <= mediumGapMaxSamples &&
+                        edgeLevelsAreCompatible(gapStart, gapEndExclusive)
 
-            val distance = i - lastPeakIndex
-            if (distance >= minPeakDistanceSamples) {
-                peakIndices.add(i)
-                lastPeakIndex = i
-            } else if (peakIndices.isNotEmpty()) {
-                val last = peakIndices.last()
-                if (wave[i] > wave[last]) {
-                    peakIndices[peakIndices.lastIndex] = i
-                    lastPeakIndex = i
+            if (!canBridge) {
+                // leading/trailing invalid는 연결할 양쪽 값이 없으므로 버리고,
+                // 내부 unbridgeable gap만 continuity break로 센다.
+                if (boundedByValidSamples) {
+                    longGapCount += 1
+                }
+                continue
+            }
+
+            val leftValue = values[gapStart - 1]
+            val rightValue = values[gapEndExclusive]
+
+            for (offset in 0 until gapLength) {
+                val fraction = (offset + 1).toDouble() / (gapLength + 1).toDouble()
+                val index = gapStart + offset
+                values[index] = leftValue + (rightValue - leftValue) * fraction
+                preparedValid[index] = true
+                interpolatedMask[index] = true
+            }
+
+            val exclusionStart =
+                (gapStart - peakExclusionMarginSamples).coerceAtLeast(0)
+            val exclusionEnd =
+                (gapEndExclusive + peakExclusionMarginSamples).coerceAtMost(size)
+            for (index in exclusionStart until exclusionEnd) {
+                peakExcludedMask[index] = true
+            }
+
+            if (gapLength <= shortGapMaxSamples) {
+                shortGapCount += 1
+            } else {
+                mediumGapCount += 1
+                for (index in gapStart until gapEndExclusive) {
+                    mediumGapMask[index] = true
                 }
             }
         }
 
-        val peakSamplePositions = peakIndices.map { index ->
-            windowStartSamplePosition + index.toLong()
-        }
+        val segments = mutableListOf<GapAwarePpgRespirationSegment>()
+        val contactSettleSamples =
+            (config.sampleRateHz * config.ppgRespContactSettleSeconds)
+                .toInt()
+                .coerceAtLeast(0)
+        var settlingDiscardedSampleCount = 0
+        cursor = 0
+        var segmentOrdinal = 0
 
-        // 모든 인접 peak interval을 먼저 보존한다. 이후 생리 범위와 median filter 결과를
-        // 비교하여 UI의 빨간 X marker를 정확하게 만든다.
-        val allIntervals = mutableListOf<RespirationInterval>()
-        for (i in 1 until peakSamplePositions.size) {
-            val startPosition = peakSamplePositions[i - 1]
-            val endPosition = peakSamplePositions[i]
-            val intervalSec =
-                (endPosition - startPosition) / config.sampleRateHz
+        while (cursor < size) {
+            while (cursor < size && !preparedValid[cursor]) {
+                cursor += 1
+            }
+            if (cursor >= size) break
 
-            allIntervals.add(
-                RespirationInterval(
-                    intervalSec = intervalSec,
-                    startSamplePosition = startPosition,
-                    endSamplePosition = endPosition,
-                    segmentId = currentAnalysisSegmentId
+            val detectedStart = cursor
+            while (cursor < size && preparedValid[cursor]) {
+                cursor += 1
+            }
+            val endExclusive = cursor
+
+            // window 안에서 leading invalid 또는 내부 long gap 뒤에 시작한 contact segment는
+            // 첫 1초를 센서/접촉 안정화 구간으로 버린다. window 첫 sample부터 이어진 segment는
+            // 이미 이전부터 안정적으로 측정 중일 수 있으므로 추가로 자르지 않는다.
+            val startsAfterVisibleBreak = detectedStart > 0
+            val settleTrim =
+                if (startsAfterVisibleBreak) {
+                    minOf(contactSettleSamples, endExclusive - detectedStart)
+                } else {
+                    0
+                }
+            val start = detectedStart + settleTrim
+            settlingDiscardedSampleCount += settleTrim
+
+            val length = endExclusive - start
+            if (length <= 0) continue
+
+            val segmentStartSamplePosition =
+                windowStartSamplePosition + start.toLong()
+
+            // 첫 segment는 rolling window 시작이 움직여도 current analysis segment ID를 유지한다.
+            // 내부 gap 이후 segment는 gap 뒤 실제 절대 sample position을 stable continuity ID로 사용한다.
+            val continuityGroupId =
+                if (segmentOrdinal == 0) {
+                    currentAnalysisSegmentId
+                } else {
+                    segmentStartSamplePosition
+                }
+
+            segments.add(
+                GapAwarePpgRespirationSegment(
+                    startSamplePosition = segmentStartSamplePosition,
+                    continuityGroupId = continuityGroupId,
+                    values = DoubleArray(length) { local -> values[start + local] },
+                    interpolatedMask = BooleanArray(length) { local ->
+                        interpolatedMask[start + local]
+                    },
+                    peakExcludedMask = BooleanArray(length) { local ->
+                        peakExcludedMask[start + local]
+                    },
+                    mediumGapMask = BooleanArray(length) { local ->
+                        mediumGapMask[start + local]
+                    }
                 )
             )
+            segmentOrdinal += 1
         }
+
+        val originalContactValidSampleCount = originalValid.count { it }
+        val validOriginalSampleCount =
+            (originalContactValidSampleCount - settlingDiscardedSampleCount)
+                .coerceAtLeast(0)
+        val invalidSampleCount = size - originalContactValidSampleCount
+        val interpolatedSampleCount = interpolatedMask.count { it }
+
+        return GapAwarePpgRespirationWindow(
+            segments = segments,
+            rawWindowSampleCount = size,
+            validOriginalSampleCount = validOriginalSampleCount,
+            invalidSampleCount = invalidSampleCount,
+            interpolatedSampleCount = interpolatedSampleCount,
+            settlingDiscardedSampleCount = settlingDiscardedSampleCount,
+            shortGapCount = shortGapCount,
+            mediumGapCount = mediumGapCount,
+            longGapCount = longGapCount
+        )
+    }
+
+    /**
+     * 한 개의 큰 step/spike가 진폭 및 peak threshold 전체를 지배하지 않도록
+     * 정렬 percentile을 선형 보간해 반환한다.
+     */
+    private fun calculateRespirationPercentile(
+        values: List<Double>,
+        percentile: Double
+    ): Double? {
+        val finite = values.filter { it.isFinite() }.sorted()
+        if (finite.isEmpty()) return null
+        if (finite.size == 1) return finite.first()
+
+        val p = percentile.coerceIn(0.0, 1.0)
+        val position = p * (finite.size - 1).toDouble()
+        val lower = kotlin.math.floor(position).toInt()
+        val upper = kotlin.math.ceil(position).toInt()
+        if (lower == upper) return finite[lower]
+
+        val fraction = position - lower.toDouble()
+        return finite[lower] + (finite[upper] - finite[lower]) * fraction
+    }
+
+    /**
+     * 여러 contact segment를 독립적으로 필터링하고, 같은 segment 안의 peak interval만 만든다.
+     * 짧은 gap은 보간 후 peak에서 제외하고, 중간 gap crossing interval은 rejected 처리한다.
+     */
+    private fun analyzeGapAwareRrFromRespSegments(
+        channel: PpgRespirationChannel,
+        prepared: GapAwarePpgRespirationWindow,
+        invert: Boolean,
+        enoughWindow: Boolean
+    ): PpgRespirationCandidateAnalysis {
+        val warmupSamples = (config.sampleRateHz * 2.0).toInt()
+        val minPeakDistanceSamples =
+            (config.sampleRateHz * (60.0 / config.rrMaxBpm)).toInt()
+
+        val graphSamples = mutableListOf<Double>()
+        val segmentBreakSampleIndices = mutableListOf<Int>()
+        val interpolatedGraphIndices = mutableListOf<Int>()
+        val positionToGraphIndex = mutableMapOf<Long, Int>()
+        val allPeakSamplePositions = mutableListOf<Long>()
+        val referencePeakSamplePositions = mutableListOf<Long>()
+        val allIntervals = mutableListOf<RespirationInterval>()
+        val weightedThresholds = mutableListOf<Pair<Double, Int>>()
+        var analyzedSegmentCount = 0
+
+        for (segment in prepared.segments) {
+            if (segment.values.size <= warmupSamples + 10) {
+                continue
+            }
+
+            val mean = segment.values.average()
+            val acSignal = DoubleArray(segment.values.size) { index ->
+                segment.values[index] - mean
+            }
+
+            // segment 경계마다 BPF state를 새로 시작한다.
+            // 접촉 전/후 DC step이 하나의 호흡 파형으로 이어지는 것을 방지한다.
+            val respBpf = SimpleBandPassFilter(
+                sampleRateHz = config.sampleRateHz,
+                lowCutHz = config.respLowCutHz,
+                highCutHz = config.respHighCutHz
+            )
+            val filtered = DoubleArray(acSignal.size) { index ->
+                respBpf.filter(acSignal[index])
+            }
+            val wave = if (invert) {
+                DoubleArray(filtered.size) { index -> -filtered[index] }
+            } else {
+                filtered
+            }
+
+            val usableSamples =
+                (warmupSamples until wave.size).map { index -> wave[index] }
+            if (usableSamples.size < 3) continue
+
+            val robustLow = calculateRespirationPercentile(
+                usableSamples,
+                config.ppgRespRobustLowPercentile
+            ) ?: continue
+            val robustHigh = calculateRespirationPercentile(
+                usableSamples,
+                config.ppgRespRobustHighPercentile
+            ) ?: continue
+            val robustRange = robustHigh - robustLow
+            val threshold = robustLow + robustRange * 0.55
+
+            val graphOffset = graphSamples.size
+            if (graphOffset > 0) {
+                segmentBreakSampleIndices.add(graphOffset)
+            }
+            graphSamples.addAll(usableSamples)
+            analyzedSegmentCount += 1
+            weightedThresholds.add(threshold to usableSamples.size)
+
+            for (localIndex in warmupSamples until segment.values.size) {
+                val graphIndex = graphOffset + (localIndex - warmupSamples)
+                val absolutePosition =
+                    segment.startSamplePosition + localIndex.toLong()
+                positionToGraphIndex[absolutePosition] = graphIndex
+                if (segment.interpolatedMask[localIndex]) {
+                    interpolatedGraphIndices.add(graphIndex)
+                }
+            }
+
+            val mediumGapPrefix = IntArray(segment.mediumGapMask.size + 1)
+            for (index in segment.mediumGapMask.indices) {
+                mediumGapPrefix[index + 1] =
+                    mediumGapPrefix[index] + if (segment.mediumGapMask[index]) 1 else 0
+            }
+
+            fun crossesMediumGap(startIndex: Int, endIndex: Int): Boolean {
+                val start = startIndex.coerceIn(0, segment.mediumGapMask.size)
+                val endExclusive = (endIndex + 1).coerceIn(0, segment.mediumGapMask.size)
+                if (endExclusive <= start) return false
+                return mediumGapPrefix[endExclusive] - mediumGapPrefix[start] > 0
+            }
+
+            val peakIndices = mutableListOf<Int>()
+            var lastPeakIndex = -minPeakDistanceSamples
+
+            if (robustRange.isFinite() && robustRange > 0.0) {
+                for (index in warmupSamples + 1 until wave.size - 1) {
+                    if (segment.peakExcludedMask[index]) continue
+
+                    val isPeak =
+                        wave[index] > wave[index - 1] &&
+                                wave[index] > wave[index + 1] &&
+                                wave[index] > threshold
+                    if (!isPeak) continue
+
+                    val distance = index - lastPeakIndex
+                    if (distance >= minPeakDistanceSamples) {
+                        peakIndices.add(index)
+                        lastPeakIndex = index
+                    } else if (peakIndices.isNotEmpty()) {
+                        val previousIndex = peakIndices.last()
+                        if (wave[index] > wave[previousIndex]) {
+                            peakIndices[peakIndices.lastIndex] = index
+                            lastPeakIndex = index
+                        }
+                    }
+                }
+            }
+
+            val peakSamplePositions = peakIndices.map { index ->
+                segment.startSamplePosition + index.toLong()
+            }
+            allPeakSamplePositions.addAll(peakSamplePositions)
+            peakSamplePositions.firstOrNull()?.let(referencePeakSamplePositions::add)
+
+            for (index in 1 until peakIndices.size) {
+                val startIndex = peakIndices[index - 1]
+                val endIndex = peakIndices[index]
+                val startPosition =
+                    segment.startSamplePosition + startIndex.toLong()
+                val endPosition =
+                    segment.startSamplePosition + endIndex.toLong()
+                val intervalSec =
+                    (endPosition - startPosition) / config.sampleRateHz
+
+                allIntervals.add(
+                    RespirationInterval(
+                        intervalSec = intervalSec,
+                        startSamplePosition = startPosition,
+                        endSamplePosition = endPosition,
+                        segmentId = currentAnalysisSegmentId,
+                        continuityGroupId = segment.continuityGroupId,
+                        crossesInvalidGap = crossesMediumGap(startIndex, endIndex)
+                    )
+                )
+            }
+        }
+
+        val robustLowAll = calculateRespirationPercentile(
+            graphSamples,
+            config.ppgRespRobustLowPercentile
+        )
+        val robustHighAll = calculateRespirationPercentile(
+            graphSamples,
+            config.ppgRespRobustHighPercentile
+        )
+        val peakToPeakAmplitude =
+            if (robustLowAll != null && robustHighAll != null) {
+                robustHighAll - robustLowAll
+            } else {
+                0.0
+            }
+
+        val weightedThreshold =
+            weightedThresholds.takeIf { it.isNotEmpty() }?.let { entries ->
+                val totalWeight = entries.sumOf { it.second }.coerceAtLeast(1)
+                entries.sumOf { (value, weight) -> value * weight } / totalWeight.toDouble()
+            }
 
         val minIntervalSec = 60.0 / config.rrMaxBpm
         val maxIntervalSec = 60.0 / config.rrMinBpm
         val physiologicalIntervals = allIntervals.filter { interval ->
-            interval.intervalSec in minIntervalSec..maxIntervalSec
+            !interval.crossesInvalidGap &&
+                    interval.intervalSec in minIntervalSec..maxIntervalSec
         }
         val usedIntervals = removeRespIntervalOutliers(physiologicalIntervals)
 
@@ -2375,7 +2778,7 @@ class PotchArousalCalculator(
 
         val amplitudeValid =
             peakToPeakAmplitude >= config.ppgRespMinPeakToPeakAmplitude
-        val peakCountValid = peakIndices.size >= 3
+        val peakCountValid = allPeakSamplePositions.size >= 3
         val intervalCountValid = physiologicalIntervals.size >= 2
         val usedIntervalCountValid = usedIntervals.size >= 2
         val rrValid = rrBpm != null && rrBpm in config.rrMinBpm..config.rrMaxBpm
@@ -2401,14 +2804,14 @@ class PotchArousalCalculator(
                 PpgRespirationResult(
                     channel = channel,
                     rrBpm = rrBpm!!,
-                    peakCount = peakIndices.size,
+                    peakCount = allPeakSamplePositions.size,
                     intervalCount = usedIntervals.size,
                     averageIntervalSec = averageIntervalSec,
                     peakToPeakAmplitude = peakToPeakAmplitude,
                     qualityScore = qualityScore,
                     inverted = invert,
-                    peakSamplePositions = peakSamplePositions,
-                    intervals = usedIntervals
+                    peakSamplePositions = allPeakSamplePositions.sorted(),
+                    intervals = usedIntervals.sortedBy { it.endSamplePosition }
                 )
             } else {
                 null
@@ -2422,45 +2825,65 @@ class PotchArousalCalculator(
                 .filterNot { it in acceptedEndPositions }
                 .distinct()
 
-        fun toGraphIndex(position: Long): Int? {
-            val relative = position - graphStartSamplePosition
-            return relative.toInt().takeIf { it in usableSamples.indices }
-        }
-
         val detectedPeakSampleIndices =
-            peakSamplePositions.mapNotNull(::toGraphIndex).distinct().sorted()
+            allPeakSamplePositions
+                .mapNotNull(positionToGraphIndex::get)
+                .distinct()
+                .sorted()
         val acceptedPeakSampleIndices =
-            acceptedEndPositions.mapNotNull(::toGraphIndex).distinct().sorted()
+            acceptedEndPositions
+                .mapNotNull(positionToGraphIndex::get)
+                .distinct()
+                .sorted()
         val rejectedPeakSampleIndices =
-            rejectedEndPositions.mapNotNull(::toGraphIndex).distinct().sorted()
-        val referencePeakSampleIndex =
-            peakSamplePositions.firstOrNull()?.let(::toGraphIndex)
+            rejectedEndPositions
+                .mapNotNull(positionToGraphIndex::get)
+                .distinct()
+                .sorted()
+        val referencePeakSampleIndices =
+            referencePeakSamplePositions
+                .mapNotNull(positionToGraphIndex::get)
+                .distinct()
+                .sorted()
+
+        val validSeconds =
+            prepared.validOriginalSampleCount / config.sampleRateHz
+        val rawWindowSeconds =
+            prepared.rawWindowSampleCount / config.sampleRateHz
 
         val state: MetricCalculationState
         val description: String
         when {
             !enoughWindow -> {
                 state = MetricCalculationState.COLLECTING
-                description = "RR 분석창 수집 중: " +
-                        "${"%.1f".format(usableSamples.size / config.sampleRateHz)}초 / " +
-                        "최소 ${config.ppgRespMinWindowSeconds}초"
+                description = "유효 PPG 수집 중: " +
+                        "${"%.1f".format(validSeconds)}초 / " +
+                        "최소 ${config.ppgRespMinWindowSeconds}초 · " +
+                        "segments=$analyzedSegmentCount · " +
+                        "gaps=${prepared.shortGapCount}/" +
+                        "${prepared.mediumGapCount}/${prepared.longGapCount}"
+            }
+
+            analyzedSegmentCount <= 0 -> {
+                state = MetricCalculationState.REJECTED
+                description = "접촉 복구 후 2초 BPF warm-up을 통과한 segment가 없음"
             }
 
             !amplitudeValid -> {
                 state = MetricCalculationState.REJECTED
-                description = "호흡 파형 진폭 부족: " +
+                description = "robust 호흡 진폭 부족: " +
                         "${"%.2f".format(peakToPeakAmplitude)} < " +
                         "${"%.2f".format(config.ppgRespMinPeakToPeakAmplitude)}"
             }
 
             !peakCountValid -> {
                 state = MetricCalculationState.REJECTED
-                description = "호흡 peak 부족: ${peakIndices.size}개 / 최소 3개"
+                description = "호흡 peak 부족: ${allPeakSamplePositions.size}개 / 최소 3개"
             }
 
             !intervalCountValid -> {
                 state = MetricCalculationState.REJECTED
-                description = "2~10초 생리 범위 호흡 interval 부족: " +
+                description = "segment 내부 2~10초 호흡 interval 부족: " +
                         "${physiologicalIntervals.size}개"
             }
 
@@ -2479,8 +2902,10 @@ class PotchArousalCalculator(
             else -> {
                 state = MetricCalculationState.VALID
                 description = "${channel.name} " +
-                        "${if (invert) "negative" else "positive"} 호흡 peak로 " +
-                        "RR ${"%.1f".format(rrBpm)} bpm 계산"
+                        "${if (invert) "negative" else "positive"} · " +
+                        "RR ${"%.1f".format(rrBpm)} bpm · " +
+                        "valid=${"%.1f".format(validSeconds)}초 · " +
+                        "segments=$analyzedSegmentCount"
             }
         }
 
@@ -2494,21 +2919,33 @@ class PotchArousalCalculator(
                     RespirationPeakPolarity.POSITIVE
                 },
                 processingState = state,
-                samples = usableSamples,
-                windowSeconds = usableSamples.size / config.sampleRateHz,
+                samples = graphSamples,
+                windowSeconds = validSeconds,
                 minimumWindowSeconds = config.ppgRespMinWindowSeconds,
                 detectedPeakSampleIndices = detectedPeakSampleIndices,
                 acceptedPeakSampleIndices = acceptedPeakSampleIndices,
                 rejectedPeakSampleIndices = rejectedPeakSampleIndices,
-                referencePeakSampleIndex = referencePeakSampleIndex,
-                detectedPeakCount = peakIndices.size,
+                referencePeakSampleIndex = referencePeakSampleIndices.firstOrNull(),
+                referencePeakSampleIndices = referencePeakSampleIndices,
+                segmentBreakSampleIndices = segmentBreakSampleIndices,
+                interpolatedSampleIndices = interpolatedGraphIndices.distinct().sorted(),
+                rawWindowSeconds = rawWindowSeconds,
+                validOriginalSampleCount = prepared.validOriginalSampleCount,
+                invalidSampleCount = prepared.invalidSampleCount,
+                interpolatedSampleCount = prepared.interpolatedSampleCount,
+                settlingDiscardedSampleCount = prepared.settlingDiscardedSampleCount,
+                segmentCount = analyzedSegmentCount,
+                shortGapCount = prepared.shortGapCount,
+                mediumGapCount = prepared.mediumGapCount,
+                longGapCount = prepared.longGapCount,
+                detectedPeakCount = allPeakSamplePositions.size,
                 rawIntervalCount = allIntervals.size,
                 acceptedIntervalCount = usedIntervals.size,
                 rejectedIntervalCount = rejectedEndPositions.size,
-                peakThreshold = threshold,
+                peakThreshold = weightedThreshold,
                 peakToPeakAmplitude = peakToPeakAmplitude,
-                calculatedRrBpm = result?.rrBpm,
-                qualityScore = result?.qualityScore,
+                calculatedRrBpm = rrBpm,
+                qualityScore = result?.qualityScore ?: qualityScore.takeIf { usedIntervals.isNotEmpty() },
                 description = description
             )
         )
@@ -3810,9 +4247,18 @@ class PotchArousalCalculator(
         val intervalValues =
             cleanedIntervals.map { it.interval.intervalSec }
 
+        // contact loss로 분리된 PPG continuity group 경계에서는
+        // 이전 segment 마지막 interval과 다음 segment 첫 interval의 차이를 RRV로 계산하지 않는다.
         val successiveDiffs =
-            intervalValues.zipWithNext { previous, current ->
-                current - previous
+            cleanedIntervals.zipWithNext().mapNotNull { (previous, current) ->
+                if (
+                    previous.interval.continuityGroupId ==
+                    current.interval.continuityGroupId
+                ) {
+                    current.interval.intervalSec - previous.interval.intervalSec
+                } else {
+                    null
+                }
             }
 
         if (successiveDiffs.isEmpty()) {
