@@ -787,14 +787,43 @@ private fun HeartRateProcessedPpgGraphCard(
                     )
                 }
 
-                if (
-                    graphData.primarySamples.size >= 2 &&
-                    graphData.peakSampleIndices.isNotEmpty()
-                ) {
-                    drawProcessedPpgPeakMarkers(
+                if (graphData.primarySamples.size >= 2) {
+                    drawProcessedPpgCircleMarkers(
                         samples = graphData.primarySamples,
-                        peakIndices = graphData.peakSampleIndices,
+                        peakIndices = graphData.detectedPeakSampleIndices,
+                        color = Color.White.copy(alpha = 0.55f),
+                        radiusPx = 4.2f,
+                        filled = false,
+                        strokeWidthPx = 1.5f,
+                        sharedMin = graphMin,
+                        sharedMax = graphMax
+                    )
+
+                    graphData.referencePeakSampleIndex?.let { referenceIndex ->
+                        drawProcessedPpgReferenceMarker(
+                            samples = graphData.primarySamples,
+                            peakIndex = referenceIndex,
+                            color = Color(0xFF5EE7E7),
+                            sharedMin = graphMin,
+                            sharedMax = graphMax
+                        )
+                    }
+
+                    drawProcessedPpgRejectedMarkers(
+                        samples = graphData.primarySamples,
+                        peakIndices = graphData.rejectedPeakSampleIndices,
+                        color = Color(0xFFFF5C68),
+                        sharedMin = graphMin,
+                        sharedMax = graphMax
+                    )
+
+                    drawProcessedPpgCircleMarkers(
+                        samples = graphData.primarySamples,
+                        peakIndices = graphData.acceptedPeakSampleIndices,
                         color = Color(0xFFFFD166),
+                        radiusPx = 4.5f,
+                        filled = true,
+                        strokeWidthPx = 1.5f,
                         sharedMin = graphMin,
                         sharedMax = graphMax
                     )
@@ -810,6 +839,10 @@ private fun HeartRateProcessedPpgGraphCard(
                 )
             }
         }
+
+        Spacer(Modifier.height(10.dp))
+
+        HeartRatePeakMarkerLegend()
 
         Spacer(Modifier.height(12.dp))
 
@@ -855,6 +888,11 @@ private fun HeartRateProcessedPpgGraphCard(
                 append(" / retained=${graphData.retainedBufferSampleCount} samples")
                 append(" · interpolated=${graphData.interpolatedSampleCount}")
                 append(" · peak-excluded=${graphData.excludedPeakSampleCount}")
+                append(
+                    " · peaks=${graphData.detectedPeakSampleIndices.size}" +
+                            "/${graphData.acceptedPeakSampleIndices.size}" +
+                            "/${graphData.rejectedPeakSampleIndices.size}"
+                )
                 graphData.calculatedBpm?.let { append(" · bpm=$it") }
                 graphData.qualityScore?.let {
                     append(" · quality=${"%.3f".format(it)}")
@@ -909,37 +947,241 @@ private fun DrawScope.drawProcessedPpgPath(
     )
 }
 
-private fun DrawScope.drawProcessedPpgPeakMarkers(
+private fun DrawScope.processedPpgMarkerOffset(
+    samples: List<Double>,
+    peakIndex: Int,
+    sharedMin: Double?,
+    sharedMax: Double?
+): Offset? {
+    if (samples.size < 2 || peakIndex !in samples.indices) return null
+
+    val minValue = sharedMin ?: samples.minOrNull() ?: return null
+    val maxValue = sharedMax ?: samples.maxOrNull() ?: return null
+    val range = (maxValue - minValue).takeIf { it > 0.0 } ?: 1.0
+
+    val x =
+        size.width * peakIndex.toFloat() /
+                (samples.size - 1).toFloat()
+
+    val normalized =
+        ((samples[peakIndex] - minValue) / range)
+            .coerceIn(0.0, 1.0)
+            .toFloat()
+
+    val y = size.height - normalized * size.height
+
+    return Offset(x, y)
+}
+
+private fun DrawScope.drawProcessedPpgCircleMarkers(
+    samples: List<Double>,
+    peakIndices: List<Int>,
+    color: Color,
+    radiusPx: Float,
+    filled: Boolean,
+    strokeWidthPx: Float,
+    sharedMin: Double?,
+    sharedMax: Double?
+) {
+    peakIndices.forEach { index ->
+        val center = processedPpgMarkerOffset(
+            samples = samples,
+            peakIndex = index,
+            sharedMin = sharedMin,
+            sharedMax = sharedMax
+        ) ?: return@forEach
+
+        if (filled) {
+            drawCircle(
+                color = color,
+                radius = radiusPx,
+                center = center
+            )
+        } else {
+            drawCircle(
+                color = color,
+                radius = radiusPx,
+                center = center,
+                style = Stroke(width = strokeWidthPx)
+            )
+        }
+    }
+}
+
+private fun DrawScope.drawProcessedPpgRejectedMarkers(
     samples: List<Double>,
     peakIndices: List<Int>,
     color: Color,
     sharedMin: Double?,
     sharedMax: Double?
 ) {
-    if (samples.size < 2) return
-
-    val minValue = sharedMin ?: samples.minOrNull() ?: return
-    val maxValue = sharedMax ?: samples.maxOrNull() ?: return
-    val range = (maxValue - minValue).takeIf { it > 0.0 } ?: 1.0
+    val halfSize = 5.0f
 
     peakIndices.forEach { index ->
-        if (index !in samples.indices) return@forEach
+        val center = processedPpgMarkerOffset(
+            samples = samples,
+            peakIndex = index,
+            sharedMin = sharedMin,
+            sharedMax = sharedMax
+        ) ?: return@forEach
 
-        val x =
-            size.width * index.toFloat() /
-                    (samples.size - 1).toFloat()
-
-        val normalized =
-            ((samples[index] - minValue) / range)
-                .coerceIn(0.0, 1.0)
-                .toFloat()
-
-        val y = size.height - normalized * size.height
-
-        drawCircle(
+        drawLine(
             color = color,
-            radius = 4.5f,
-            center = Offset(x, y)
+            start = Offset(center.x - halfSize, center.y - halfSize),
+            end = Offset(center.x + halfSize, center.y + halfSize),
+            strokeWidth = 2.2f
+        )
+        drawLine(
+            color = color,
+            start = Offset(center.x - halfSize, center.y + halfSize),
+            end = Offset(center.x + halfSize, center.y - halfSize),
+            strokeWidth = 2.2f
+        )
+    }
+}
+
+private fun DrawScope.drawProcessedPpgReferenceMarker(
+    samples: List<Double>,
+    peakIndex: Int,
+    color: Color,
+    sharedMin: Double?,
+    sharedMax: Double?
+) {
+    val center = processedPpgMarkerOffset(
+        samples = samples,
+        peakIndex = peakIndex,
+        sharedMin = sharedMin,
+        sharedMax = sharedMax
+    ) ?: return
+
+    drawCircle(
+        color = color,
+        radius = 6.2f,
+        center = center,
+        style = Stroke(width = 2.0f)
+    )
+    drawCircle(
+        color = color,
+        radius = 2.2f,
+        center = center
+    )
+}
+
+private enum class HeartRatePeakLegendStyle {
+    DETECTED,
+    ACCEPTED,
+    REJECTED,
+    REFERENCE
+}
+
+@Composable
+private fun HeartRatePeakMarkerLegend() {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        HeartRatePeakMarkerLegendItem(
+            modifier = Modifier.weight(1f),
+            text = "전체 검출",
+            color = Color.White.copy(alpha = 0.65f),
+            style = HeartRatePeakLegendStyle.DETECTED
+        )
+        HeartRatePeakMarkerLegendItem(
+            modifier = Modifier.weight(1f),
+            text = "최종 채택",
+            color = Color(0xFFFFD166),
+            style = HeartRatePeakLegendStyle.ACCEPTED
+        )
+        HeartRatePeakMarkerLegendItem(
+            modifier = Modifier.weight(1f),
+            text = "IBI 탈락",
+            color = Color(0xFFFF5C68),
+            style = HeartRatePeakLegendStyle.REJECTED
+        )
+        HeartRatePeakMarkerLegendItem(
+            modifier = Modifier.weight(1f),
+            text = "시작 기준",
+            color = Color(0xFF5EE7E7),
+            style = HeartRatePeakLegendStyle.REFERENCE
+        )
+    }
+}
+
+@Composable
+private fun HeartRatePeakMarkerLegendItem(
+    modifier: Modifier = Modifier,
+    text: String,
+    color: Color,
+    style: HeartRatePeakLegendStyle
+) {
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color.White.copy(alpha = 0.045f))
+            .padding(horizontal = 7.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp)
+    ) {
+        Canvas(
+            modifier = Modifier.size(13.dp)
+        ) {
+            val center = Offset(size.width / 2f, size.height / 2f)
+
+            when (style) {
+                HeartRatePeakLegendStyle.DETECTED -> {
+                    drawCircle(
+                        color = color,
+                        radius = size.minDimension * 0.30f,
+                        center = center,
+                        style = Stroke(width = 1.5f)
+                    )
+                }
+
+                HeartRatePeakLegendStyle.ACCEPTED -> {
+                    drawCircle(
+                        color = color,
+                        radius = size.minDimension * 0.30f,
+                        center = center
+                    )
+                }
+
+                HeartRatePeakLegendStyle.REJECTED -> {
+                    val halfSize = size.minDimension * 0.28f
+                    drawLine(
+                        color = color,
+                        start = Offset(center.x - halfSize, center.y - halfSize),
+                        end = Offset(center.x + halfSize, center.y + halfSize),
+                        strokeWidth = 2.0f
+                    )
+                    drawLine(
+                        color = color,
+                        start = Offset(center.x - halfSize, center.y + halfSize),
+                        end = Offset(center.x + halfSize, center.y - halfSize),
+                        strokeWidth = 2.0f
+                    )
+                }
+
+                HeartRatePeakLegendStyle.REFERENCE -> {
+                    drawCircle(
+                        color = color,
+                        radius = size.minDimension * 0.34f,
+                        center = center,
+                        style = Stroke(width = 1.6f)
+                    )
+                    drawCircle(
+                        color = color,
+                        radius = size.minDimension * 0.11f,
+                        center = center
+                    )
+                }
+            }
+        }
+
+        Text(
+            text = text,
+            color = Color.White.copy(alpha = 0.66f),
+            fontSize = 10.sp,
+            maxLines = 1
         )
     }
 }

@@ -147,6 +147,13 @@ data class HeartRateDiagnostics(
     val selectedThresholdPercent: Double? = null,
     val selectedPolarity: HeartRatePeakPolarity = HeartRatePeakPolarity.NONE,
 
+    // 선택된 peak fitting 후보의 절대 sample 위치.
+    // UI에서 전체 검출 peak, 최종 채택 IBI, 탈락 IBI, 첫 기준 peak를 구분해 표시한다.
+    val detectedPeakSamplePositions: List<Double> = emptyList(),
+    val acceptedIbiEndSamplePositions: List<Double> = emptyList(),
+    val rejectedIbiEndSamplePositions: List<Double> = emptyList(),
+    val referencePeakSamplePosition: Double? = null,
+
     val detectedPeakCount: Int = 0,
     val rawIbiCount: Int = 0,
     val validIbiCount: Int = 0,
@@ -257,6 +264,15 @@ data class HeartRateEstimate(
     val amplitudeCoefficientOfVariation: Double? = null,
     val abruptChangeRatio: Double? = null,
 
+    // 최종 선택된 threshold/polarity 후보의 peak 디버그 정보.
+    // 위치는 rolling HR buffer 전체 기준의 절대 sample position이다.
+    val detectedPeakSamplePositions: List<Double> = emptyList(),
+    val acceptedIbiEndSamplePositions: List<Double> =
+        ibiIntervals.map { it.endSamplePosition },
+    val rejectedIbiEndSamplePositions: List<Double> = emptyList(),
+    val referencePeakSamplePosition: Double? =
+        detectedPeakSamplePositions.firstOrNull(),
+
     // 정수 peak index에서 포물선 보간 위치까지 이동한 크기.
     // 측정 정확도 자체를 뜻하지 않고 10ms grid 보정량을 디버깅하기 위한 값이다.
     val meanPeakInterpolationOffsetMs: Double = 0.0,
@@ -284,8 +300,18 @@ data class HeartRateGraphData(
     val secondaryLabel: String? = null,
     val secondarySamples: List<Double> = emptyList(),
 
-    // 최종 estimate의 IBI 종료 peak 위치를 현재 graph window 기준 index로 변환한 값.
+    // 이전 UI 호환용. 최종 채택 IBI 종료 peak와 동일하다.
     val peakSampleIndices: List<Int> = emptyList(),
+
+    // 현재 graph window 기준 marker index.
+    // detected: 선택된 threshold에서 검출된 전체 peak
+    // accepted: 최종 HR 계산에 남은 IBI의 종료 peak
+    // rejected: 생리 범위/quotient/median filter에서 탈락한 IBI의 종료 peak
+    // reference: 첫 번째 검출 peak이며 첫 IBI의 시작 기준점
+    val detectedPeakSampleIndices: List<Int> = emptyList(),
+    val acceptedPeakSampleIndices: List<Int> = emptyList(),
+    val rejectedPeakSampleIndices: List<Int> = emptyList(),
+    val referencePeakSampleIndex: Int? = null,
 
     val retainedBufferSampleCount: Int = 0,
     val cleanSegmentSampleCount: Int = 0,
@@ -1606,18 +1632,60 @@ class PotchDataProcessor(
         }
 
         val graphLength = primary.samples.size
-        val peakSampleIndices =
-            estimate
-                ?.ibiIntervals
-                ?.mapNotNull { interval ->
+
+        fun toGraphIndices(
+            absolutePositions: List<Double>
+        ): List<Int> {
+            return absolutePositions
+                .mapNotNull { absolutePosition ->
                     val relative =
-                        (interval.endSamplePosition - primary.startSamplePosition)
+                        (absolutePosition - primary.startSamplePosition)
                             .roundToInt()
 
                     relative.takeIf { it in 0 until graphLength }
                 }
-                ?.distinct()
-                ?: emptyList()
+                .distinct()
+                .sorted()
+        }
+
+        val detectedPeakSamplePositions =
+            estimate
+                ?.detectedPeakSamplePositions
+                ?.takeIf { it.isNotEmpty() }
+                ?: diagnostics.detectedPeakSamplePositions
+
+        val acceptedIbiEndSamplePositions =
+            estimate
+                ?.acceptedIbiEndSamplePositions
+                ?.takeIf { it.isNotEmpty() }
+                ?: diagnostics.acceptedIbiEndSamplePositions
+
+        val rejectedIbiEndSamplePositions =
+            estimate
+                ?.rejectedIbiEndSamplePositions
+                ?.takeIf { it.isNotEmpty() }
+                ?: diagnostics.rejectedIbiEndSamplePositions
+
+        val referencePeakSamplePosition =
+            estimate?.referencePeakSamplePosition
+                ?: diagnostics.referencePeakSamplePosition
+
+        val detectedPeakSampleIndices =
+            toGraphIndices(detectedPeakSamplePositions)
+
+        val acceptedPeakSampleIndices =
+            toGraphIndices(acceptedIbiEndSamplePositions)
+
+        val rejectedPeakSampleIndices =
+            toGraphIndices(rejectedIbiEndSamplePositions)
+
+        val referencePeakSampleIndex =
+            referencePeakSamplePosition
+                ?.let { absolutePosition ->
+                    (absolutePosition - primary.startSamplePosition)
+                        .roundToInt()
+                }
+                ?.takeIf { it in 0 until graphLength }
 
         return HeartRateGraphData(
             source = source,
@@ -1627,7 +1695,11 @@ class PotchDataProcessor(
             primarySamples = primary.samples,
             secondaryLabel = secondary?.label,
             secondarySamples = secondary?.samples ?: emptyList(),
-            peakSampleIndices = peakSampleIndices,
+            peakSampleIndices = acceptedPeakSampleIndices,
+            detectedPeakSampleIndices = detectedPeakSampleIndices,
+            acceptedPeakSampleIndices = acceptedPeakSampleIndices,
+            rejectedPeakSampleIndices = rejectedPeakSampleIndices,
+            referencePeakSampleIndex = referencePeakSampleIndex,
             retainedBufferSampleCount =
                 maxOf(
                     primary.retainedBufferSampleCount,
@@ -2495,6 +2567,8 @@ class PotchDataProcessor(
             qualityScore = fusedQuality,
             source = HeartRateFusionSource.FUSED_IR_RED,
             fusionLog = null,
+            acceptedIbiEndSamplePositions =
+                fusedIntervals.map { it.endSamplePosition },
             peakFitSdsdMs =
                 calculateSdsd(fusedIntervals.map { it.intervalSec })
                     ?.times(1000.0),
@@ -2828,6 +2902,31 @@ class PotchDataProcessor(
             validIbiCount: Int = 0,
             preprocess: PpgPreprocessResult? = null
         ): HeartRateDiagnostics {
+            val detectedPeakSamplePositions =
+                selectedCandidate
+                    ?.peakPositions
+                    ?.map { relative ->
+                        cleanWindow.startSamplePosition.toDouble() + relative
+                    }
+                    ?: emptyList()
+
+            val acceptedIbiEndSamplePositions =
+                selectedCandidate
+                    ?.usedIntervals
+                    ?.map { it.endSamplePosition }
+                    ?: emptyList()
+
+            val acceptedEndPositionSet =
+                acceptedIbiEndSamplePositions.toSet()
+
+            val rejectedIbiEndSamplePositions =
+                selectedCandidate
+                    ?.rawIntervals
+                    ?.map { it.endSamplePosition }
+                    ?.filterNot { it in acceptedEndPositionSet }
+                    ?.distinct()
+                    ?: emptyList()
+
             return HeartRateDiagnostics(
                 processingState = state,
                 message = message,
@@ -2846,6 +2945,11 @@ class PotchDataProcessor(
                 selectedThresholdPercent = selectedCandidate?.thresholdPercent,
                 selectedPolarity = selectedCandidate?.polarity
                     ?: HeartRatePeakPolarity.NONE,
+                detectedPeakSamplePositions = detectedPeakSamplePositions,
+                acceptedIbiEndSamplePositions = acceptedIbiEndSamplePositions,
+                rejectedIbiEndSamplePositions = rejectedIbiEndSamplePositions,
+                referencePeakSamplePosition =
+                    detectedPeakSamplePositions.firstOrNull(),
                 detectedPeakCount = selectedCandidate?.peakPositions?.size
                     ?: detectedPeakCount,
                 rawIbiCount = selectedCandidate?.rawIntervals?.size
@@ -3294,6 +3398,23 @@ class PotchDataProcessor(
                     (0.70 + artifactRetentionScore * 0.30))
                 .coerceIn(0.0, 1.0)
 
+        val detectedPeakSamplePositions =
+            bestFit.peakPositions.map { relative ->
+                bufferStartSampleIndex.toDouble() + relative
+            }
+
+        val acceptedIbiEndSamplePositions =
+            bestFit.usedIntervals.map { it.endSamplePosition }
+
+        val acceptedEndPositionSet =
+            acceptedIbiEndSamplePositions.toSet()
+
+        val rejectedIbiEndSamplePositions =
+            bestFit.rawIntervals
+                .map { it.endSamplePosition }
+                .filterNot { it in acceptedEndPositionSet }
+                .distinct()
+
         val estimate = HeartRateEstimate(
             bpm = bpm,
             ibiIntervals = bestFit.usedIntervals,
@@ -3316,6 +3437,11 @@ class PotchDataProcessor(
             spectralEntropy = spectralQuality?.entropy,
             amplitudeCoefficientOfVariation = amplitudeCoefficientOfVariation,
             abruptChangeRatio = abruptChangeRatio,
+            detectedPeakSamplePositions = detectedPeakSamplePositions,
+            acceptedIbiEndSamplePositions = acceptedIbiEndSamplePositions,
+            rejectedIbiEndSamplePositions = rejectedIbiEndSamplePositions,
+            referencePeakSamplePosition =
+                detectedPeakSamplePositions.firstOrNull(),
             meanPeakInterpolationOffsetMs = bestFit.meanInterpolationOffsetMs,
             maxPeakInterpolationOffsetMs = bestFit.maxInterpolationOffsetMs
         )
