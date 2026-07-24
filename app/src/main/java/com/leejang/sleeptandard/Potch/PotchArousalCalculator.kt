@@ -141,6 +141,15 @@ data class ArousalConfig(
     // interval 튄 값 제거 기준
     val imuRespIntervalOutlierTolerance: Double = 0.40,
 
+    // RR peak 경로 안정화.
+    // PPG는 IR positive, IMU는 positive를 primary로 유지하고
+    // 일시적인 품질 차이만으로 source/polarity를 바꾸지 않는다.
+    val rrPathFailuresBeforeFallback: Int = 5,
+    val rrPathConfirmFrames: Int = 5,
+    val rrPathRecoveryConfirmFrames: Int = 5,
+    val rrPathPendingBpmTolerance: Double = 2.0,
+    val rrPathMinHoldMillis: Long = 10 * 1000L,
+
     // RR Fusion
     // 두 센서가 1 bpm 이내로 일치할 때만 weighted fusion을 허용한다.
     val rrFusionAgreeDiffBpm: Double = 1.0,
@@ -375,6 +384,37 @@ enum class PpgRespirationChannel {
     IR,
     RED
 }
+
+/**
+ * PPG RR 검출 경로 우선순위.
+ *
+ * 평상시에는 IR 위쪽 peak만 사용한다. RED와 아래쪽 peak는
+ * primary가 지속적으로 실패한 경우에만 확인 후 fallback으로 전환한다.
+ */
+private enum class PpgRespirationDetectionPath(
+    val channel: PpgRespirationChannel,
+    val inverted: Boolean,
+    val label: String
+) {
+    IR_POSITIVE(PpgRespirationChannel.IR, false, "IR positive"),
+    RED_POSITIVE(PpgRespirationChannel.RED, false, "RED positive"),
+    IR_NEGATIVE(PpgRespirationChannel.IR, true, "IR negative"),
+    RED_NEGATIVE(PpgRespirationChannel.RED, true, "RED negative")
+}
+
+/** IMU RR은 positive를 primary, negative를 fallback으로 유지한다. */
+private enum class ImuRespirationDetectionPath(
+    val inverted: Boolean,
+    val label: String
+) {
+    POSITIVE(false, "IMU positive"),
+    NEGATIVE(true, "IMU negative")
+}
+
+private data class PpgRespirationCandidates(
+    val positive: PpgRespirationResult?,
+    val negative: PpgRespirationResult?
+)
 
 /**
  * PPG에서 추출한 호흡수 계산 결과.
@@ -620,6 +660,28 @@ class PotchArousalCalculator(
      * rrFinal이 계산되고 confidence가 충분한 경우에만 저장한다.
      */
     private val respirationRateBuffer = ArrayDeque<Pair<Long, Double>>()
+
+    // PPG RR 경로 hysteresis state.
+    private var activePpgRespirationPath =
+        PpgRespirationDetectionPath.IR_POSITIVE
+    private var activePpgRespirationPathSinceMillis: Long = 0L
+    private var ppgRespirationFailureStreak: Int = 0
+    private var pendingPpgRespirationPath: PpgRespirationDetectionPath? = null
+    private var pendingPpgRespirationSuccessStreak: Int = 0
+    private var pendingPpgRespirationLastRr: Double? = null
+    private var ppgPrimaryRecoveryStreak: Int = 0
+    private var ppgPrimaryRecoveryLastRr: Double? = null
+
+    // IMU RR polarity hysteresis state.
+    private var activeImuRespirationPath =
+        ImuRespirationDetectionPath.POSITIVE
+    private var activeImuRespirationPathSinceMillis: Long = 0L
+    private var imuRespirationFailureStreak: Int = 0
+    private var pendingImuRespirationPath: ImuRespirationDetectionPath? = null
+    private var pendingImuRespirationSuccessStreak: Int = 0
+    private var pendingImuRespirationLastRr: Double? = null
+    private var imuPrimaryRecoveryStreak: Int = 0
+    private var imuPrimaryRecoveryLastRr: Double? = null
 
     /**
      * IMU G magnitude rolling buffer.
@@ -1609,6 +1671,7 @@ class PotchArousalCalculator(
         microFilteredBuffer.clear()
         microBpf.reset()
         clearRespirationVariabilityBuffers(resetSampleCounters = true)
+        resetRespirationPathSelection()
 
         // HRV는 한 개의 연속 segment 안에서만 계산한다.
         hrvIbiBuffer.clear()
@@ -1668,6 +1731,7 @@ class PotchArousalCalculator(
         respirationRateBuffer.clear()
         hrvIbiBuffer.clear()
         clearRespirationVariabilityBuffers(resetSampleCounters = true)
+        resetRespirationPathSelection()
 
         currentAnalysisSegmentId = initialSegmentId
         lastAcceptedHrvIbiSegmentId = Long.MIN_VALUE
@@ -1945,23 +2009,54 @@ class PotchArousalCalculator(
     /**
      * PPG 기반 호흡수를 계산한다.
      *
-     * IR 채널을 우선 사용하고, IR에서 유효한 호흡 파형을 찾지 못하면
-     * RED 채널을 백업으로 사용한다.
+     * IR positive를 primary로 유지하고, 지속 실패한 경우에만
+     * RED positive -> IR negative -> RED negative 순으로 확인 후 전환한다.
      */
     fun calculatePpgRespiration(): PpgRespirationResult? {
-        val irResult = calculatePpgRespirationFromBuffer(
+        val minSampleCount =
+            (config.sampleRateHz * config.ppgRespMinWindowSeconds).toInt()
+
+        // 초기 window 수집 중인 상태를 primary 실패로 누적하지 않는다.
+        if (ppgIrBuffer.size < minSampleCount && ppgRedBuffer.size < minSampleCount) {
+            return null
+        }
+
+        val irCandidates = calculatePpgRespirationCandidatesFromBuffer(
             channel = PpgRespirationChannel.IR,
             buffer = ppgIrBuffer
         )
 
-        if (irResult != null) {
-            return irResult
+        var redCandidatesCalculated = false
+        var redCandidates: PpgRespirationCandidates? = null
+
+        fun candidateFor(
+            path: PpgRespirationDetectionPath
+        ): PpgRespirationResult? {
+            val candidates =
+                when (path.channel) {
+                    PpgRespirationChannel.IR -> irCandidates
+                    PpgRespirationChannel.RED -> {
+                        if (!redCandidatesCalculated) {
+                            redCandidates = calculatePpgRespirationCandidatesFromBuffer(
+                                channel = PpgRespirationChannel.RED,
+                                buffer = ppgRedBuffer
+                            )
+                            redCandidatesCalculated = true
+                        }
+                        redCandidates
+                    }
+                }
+
+            return if (path.inverted) {
+                candidates?.negative
+            } else {
+                candidates?.positive
+            }
         }
 
-        // IR에서 호흡 파형 검출이 실패하면 RED를 백업으로 사용
-        return calculatePpgRespirationFromBuffer(
-            channel = PpgRespirationChannel.RED,
-            buffer = ppgRedBuffer
+        return selectStablePpgRespirationPath(
+            candidateFor = ::candidateFor,
+            nowMillis = System.currentTimeMillis()
         )
     }
 
@@ -1978,12 +2073,12 @@ class PotchArousalCalculator(
      * 지정된 PPG 채널 buffer에서 호흡 파형을 추출한다.
      *
      * 최근 window를 가져와 DC 제거 후 0.1~0.5Hz BPF를 적용하고,
-     * 양/음 peak 방향을 모두 시도해 더 품질이 좋은 결과를 선택한다.
+     * 양/음 후보를 만든다. 실제 선택은 IR positive primary 기반 hysteresis가 담당한다.
      */
-    private fun calculatePpgRespirationFromBuffer(
+    private fun calculatePpgRespirationCandidatesFromBuffer(
         channel: PpgRespirationChannel,
         buffer: ArrayDeque<Double>
-    ): PpgRespirationResult? {
+    ): PpgRespirationCandidates? {
         val windowSampleCount =
             (config.sampleRateHz * config.ppgRespWindowSeconds).toInt()
 
@@ -2045,8 +2140,8 @@ class PotchArousalCalculator(
             return null
         }
 
-        // 5. 양의 peak와 음의 peak 둘 다 시도
-        // PPG 호흡 파형은 부착/압박/개인차에 따라 방향이 뒤집혀 보일 수 있음.
+        // 5. 양의 peak와 음의 peak 후보를 모두 생성한다.
+        // 매 frame quality 경쟁은 하지 않고 stable path selector가 primary/fallback을 결정한다.
         val positiveResult = calculateRrFromRespWave(
             channel = channel,
             filtered = filtered,
@@ -2065,9 +2160,9 @@ class PotchArousalCalculator(
             windowStartSamplePosition = windowStartSamplePosition
         )
 
-        return chooseBetterRespirationResult(
-            positiveResult,
-            negativeResult
+        return PpgRespirationCandidates(
+            positive = positiveResult,
+            negative = negativeResult
         )
     }
 
@@ -2280,14 +2375,132 @@ class PotchArousalCalculator(
      * 부착 상태에 따라 PPG 호흡 파형 방향이 뒤집힐 수 있으므로
      * 두 방향을 모두 계산한 뒤 qualityScore가 높은 쪽을 사용한다.
      */
-    private fun chooseBetterRespirationResult(
-        a: PpgRespirationResult?,
-        b: PpgRespirationResult?
+    private fun selectStablePpgRespirationPath(
+        candidateFor: (PpgRespirationDetectionPath) -> PpgRespirationResult?,
+        nowMillis: Long
     ): PpgRespirationResult? {
-        if (a == null) return b
-        if (b == null) return a
+        val primaryPath = PpgRespirationDetectionPath.IR_POSITIVE
 
-        return if (a.qualityScore >= b.qualityScore) a else b
+        // fallback 사용 중에는 IR positive가 연속적으로 복구됐을 때만 primary로 돌아간다.
+        if (activePpgRespirationPath != primaryPath) {
+            val primaryCandidate = candidateFor(primaryPath)
+
+            if (primaryCandidate != null) {
+                if (isPendingRrConsistent(
+                        previousRr = ppgPrimaryRecoveryLastRr,
+                        currentRr = primaryCandidate.rrBpm
+                    )) {
+                    ppgPrimaryRecoveryStreak += 1
+                } else {
+                    ppgPrimaryRecoveryStreak = 1
+                }
+                ppgPrimaryRecoveryLastRr = primaryCandidate.rrBpm
+
+                if (
+                    ppgPrimaryRecoveryStreak >= config.rrPathRecoveryConfirmFrames &&
+                    canSwitchRespirationPath(
+                        activeSinceMillis = activePpgRespirationPathSinceMillis,
+                        nowMillis = nowMillis
+                    )
+                ) {
+                    activatePpgRespirationPath(primaryPath, nowMillis)
+                    return primaryCandidate
+                }
+            } else {
+                ppgPrimaryRecoveryStreak = 0
+                ppgPrimaryRecoveryLastRr = null
+            }
+        }
+
+        val activeCandidate = candidateFor(activePpgRespirationPath)
+        if (activeCandidate != null) {
+            ppgRespirationFailureStreak = 0
+            clearPendingPpgRespirationPath()
+            return activeCandidate
+        }
+
+        ppgRespirationFailureStreak += 1
+        if (ppgRespirationFailureStreak < config.rrPathFailuresBeforeFallback) {
+            // 경로는 유지하되 오래된 RR을 새 결과처럼 재사용하지 않는다.
+            return null
+        }
+
+        val fallbackOrder = listOf(
+            PpgRespirationDetectionPath.RED_POSITIVE,
+            PpgRespirationDetectionPath.IR_NEGATIVE,
+            PpgRespirationDetectionPath.RED_NEGATIVE
+        )
+
+        var fallbackPath: PpgRespirationDetectionPath? = null
+        var fallbackCandidate: PpgRespirationResult? = null
+
+        for (path in fallbackOrder) {
+            if (path == activePpgRespirationPath) continue
+
+            val candidate = candidateFor(path)
+            if (candidate != null) {
+                fallbackPath = path
+                fallbackCandidate = candidate
+                break
+            }
+        }
+
+        if (fallbackPath == null || fallbackCandidate == null) {
+            clearPendingPpgRespirationPath()
+            return null
+        }
+
+        registerPendingPpgRespirationCandidate(
+            path = fallbackPath,
+            rrBpm = fallbackCandidate.rrBpm
+        )
+
+        if (
+            pendingPpgRespirationSuccessStreak >= config.rrPathConfirmFrames &&
+            canSwitchRespirationPath(
+                activeSinceMillis = activePpgRespirationPathSinceMillis,
+                nowMillis = nowMillis
+            )
+        ) {
+            activatePpgRespirationPath(fallbackPath, nowMillis)
+            return fallbackCandidate
+        }
+
+        return null
+    }
+
+    private fun registerPendingPpgRespirationCandidate(
+        path: PpgRespirationDetectionPath,
+        rrBpm: Double
+    ) {
+        val samePath = pendingPpgRespirationPath == path
+        val consistent = samePath && isPendingRrConsistent(
+            previousRr = pendingPpgRespirationLastRr,
+            currentRr = rrBpm
+        )
+
+        pendingPpgRespirationSuccessStreak =
+            if (consistent) pendingPpgRespirationSuccessStreak + 1 else 1
+        pendingPpgRespirationPath = path
+        pendingPpgRespirationLastRr = rrBpm
+    }
+
+    private fun activatePpgRespirationPath(
+        path: PpgRespirationDetectionPath,
+        nowMillis: Long
+    ) {
+        activePpgRespirationPath = path
+        activePpgRespirationPathSinceMillis = nowMillis
+        ppgRespirationFailureStreak = 0
+        ppgPrimaryRecoveryStreak = 0
+        ppgPrimaryRecoveryLastRr = null
+        clearPendingPpgRespirationPath()
+    }
+
+    private fun clearPendingPpgRespirationPath() {
+        pendingPpgRespirationPath = null
+        pendingPpgRespirationSuccessStreak = 0
+        pendingPpgRespirationLastRr = null
     }
 
     /**
@@ -2371,7 +2584,7 @@ class PotchArousalCalculator(
             return null
         }
 
-        // 5. 양의 peak / 음의 peak 둘 다 시도
+        // 5. 양의 peak / 음의 peak 후보를 만들고 stable polarity selector에 전달
         val positiveResult = calculateRrFromImuRespWave(
             filtered = filtered,
             usableStartIndex = warmupSamples,
@@ -2388,9 +2601,10 @@ class PotchArousalCalculator(
             windowStartSamplePosition = windowStartSamplePosition
         )
 
-        return chooseBetterImuRespirationResult(
-            positiveResult,
-            negativeResult
+        return selectStableImuRespirationPath(
+            positiveResult = positiveResult,
+            negativeResult = negativeResult,
+            nowMillis = System.currentTimeMillis()
         )
     }
     /**
@@ -2611,19 +2825,158 @@ class PotchArousalCalculator(
     }
 
     /**
-     * 양의 peak와 음의 peak 중 더 신뢰할 수 있는 IMU 호흡 결과를 선택한다.
-     *
-     * 센서 부착 방향이나 자세에 따라 호흡 파형 부호가 바뀔 수 있어
-     * 두 방향 중 qualityScore가 높은 결과를 사용한다.
+     * IMU positive를 primary로 유지하고, 연속 실패와 연속 확인을 거친 경우에만
+     * negative fallback으로 전환한다. 순간 quality 차이로는 polarity를 바꾸지 않는다.
      */
-    private fun chooseBetterImuRespirationResult(
-        a: ImuRespirationResult?,
-        b: ImuRespirationResult?
+    private fun selectStableImuRespirationPath(
+        positiveResult: ImuRespirationResult?,
+        negativeResult: ImuRespirationResult?,
+        nowMillis: Long
     ): ImuRespirationResult? {
-        if (a == null) return b
-        if (b == null) return a
+        fun candidateFor(path: ImuRespirationDetectionPath): ImuRespirationResult? {
+            return if (path.inverted) negativeResult else positiveResult
+        }
 
-        return if (a.qualityScore >= b.qualityScore) a else b
+        val primaryPath = ImuRespirationDetectionPath.POSITIVE
+
+        if (activeImuRespirationPath != primaryPath) {
+            val primaryCandidate = candidateFor(primaryPath)
+
+            if (primaryCandidate != null) {
+                if (isPendingRrConsistent(
+                        previousRr = imuPrimaryRecoveryLastRr,
+                        currentRr = primaryCandidate.rrBpm
+                    )) {
+                    imuPrimaryRecoveryStreak += 1
+                } else {
+                    imuPrimaryRecoveryStreak = 1
+                }
+                imuPrimaryRecoveryLastRr = primaryCandidate.rrBpm
+
+                if (
+                    imuPrimaryRecoveryStreak >= config.rrPathRecoveryConfirmFrames &&
+                    canSwitchRespirationPath(
+                        activeSinceMillis = activeImuRespirationPathSinceMillis,
+                        nowMillis = nowMillis
+                    )
+                ) {
+                    activateImuRespirationPath(primaryPath, nowMillis)
+                    return primaryCandidate
+                }
+            } else {
+                imuPrimaryRecoveryStreak = 0
+                imuPrimaryRecoveryLastRr = null
+            }
+        }
+
+        val activeCandidate = candidateFor(activeImuRespirationPath)
+        if (activeCandidate != null) {
+            imuRespirationFailureStreak = 0
+            clearPendingImuRespirationPath()
+            return activeCandidate
+        }
+
+        imuRespirationFailureStreak += 1
+        if (imuRespirationFailureStreak < config.rrPathFailuresBeforeFallback) {
+            return null
+        }
+
+        val fallbackPath =
+            if (activeImuRespirationPath == ImuRespirationDetectionPath.POSITIVE) {
+                ImuRespirationDetectionPath.NEGATIVE
+            } else {
+                ImuRespirationDetectionPath.POSITIVE
+            }
+
+        val fallbackCandidate = candidateFor(fallbackPath)
+        if (fallbackCandidate == null) {
+            clearPendingImuRespirationPath()
+            return null
+        }
+
+        registerPendingImuRespirationCandidate(
+            path = fallbackPath,
+            rrBpm = fallbackCandidate.rrBpm
+        )
+
+        if (
+            pendingImuRespirationSuccessStreak >= config.rrPathConfirmFrames &&
+            canSwitchRespirationPath(
+                activeSinceMillis = activeImuRespirationPathSinceMillis,
+                nowMillis = nowMillis
+            )
+        ) {
+            activateImuRespirationPath(fallbackPath, nowMillis)
+            return fallbackCandidate
+        }
+
+        return null
+    }
+
+    private fun registerPendingImuRespirationCandidate(
+        path: ImuRespirationDetectionPath,
+        rrBpm: Double
+    ) {
+        val samePath = pendingImuRespirationPath == path
+        val consistent = samePath && isPendingRrConsistent(
+            previousRr = pendingImuRespirationLastRr,
+            currentRr = rrBpm
+        )
+
+        pendingImuRespirationSuccessStreak =
+            if (consistent) pendingImuRespirationSuccessStreak + 1 else 1
+        pendingImuRespirationPath = path
+        pendingImuRespirationLastRr = rrBpm
+    }
+
+    private fun activateImuRespirationPath(
+        path: ImuRespirationDetectionPath,
+        nowMillis: Long
+    ) {
+        activeImuRespirationPath = path
+        activeImuRespirationPathSinceMillis = nowMillis
+        imuRespirationFailureStreak = 0
+        imuPrimaryRecoveryStreak = 0
+        imuPrimaryRecoveryLastRr = null
+        clearPendingImuRespirationPath()
+    }
+
+    private fun clearPendingImuRespirationPath() {
+        pendingImuRespirationPath = null
+        pendingImuRespirationSuccessStreak = 0
+        pendingImuRespirationLastRr = null
+    }
+
+    private fun isPendingRrConsistent(
+        previousRr: Double?,
+        currentRr: Double
+    ): Boolean {
+        return previousRr == null ||
+                abs(currentRr - previousRr) <= config.rrPathPendingBpmTolerance
+    }
+
+    private fun canSwitchRespirationPath(
+        activeSinceMillis: Long,
+        nowMillis: Long
+    ): Boolean {
+        return activeSinceMillis <= 0L ||
+                nowMillis - activeSinceMillis >= config.rrPathMinHoldMillis
+    }
+
+    private fun resetRespirationPathSelection() {
+        activePpgRespirationPath = PpgRespirationDetectionPath.IR_POSITIVE
+        activePpgRespirationPathSinceMillis = 0L
+        ppgRespirationFailureStreak = 0
+        ppgPrimaryRecoveryStreak = 0
+        ppgPrimaryRecoveryLastRr = null
+        clearPendingPpgRespirationPath()
+
+        activeImuRespirationPath = ImuRespirationDetectionPath.POSITIVE
+        activeImuRespirationPathSinceMillis = 0L
+        imuRespirationFailureStreak = 0
+        imuPrimaryRecoveryStreak = 0
+        imuPrimaryRecoveryLastRr = null
+        clearPendingImuRespirationPath()
     }
 
     /********************* //RR from IMU ********************/
@@ -2642,6 +2995,12 @@ class PotchArousalCalculator(
     ): RrFusionResult {
         val ppgValid = ppg?.rrBpm?.let { isValidRr(it) } == true
         val imuValid = imu?.rrBpm?.let { isValidRr(it) } == true
+        val ppgPathLabel = ppg?.let {
+            "${it.channel.name} ${if (it.inverted) "negative" else "positive"}"
+        }
+        val imuPathLabel = imu?.let {
+            if (it.inverted) "IMU negative" else "IMU positive"
+        }
 
         if (!ppgValid && !imuValid) {
             return RrFusionResult(
@@ -2653,7 +3012,8 @@ class PotchArousalCalculator(
                 imuQuality = imu?.qualityScore,
                 diffBpm = null,
                 confidence = 0.0,
-                log = "RR fusion failed: no valid PPG/IMU RR"
+                log = "RR fusion failed: no valid PPG/IMU RR " +
+                        "(ppgPath=$ppgPathLabel, imuPath=$imuPathLabel)"
             )
         }
 
@@ -2667,7 +3027,7 @@ class PotchArousalCalculator(
                 imuQuality = imu.qualityScore,
                 diffBpm = null,
                 confidence = (imu.qualityScore * 0.8).coerceIn(0.0, 1.0),
-                log = "RR fusion: IMU only (PPG unavailable)"
+                log = "RR fusion: IMU only (PPG unavailable, path=$imuPathLabel)"
             )
         }
 
@@ -2681,7 +3041,7 @@ class PotchArousalCalculator(
                 imuQuality = imu?.qualityScore,
                 diffBpm = null,
                 confidence = ppg.qualityScore.coerceIn(0.0, 1.0),
-                log = "RR fusion: PPG only"
+                log = "RR fusion: PPG only (path=$ppgPathLabel)"
             )
         }
 
@@ -2743,7 +3103,8 @@ class PotchArousalCalculator(
                 diffBpm = diff,
                 confidence = confidence,
                 log = "RR fusion: weighted, diff=${"%.2f".format(diff)}, " +
-                        "ppgQ=${"%.2f".format(ppgQuality)}, imuQ=${"%.2f".format(imuQuality)}"
+                        "ppgQ=${"%.2f".format(ppgQuality)}, imuQ=${"%.2f".format(imuQuality)}, " +
+                        "ppgPath=$ppgPathLabel, imuPath=$imuPathLabel"
             )
         }
 
@@ -2759,7 +3120,8 @@ class PotchArousalCalculator(
                 imuQuality = imuQuality,
                 diffBpm = diff,
                 confidence = (imuQuality * 0.7).coerceIn(0.0, 1.0),
-                log = "RR fusion: disagree, IMU used because PPG quality is low"
+                log = "RR fusion: disagree, IMU used because PPG quality is low " +
+                        "(path=$imuPathLabel)"
             )
         }
 
