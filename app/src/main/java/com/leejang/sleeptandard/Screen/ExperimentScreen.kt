@@ -363,10 +363,6 @@ fun ExperimentScreen(
             isConnected = bleState.isConnected
         )
 */
-        ImuRealtimeModelCard(
-            imuPose = latestImuPose,
-            isConnected = bleState.isConnected
-        )
 
         Text(
             text = "Micro Movement BPF",
@@ -401,9 +397,6 @@ fun ExperimentScreen(
             valueRange = 1.0f..10.0f
         )
 
-        ArousalCalculationStatusCard(
-            arousalState = arousalState
-        )
 
         ArousalStateCard(
             arousalState = arousalState
