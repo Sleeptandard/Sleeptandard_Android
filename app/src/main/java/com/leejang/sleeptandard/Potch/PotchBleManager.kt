@@ -10,6 +10,7 @@ import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
+import android.bluetooth.BluetoothStatusCodes
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
 import android.content.Context
@@ -55,7 +56,11 @@ data class PotchBleState(
     val lastLog: String = "BLE idle",
 
     // 마지막으로 저장된 로그 파일 경로
-    val lastSavedLogPath: String? = null
+    val lastSavedLogPath: String? = null,
+
+    // 발견된 Data Characteristic의 Write 지원 여부
+    val supportsWrite: Boolean = false,
+    val supportsWriteWithoutResponse: Boolean = false
 )
 
 /**
@@ -84,7 +89,7 @@ class PotchBleManager(
          * Android 앱은 연결 후 이 UUID를 가진 Service를 찾아야 한다.
          */
         val SERVICE_UUID: UUID =
-            UUID.fromString("00001234-0000-1000-8000-00805F9B34FB")
+            UUID.fromString("12345678-1234-5678-1234-56789abcdef0")
 
         /**
          * Potch 펌웨어에 정의된 BLE Characteristic UUID.
@@ -92,7 +97,7 @@ class PotchBleManager(
          * 실제 센서 데이터가 notify로 들어오는 통로다.
          */
         val CHAR_UUID: UUID =
-            UUID.fromString("00005678-0000-1000-8000-00805F9B34FB")
+            UUID.fromString("12345678-1234-5678-1234-56789abcdef1")
 
         /**
          * CCCD(Client Characteristic Configuration Descriptor) UUID.
@@ -113,12 +118,11 @@ class PotchBleManager(
         /**
          * 요청할 MTU 크기.
          *
-         * Potch는 한 번에 204 bytes notification을 보내므로,
-         * Android 기본 MTU 23으로는 부족하다.
-         *
-         * 247 정도로 요청하면 ATT payload를 충분히 크게 받을 수 있다.
+         * Potch510은 142 bytes notification을 보내므로 Android 기본 MTU 23으로는 부족하다.
+         * ATT notification payload는 MTU-3이므로 최소 MTU 145가 필요하며,
+         * 명세 권장값에 따라 200을 요청한다.
          */
-        private const val TARGET_MTU = 247
+        private const val TARGET_MTU = 200
     }
 
     // 메인 스레드에서 재연결 딜레이 작업을 실행하기 위한 Handler
@@ -367,8 +371,8 @@ class PotchBleManager(
 
                     gatt.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH)
 
-                    // Potch는 204 bytes notification을 보내므로 기본 MTU 23으로는 부족하다.
-                    // 먼저 MTU를 247로 요청하고, MTU 변경이 완료되면 서비스 탐색을 시작한다.
+                    // Potch510은 142B payload를 전송하므로 최소 MTU 145가 필요하다.
+                    // 명세 권장값인 200을 요청하고 완료 후 서비스 탐색을 시작한다.
                     val requested = gatt.requestMtu(TARGET_MTU)
 
                     // MTU 요청 자체가 실패하면 그냥 바로 서비스 탐색을 진행한다.
@@ -476,8 +480,33 @@ class PotchBleManager(
                 return
             }
 
-            // 나중에 참조할 수 있도록 저장
+            val supportsNotify =
+                characteristic.properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY != 0
+            val supportsWrite =
+                characteristic.properties and BluetoothGattCharacteristic.PROPERTY_WRITE != 0
+            val supportsWriteWithoutResponse =
+                characteristic.properties and
+                        BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE != 0
+
+            if (!supportsNotify) {
+                error("Data characteristic does not support Notify: $CHAR_UUID")
+                return
+            }
+
+            val propertyMsg =
+                "Characteristic properties: notify=$supportsNotify, " +
+                        "write=$supportsWrite, writeNoResponse=$supportsWriteWithoutResponse"
+            Log.i(TAG, propertyMsg)
+            dataLogger.logDebug(TAG, propertyMsg, "I")
+
+            // 나중에 명령 Write와 Notify 구독에 사용할 수 있도록 저장한다.
             notifyCharacteristic = characteristic
+            _state.update {
+                it.copy(
+                    supportsWrite = supportsWrite,
+                    supportsWriteWithoutResponse = supportsWriteWithoutResponse
+                )
+            }
 
             // 이 characteristic의 notify를 활성화한다.
             enableNotification(gatt, characteristic)
@@ -561,6 +590,30 @@ class PotchBleManager(
                 // 수신된 raw byte 데이터를 파서로 전달
                 dataProcessor.processIncomingData(value)
             }
+        }
+
+
+        override fun onCharacteristicWrite(
+            gatt: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+            status: Int
+        ) {
+            if (characteristic.uuid != CHAR_UUID) return
+
+            val message = if (status == BluetoothGatt.GATT_SUCCESS) {
+                "Potch command write completed"
+            } else {
+                "Potch command write failed: status=$status"
+            }
+            dataLogger.logConnectionEvent(
+                event = if (status == BluetoothGatt.GATT_SUCCESS) {
+                    "command_write_success"
+                } else {
+                    "command_write_failed"
+                },
+                message = message
+            )
+            if (status == BluetoothGatt.GATT_SUCCESS) log(message) else error(message)
         }
     }
 
@@ -741,6 +794,101 @@ class PotchBleManager(
     }
 
     /**
+     * Potch510 Data Characteristic으로 명령 payload를 전송한다.
+     *
+     * 최신 guide는 characteristic이 Write/Write Without Response를 지원한다고 명시하지만
+     * 명령 opcode와 payload 형식은 제공하지 않는다. 따라서 이 함수는 raw payload 전송만
+     * 담당하며, 수동 로깅 트리거 등의 실제 명령 바이트는 펌웨어 명세가 정해진 뒤 호출부에서 넣는다.
+     */
+    @SuppressLint("MissingPermission")
+    fun writeCommand(
+        payload: ByteArray,
+        withoutResponse: Boolean = true
+    ): Boolean {
+        if (payload.isEmpty()) {
+            error("Potch command payload is empty")
+            return false
+        }
+
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            appContext.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            error("Missing BLUETOOTH_CONNECT permission")
+            return false
+        }
+
+        val activeGatt = gatt ?: run {
+            error("Cannot write Potch command: GATT is not connected")
+            return false
+        }
+        val characteristic = notifyCharacteristic ?: run {
+            error("Cannot write Potch command: data characteristic is unavailable")
+            return false
+        }
+
+        val requestedWriteType = if (withoutResponse) {
+            BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+        } else {
+            BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+        }
+        val requiredProperty = if (withoutResponse) {
+            BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE
+        } else {
+            BluetoothGattCharacteristic.PROPERTY_WRITE
+        }
+
+        if (characteristic.properties and requiredProperty == 0) {
+            error(
+                if (withoutResponse) {
+                    "Potch characteristic does not support Write Without Response"
+                } else {
+                    "Potch characteristic does not support Write"
+                }
+            )
+            return false
+        }
+
+        val started = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            activeGatt.writeCharacteristic(
+                characteristic,
+                payload,
+                requestedWriteType
+            ) == BluetoothStatusCodes.SUCCESS
+        } else {
+            @Suppress("DEPRECATION")
+            characteristic.writeType = requestedWriteType
+            @Suppress("DEPRECATION")
+            characteristic.value = payload.copyOf()
+            @Suppress("DEPRECATION")
+            activeGatt.writeCharacteristic(characteristic)
+        }
+
+        if (started) {
+            dataLogger.logDebug(
+                TAG,
+                "Potch command write started: bytes=${payload.size}, withoutResponse=$withoutResponse",
+                "I"
+            )
+        } else {
+            error("Potch command write could not be started")
+        }
+        return started
+    }
+
+    /**
+     * ble(3).c의 rx_write_cb가 처리하는 LED/Vibe 트리거 명령을 전송한다.
+     * iOS 구현과 동일하게 0x01 한 바이트를 Write Without Response로 보낸다.
+     */
+    fun triggerLedFlash(): Boolean {
+        return writeCommand(
+            payload = byteArrayOf(0x01),
+            withoutResponse = true
+        )
+    }
+
+    /**
      * PotchBleManager를 더 이상 사용하지 않을 때 호출한다.
      *
      * ViewModel의 onCleared() 같은 곳에서 호출하면 좋다.
@@ -816,6 +964,12 @@ class PotchBleManager(
             // GATT와 characteristic 참조 제거
             gatt = null
             notifyCharacteristic = null
+            _state.update {
+                it.copy(
+                    supportsWrite = false,
+                    supportsWriteWithoutResponse = false
+                )
+            }
         }
     }
 

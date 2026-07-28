@@ -52,6 +52,16 @@ class PotchBleForegroundService : Service() {
 
         const val EXTRA_MICRO_LOW_CUT = "extra_micro_low_cut"
         const val EXTRA_MICRO_HIGH_CUT = "extra_micro_high_cut"
+
+        /** Potch510 Data Characteristic에 raw command payload를 전달한다. */
+        const val ACTION_WRITE_COMMAND =
+            "com.leejang.sleeptandard.Potch.ACTION_WRITE_COMMAND"
+        const val EXTRA_COMMAND_PAYLOAD = "extra_command_payload"
+        const val EXTRA_COMMAND_WITHOUT_RESPONSE = "extra_command_without_response"
+
+        /** ble(3).c 기반 LED/Vibe 트리거 명령(0x01) 전송. */
+        const val ACTION_TRIGGER_LED_FLASH =
+            "com.leejang.sleeptandard.Potch.ACTION_TRIGGER_LED_FLASH"
         /**
          * Potch 수신 시작 명령.
          *
@@ -102,15 +112,15 @@ class PotchBleForegroundService : Service() {
     /**
      * Potch 수신 데이터를 CSV 파일로 저장하는 객체.
      *
-     * Super Frame이 들어올 때마다 내부 저장소 파일에 append한다.
+     * 완성된 1초 Burst가 들어올 때마다 내부 저장소 파일에 append한다.
      */
     private var dataLogger: PotchDataLogger? = null
 
     /**
      * BLE로 들어온 raw byte packet을 실제 SensorData로 파싱하는 객체.
      *
-     * 204B mini packet을 모아서 1212B super frame으로 만들고,
-     * CRC / sequence / header 검사를 수행한다.
+     * 142B 서브 패킷 8개를 모아 1초 Burst로 만들고,
+     * CRC-16 CCITT-FALSE / uint16 sequence / header 검사를 수행한다.
      */
     private var dataProcessor: PotchDataProcessor? = null
 
@@ -179,6 +189,42 @@ class PotchBleForegroundService : Service() {
                     "ACTION_UPDATE_MICRO_BPF low=$low high=$high",
                     "I"
                 )
+            }
+            ACTION_TRIGGER_LED_FLASH -> {
+                val started = bleManager?.triggerLedFlash() ?: false
+                dataLogger?.logDebug(
+                    TAG,
+                    "ACTION_TRIGGER_LED_FLASH command=0x01, started=$started",
+                    if (started) "I" else "E"
+                )
+            }
+
+            ACTION_WRITE_COMMAND -> {
+                val payload = intent.getByteArrayExtra(EXTRA_COMMAND_PAYLOAD)
+                val withoutResponse = intent.getBooleanExtra(
+                    EXTRA_COMMAND_WITHOUT_RESPONSE,
+                    true
+                )
+
+                if (payload == null || payload.isEmpty()) {
+                    dataLogger?.logDebug(
+                        TAG,
+                        "ACTION_WRITE_COMMAND ignored: payload is null or empty",
+                        "W"
+                    )
+                } else {
+                    // 위 null/empty 검사 이후 payload는 ByteArray로 smart cast된다.
+                    val started = bleManager?.writeCommand(
+                        payload = payload,
+                        withoutResponse = withoutResponse
+                    ) ?: false
+                    dataLogger?.logDebug(
+                        TAG,
+                        "ACTION_WRITE_COMMAND bytes=${payload.size}, " +
+                                "withoutResponse=$withoutResponse, started=$started",
+                        if (started) "I" else "E"
+                    )
+                }
             }
             ACTION_START -> {
                 isStoppingService = false

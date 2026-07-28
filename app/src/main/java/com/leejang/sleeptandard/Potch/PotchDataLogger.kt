@@ -5,14 +5,12 @@ import android.content.Context
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
-import androidx.annotation.RequiresApi
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-
 
 data class InternalPotchLogFile(
     val name: String,
@@ -21,157 +19,89 @@ data class InternalPotchLogFile(
     val lastModifiedMillis: Long
 )
 
-/**
- * Potch Super Frame 로그와 디버그 로그를 내부 저장소에 실시간 append로 저장하는 클래스.
- *
- * 저장 파일:
- * 1. potch_super_frame_log_yyyyMMdd_HHmmss.csv
- *    - 실제 Potch Super Frame 데이터 저장
- *
- * 2. potch_debug_log_yyyyMMdd_HHmmss.txt
- *    - BLE 상태, Service 상태, 재연결 상태 같은 디버그 로그 저장
- *
- * 3. potch_arousal_state_log_yyyyMMdd_HHmmss.csv
- *    - 각 Super Frame마다 계산된 ArousalState 저장
- *
- * 4. potch_hr_diagnostic_log_yyyyMMdd_HHmmss.csv
- *    - HR 계산 성공/실패 사유와 PPG/IMU 품질값 저장
- *
- * 종료 및 저장 시:
- * - 네 파일을 모두 Download/PotchLogs 폴더로 복사한다.
- */
-class PotchDataLogger(
-    context: Context
-) {
+/** Potch510 Green PPG/IMU 수신 및 분석 로그를 관리한다. */
+class PotchDataLogger(context: Context) {
     private val appContext = context.applicationContext
-
-    // 현재 로그 기록 중인지 여부
     private var isLogging = false
+    private var workingBurstFile: File? = null
+    private var workingDebugFile: File? = null
+    private var workingArousalFile: File? = null
+    private var workingHeartRateFile: File? = null
 
-    // Super Frame CSV 로그 파일
-    private var workingLogFile: File? = null
-
-    // TAG 기반 디버그 TXT 로그 파일
-    private var workingDebugLogFile: File? = null
-
-    // ArousalState 전용 CSV 로그 파일
-    private var workingArousalLogFile: File? = null
-
-    // HR 계산 상세 진단 전용 CSV 로그 파일
-    private var workingHeartRateDiagnosticLogFile: File? = null
-
-    // 마지막으로 Downloads에 저장/복사된 CSV 경로
     var lastSavedFilePath: String? = null
         private set
 
-    /**
-     * 새 로그 세션을 시작한다.
-     *
-     * 이 함수는 항상 새 파일을 만든다.
-     * 재연결 상황에서는 새 파일을 만들지 않도록 startIfNeeded()를 사용해야 한다.
-     */
+    @Synchronized
     fun start() {
-        isLogging = true
-        lastSavedFilePath = null
+        val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+        val directory = File(appContext.filesDir, INTERNAL_LOG_DIR_NAME).apply { mkdirs() }
 
-        val timestamp = SimpleDateFormat(
-            "yyyyMMdd_HHmmss",
-            Locale.getDefault()
-        ).format(Date())
+        workingBurstFile = File(directory, "potch_burst_log_$timestamp.csv")
+        workingDebugFile = File(directory, "potch_debug_log_$timestamp.txt")
+        workingArousalFile = File(directory, "potch_arousal_state_log_$timestamp.csv")
+        workingHeartRateFile = File(directory, "potch_hr_diagnostic_log_$timestamp.csv")
 
-        val dir = File(appContext.filesDir, INTERNAL_LOG_DIR_NAME)
-        if (!dir.exists()) {
-            dir.mkdirs()
-        }
-
-        workingLogFile = File(dir, "potch_super_frame_log_$timestamp.csv")
-        workingDebugLogFile = File(dir, "potch_debug_log_$timestamp.txt")
-        workingArousalLogFile = File(dir, "potch_arousal_state_log_$timestamp.csv")
-        workingHeartRateDiagnosticLogFile =
-            File(dir, "potch_hr_diagnostic_log_$timestamp.csv")
-
-        workingDebugLogFile?.writeText(
-            text = "Potch debug log started at $timestamp\n",
-            charset = Charsets.UTF_8
-        )
-
-        workingLogFile?.writeText(
-            text = UTF8_BOM + listOf(
+        workingBurstFile?.writeText(
+            UTF8_BOM + listOf(
                 "phone_time",
                 "timestamp",
-                "super_frame_hex",
+                "sequence_start",
+                "sequence_end",
+                "packet_count",
+                "burst_hex",
                 "complete",
                 "miss_packet_num",
                 "error_log"
             ).joinToString(",") + "\n",
-            charset = Charsets.UTF_8
+            Charsets.UTF_8
         )
 
-        workingArousalLogFile?.writeText(
-            text = UTF8_BOM + listOf(
+        workingDebugFile?.writeText(
+            "Potch debug log started at $timestamp\n",
+            Charsets.UTF_8
+        )
+
+        workingArousalFile?.writeText(
+            UTF8_BOM + listOf(
                 "phone_time",
                 "timestamp",
-
                 "final_wake_score",
                 "is_wake_timing_candidate",
-
                 "micro_movement_variance",
                 "micro_movement_score",
-
-                "rr_from_ppg",
+                "rr_from_green_ppg",
                 "rr_from_imu",
                 "rr_final",
                 "rr_score",
                 "rr_raw_score",
-                "rr_fusion_source",
-                "rr_fusion_confidence",
-                "rr_fusion_log",
-
-                "rr_analysis_segment_id",
-                "ppg_resp_peak_sample_positions",
-                "ppg_resp_intervals_sec",
-                "imu_resp_peak_sample_positions",
-                "imu_resp_intervals_sec",
-
+                "rr_source",
+                "rr_confidence",
+                "rr_log",
                 "rrv_rmssd_sec",
-                "rrv_rmssd_ms",
                 "rrv_score",
                 "rrv_source",
-                "rrv_quality",
-                "rrv_from_ppg_rmssd_sec",
-                "rrv_from_imu_rmssd_sec",
-                "rrv_ppg_interval_count",
-                "rrv_imu_interval_count",
-                "rrv_ppg_quality",
-                "rrv_imu_quality",
-
                 "hr_bpm",
                 "hr_gradient",
                 "hr_score",
-
                 "hrv_rmssd_sec",
-                "hrv_rmssd_ms",
                 "hrv_lf",
                 "hrv_hf",
                 "hrv_lf_hf",
                 "hrv_score",
                 "hrv_quality",
-                "hrv_log",
-
                 "skin_temperature_celsius",
                 "skin_temperature_gradient",
                 "skin_temperature_score",
-
                 "complete",
                 "miss_packet_num",
                 "error_log",
                 "last_log"
             ).joinToString(",") + "\n",
-            charset = Charsets.UTF_8
+            Charsets.UTF_8
         )
 
-        workingHeartRateDiagnosticLogFile?.writeText(
-            text = UTF8_BOM + listOf(
+        workingHeartRateFile?.writeText(
+            UTF8_BOM + listOf(
                 "phone_time",
                 "timestamp",
                 "analysis_segment_id",
@@ -180,658 +110,325 @@ class PotchDataLogger(
                 "message",
                 "heart_rate_fresh",
                 "heart_rate_age_ms",
-
-                "fusion_source",
-                "fusion_log",
-
-                "ir_processing_state",
-                "ir_calculated_bpm",
-                "ir_quality_score",
-                "ir_accepted_interval_ratio",
-                "ir_raw_sdsd_ms",
-
-                "red_processing_state",
-                "red_calculated_bpm",
-                "red_quality_score",
-                "red_accepted_interval_ratio",
-                "red_raw_sdsd_ms",
-
-                "combined_processing_state",
-                "combined_calculated_bpm",
-                "combined_quality_score",
-                "combined_accepted_interval_ratio",
-                "combined_raw_sdsd_ms",
-
-                "window_sample_count",
-                "window_seconds",
-                "ir_dc_mean",
-                "ir_min",
-                "ir_max",
+                "source",
+                "source_log",
+                "green_dc_mean",
+                "green_min",
+                "green_max",
                 "ac_robust_amplitude",
-                "amplitude_cv",
-                "spectral_concentration",
-                "spectral_entropy",
-                "abrupt_change_ratio",
                 "selected_peak_threshold",
-                "selected_threshold_percent",
                 "selected_polarity",
                 "detected_peak_count",
                 "raw_ibi_count",
                 "valid_ibi_count",
                 "accepted_interval_ratio",
                 "raw_sdsd_ms",
-                "raw_ibi_cv",
-                "physiological_interval_ratio",
-                "raw_interval_quality_score",
-                "sdsd_ms",
                 "quality_score",
                 "calculated_bpm",
                 "displayed_bpm",
+                "window_sample_count",
+                "window_seconds",
                 "imu_max_delta_g",
                 "imu_p95_delta_g",
                 "imu_motion_exceedance_ratio",
-                "retained_buffer_sample_count",
-                "clean_segment_sample_count",
-                "invalid_masked_sample_count",
-                "motion_masked_sample_count",
-                "interpolated_sample_count",
-                "excluded_peak_sample_count",
-                "longest_interpolated_run",
-                "motion_tolerated",
                 "max_raw_sample_delta",
                 "crc_error_count",
                 "sequence_loss_count",
                 "estimated_lost_packet_count"
             ).joinToString(",") + "\n",
-            charset = Charsets.UTF_8
+            Charsets.UTF_8
         )
+
+        isLogging = true
+        lastSavedFilePath = null
     }
 
-    /**
-     * 이미 로깅 중이면 기존 파일에 이어서 쓰고,
-     * 로깅 중이 아니면 새 로그 파일을 만든다.
-     *
-     * 자동 재연결 시에는 반드시 이 함수를 써야 로그가 끊기지 않는다.
-     */
+    @Synchronized
     fun startIfNeeded() {
-        if (isLogging && workingLogFile != null) return
-        start()
+        if (!isLogging || workingBurstFile == null) start()
     }
 
-    /**
-     * Logcat에 찍던 주요 상태 로그를 내부 TXT 파일에도 저장한다.
-     *
-     * 저장 예:
-     * 2026-06-06 23:33:55.123 I/PotchBleManager: Found Potch again
-     */
-    fun logDebug(
-        tag: String,
-        message: String,
-        level: String = "D"
-    ) {
+    @Synchronized
+    fun logDebug(tag: String, message: String, level: String = "D") {
         if (!isLogging) return
-
-        val file = workingDebugLogFile ?: return
-
-        val phoneTimeText = SimpleDateFormat(
-            "yyyy-MM-dd HH:mm:ss.SSS",
-            Locale.getDefault()
-        ).format(Date(System.currentTimeMillis()))
-
-        val line = "$phoneTimeText $level/$tag: $message"
-
-        file.appendText(line + "\n", Charsets.UTF_8)
+        val time = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.getDefault()).format(Date())
+        workingDebugFile?.appendText("$time $level/$tag: $message\n", Charsets.UTF_8)
     }
 
-    /**
-     * 하나의 Super Frame 로그를 CSV 파일에 즉시 append한다.
-     *
-     * 저장 형식:
-     * phone_time,timestamp,super_frame_hex,complete,miss_packet_num,error_log
-     */
+    @Synchronized
     fun logSuperFrame(
         phoneTimeMillis: Long,
-        timestamp: Long?,
-        superFrame: ByteArray,
+        timestamp: Long,
+        sequenceStart: Int,
+        sequenceEnd: Int,
+        packetCount: Int,
+        burstHex: String,
         complete: String,
         missPacketNum: String,
         errorLog: String
     ) {
         if (!isLogging) return
-
-        val file = workingLogFile ?: return
-
-        val phoneTimeText = SimpleDateFormat(
-            "yyyy-MM-dd HH:mm:ss.SSS",
-            Locale.getDefault()
-        ).format(Date(phoneTimeMillis))
-
-        val hex = superFrame.joinToString(" ") { byte ->
-            "%02X".format(byte.toInt() and 0xFF)
-        }
-
-        val row = listOf(
-            escapeCsv(phoneTimeText),
-            timestamp?.toString() ?: "",
-            escapeCsv(hex),
-            escapeCsv(complete),
-            escapeCsv(missPacketNum),
-            escapeCsv(errorLog)
-        ).joinToString(",")
-
-        file.appendText(row + "\n", Charsets.UTF_8)
+        appendCsv(
+            workingBurstFile,
+            phoneTime(phoneTimeMillis),
+            timestamp,
+            sequenceStart,
+            sequenceEnd,
+            packetCount,
+            burstHex,
+            complete,
+            missPacketNum,
+            errorLog
+        )
     }
 
-    /**
-     * HR 계산 진단값을 전용 CSV에 append한다.
-     *
-     * 새 BPM이 없더라도 COLLECTING/NO_CONTACT/MOTION_ARTIFACT 같은 상태와
-     * 마지막 값 유지 여부를 매 SuperFrame마다 기록한다.
-     */
+    @Synchronized
     fun logHeartRateDiagnostics(
         phoneTimeMillis: Long,
-        timestamp: Long?,
+        timestamp: Long,
         diagnostics: HeartRateDiagnostics
     ) {
         if (!isLogging) return
-
-        val file = workingHeartRateDiagnosticLogFile ?: return
-
-        val phoneTimeText = SimpleDateFormat(
-            "yyyy-MM-dd HH:mm:ss.SSS",
-            Locale.getDefault()
-        ).format(Date(phoneTimeMillis))
-
-        val row = listOf(
-            escapeCsv(phoneTimeText),
-            timestamp?.toString() ?: "",
-            diagnostics.analysisSegmentId.toString(),
-            escapeCsv(diagnostics.processingState.name),
-            escapeCsv(diagnostics.underlyingFailureReason?.name.orEmpty()),
-            escapeCsv(diagnostics.message),
-            diagnostics.heartRateFresh.toString(),
-            diagnostics.heartRateAgeMillis?.toString() ?: "",
-
-            escapeCsv(diagnostics.fusionSource.name),
-            escapeCsv(diagnostics.fusionLog.orEmpty()),
-
-            escapeCsv(diagnostics.irProcessingState?.name.orEmpty()),
-            diagnostics.irCalculatedBpm?.toString() ?: "",
-            formatDouble(diagnostics.irQualityScore, digits = 6),
-            formatDouble(diagnostics.irAcceptedIntervalRatio, digits = 6),
-            formatDouble(diagnostics.irRawSdsdMs, digits = 3),
-
-            escapeCsv(diagnostics.redProcessingState?.name.orEmpty()),
-            diagnostics.redCalculatedBpm?.toString() ?: "",
-            formatDouble(diagnostics.redQualityScore, digits = 6),
-            formatDouble(diagnostics.redAcceptedIntervalRatio, digits = 6),
-            formatDouble(diagnostics.redRawSdsdMs, digits = 3),
-
-            escapeCsv(diagnostics.combinedProcessingState?.name.orEmpty()),
-            diagnostics.combinedCalculatedBpm?.toString() ?: "",
-            formatDouble(diagnostics.combinedQualityScore, digits = 6),
-            formatDouble(diagnostics.combinedAcceptedIntervalRatio, digits = 6),
-            formatDouble(diagnostics.combinedRawSdsdMs, digits = 3),
-
-            diagnostics.windowSampleCount.toString(),
-            formatDouble(diagnostics.windowSeconds, digits = 3),
-            formatDouble(diagnostics.irDcMean, digits = 3),
-            formatDouble(diagnostics.irMin, digits = 3),
-            formatDouble(diagnostics.irMax, digits = 3),
-            formatDouble(diagnostics.acRobustAmplitude, digits = 6),
-            formatDouble(diagnostics.amplitudeCoefficientOfVariation, digits = 6),
-            formatDouble(diagnostics.spectralConcentration, digits = 6),
-            formatDouble(diagnostics.spectralEntropy, digits = 6),
-            formatDouble(diagnostics.abruptChangeRatio, digits = 6),
-            formatDouble(diagnostics.selectedPeakThreshold, digits = 6),
-            formatDouble(diagnostics.selectedThresholdPercent, digits = 3),
-            escapeCsv(diagnostics.selectedPolarity.name),
-            diagnostics.detectedPeakCount.toString(),
-            diagnostics.rawIbiCount.toString(),
-            diagnostics.validIbiCount.toString(),
-            formatDouble(diagnostics.acceptedIntervalRatio, digits = 6),
-            formatDouble(diagnostics.rawSdsdMs, digits = 3),
-            formatDouble(diagnostics.rawIbiCv, digits = 6),
-            formatDouble(diagnostics.physiologicalIntervalRatio, digits = 6),
-            formatDouble(diagnostics.rawIntervalQualityScore, digits = 6),
-            formatDouble(diagnostics.sdsdMs, digits = 3),
-            formatDouble(diagnostics.qualityScore, digits = 6),
-            diagnostics.calculatedBpm?.toString() ?: "",
-            diagnostics.displayedBpm?.toString() ?: "",
-            formatDouble(diagnostics.imuMaxDeltaG, digits = 8),
-            formatDouble(diagnostics.imuP95DeltaG, digits = 8),
-            formatDouble(diagnostics.imuMotionExceedanceRatio, digits = 6),
-            diagnostics.retainedBufferSampleCount.toString(),
-            diagnostics.cleanSegmentSampleCount.toString(),
-            diagnostics.invalidMaskedSampleCount.toString(),
-            diagnostics.motionMaskedSampleCount.toString(),
-            diagnostics.interpolatedSampleCount.toString(),
-            diagnostics.excludedPeakSampleCount.toString(),
-            diagnostics.longestInterpolatedRun.toString(),
-            diagnostics.motionTolerated.toString(),
-            formatDouble(diagnostics.maxRawSampleDelta, digits = 6),
-            diagnostics.crcErrorCount.toString(),
-            diagnostics.sequenceLossCount.toString(),
-            diagnostics.estimatedLostPacketCount.toString()
-        ).joinToString(",")
-
-        file.appendText(row + "\n", Charsets.UTF_8)
+        appendCsv(
+            workingHeartRateFile,
+            phoneTime(phoneTimeMillis),
+            timestamp,
+            diagnostics.analysisSegmentId,
+            diagnostics.processingState,
+            diagnostics.underlyingFailureReason,
+            diagnostics.message,
+            diagnostics.heartRateFresh,
+            diagnostics.heartRateAgeMillis,
+            diagnostics.source,
+            diagnostics.sourceLog,
+            diagnostics.greenDcMean,
+            diagnostics.greenMin,
+            diagnostics.greenMax,
+            diagnostics.acRobustAmplitude,
+            diagnostics.selectedPeakThreshold,
+            diagnostics.selectedPolarity,
+            diagnostics.detectedPeakCount,
+            diagnostics.rawIbiCount,
+            diagnostics.validIbiCount,
+            diagnostics.acceptedIntervalRatio,
+            diagnostics.rawSdsdMs,
+            diagnostics.qualityScore,
+            diagnostics.calculatedBpm,
+            diagnostics.displayedBpm,
+            diagnostics.windowSampleCount,
+            diagnostics.windowSeconds,
+            diagnostics.imuMaxDeltaG,
+            diagnostics.imuP95DeltaG,
+            diagnostics.imuMotionExceedanceRatio,
+            diagnostics.maxRawSampleDelta,
+            diagnostics.crcErrorCount,
+            diagnostics.sequenceLossCount,
+            diagnostics.estimatedLostPacketCount
+        )
     }
 
-    /**
-     * 각성지표 연산 결과를 ArousalState 전용 CSV 파일에 즉시 append한다.
-     *
-     * Super Frame CSV와 같은 phone_time/timestamp를 사용하면,
-     * 나중에 raw frame 로그와 각성지표 로그를 쉽게 대조할 수 있다.
-     */
+    @Synchronized
     fun logArousalState(
         phoneTimeMillis: Long,
-        timestamp: Long?,
+        timestamp: Long,
         arousalState: ArousalState,
         complete: String,
         missPacketNum: String,
         errorLog: String
     ) {
         if (!isLogging) return
-
-        val file = workingArousalLogFile ?: return
-
-        val phoneTimeText = SimpleDateFormat(
-            "yyyy-MM-dd HH:mm:ss.SSS",
-            Locale.getDefault()
-        ).format(Date(phoneTimeMillis))
-
-        val row = listOf(
-            escapeCsv(phoneTimeText),
-            timestamp?.toString() ?: "",
-
-            formatDouble(arousalState.finalWakeScore),
-            arousalState.isWakeTimingCandidate.toString(),
-
-            formatDouble(arousalState.microMovementVariance, digits = 10),
-            formatDouble(arousalState.microMovementScore),
-
-            formatDouble(arousalState.rrFromPpg),
-            formatDouble(arousalState.rrFromImu),
-            formatDouble(arousalState.rrFinal),
-            formatDouble(arousalState.rrScore),
-            formatDouble(arousalState.rrRawScore),
-            escapeCsv(arousalState.rrFusionSource.name),
-            formatDouble(arousalState.rrFusionConfidence),
-            escapeCsv(arousalState.rrFusionLog.orEmpty()),
-
-            arousalState.rrAnalysisSegmentId.toString(),
-            formatLongList(arousalState.ppgRespPeakSamplePositions),
-            formatDoubleList(arousalState.ppgRespIntervalsSec),
-            formatLongList(arousalState.imuRespPeakSamplePositions),
-            formatDoubleList(arousalState.imuRespIntervalsSec),
-
-            formatDouble(arousalState.rrvRmssd),
-            formatDouble(arousalState.rrvRmssdMs),
-            formatDouble(arousalState.rrvScore),
-            escapeCsv(arousalState.rrvSource.name),
-            formatDouble(arousalState.rrvQuality),
-            formatDouble(arousalState.rrvFromPpgRmssdSec),
-            formatDouble(arousalState.rrvFromImuRmssdSec),
-            arousalState.rrvPpgIntervalCount.toString(),
-            arousalState.rrvImuIntervalCount.toString(),
-            formatDouble(arousalState.rrvPpgQuality),
-            formatDouble(arousalState.rrvImuQuality),
-
-            arousalState.hrBpm?.toString() ?: "",
-            formatDouble(arousalState.hrGradient),
-            formatDouble(arousalState.hrScore),
-
-            formatDouble(arousalState.hrvRmssd),
-            formatDouble(arousalState.hrvRmssdMs),
-            formatDouble(arousalState.hrvLf),
-            formatDouble(arousalState.hrvHf),
-            formatDouble(arousalState.hrvLfHf),
-            formatDouble(arousalState.hrvScore),
-            formatDouble(arousalState.hrvQuality),
-            escapeCsv(arousalState.hrvLog.orEmpty()),
-
-            formatDouble(arousalState.skinTemperatureCelsius),
-            formatDouble(arousalState.skinTemperatureGradient),
-            formatDouble(arousalState.skinTemperatureScore),
-
-            escapeCsv(complete),
-            escapeCsv(missPacketNum),
-            escapeCsv(errorLog),
-            escapeCsv(arousalState.lastLog)
-        ).joinToString(",")
-
-        file.appendText(row + "\n", Charsets.UTF_8)
+        appendCsv(
+            workingArousalFile,
+            phoneTime(phoneTimeMillis),
+            timestamp,
+            arousalState.finalWakeScore,
+            arousalState.isWakeTimingCandidate,
+            arousalState.microMovementVariance,
+            arousalState.microMovementScore,
+            arousalState.rrFromPpg,
+            arousalState.rrFromImu,
+            arousalState.rrFinal,
+            arousalState.rrScore,
+            arousalState.rrRawScore,
+            arousalState.rrFusionSource,
+            arousalState.rrFusionConfidence,
+            arousalState.rrFusionLog,
+            arousalState.rrvRmssd,
+            arousalState.rrvScore,
+            arousalState.rrvSource,
+            arousalState.hrBpm,
+            arousalState.hrGradient,
+            arousalState.hrScore,
+            arousalState.hrvRmssd,
+            arousalState.hrvLf,
+            arousalState.hrvHf,
+            arousalState.hrvLfHf,
+            arousalState.hrvScore,
+            arousalState.hrvQuality,
+            arousalState.skinTemperatureCelsius,
+            arousalState.skinTemperatureGradient,
+            arousalState.skinTemperatureScore,
+            complete,
+            missPacketNum,
+            errorLog,
+            arousalState.lastLog
+        )
     }
 
-    /**
-     * 연결 끊김, 재연결, 종료 같은 이벤트를 Super Frame CSV에도 한 줄로 기록한다.
-     *
-     * 예:
-     * complete 컬럼에 disconnected / reconnect_scan_attempt / finished 등을 기록한다.
-     */
-    fun logConnectionEvent(
-        event: String,
-        message: String
-    ) {
-        if (!isLogging) return
-
-        val file = workingLogFile ?: return
-
-        val phoneTimeText = SimpleDateFormat(
-            "yyyy-MM-dd HH:mm:ss.SSS",
-            Locale.getDefault()
-        ).format(Date(System.currentTimeMillis()))
-
-        val row = listOf(
-            escapeCsv(phoneTimeText),
-            "",
-            "",
-            escapeCsv(event),
-            "",
-            escapeCsv(message)
-        ).joinToString(",")
-
-        file.appendText(row + "\n", Charsets.UTF_8)
+    fun logConnectionEvent(event: String, message: String) {
+        logDebug("PotchConnection", "event=$event, message=$message", "I")
     }
 
-    /**
-     * 로깅을 종료하고, 현재까지 append된 파일들을 Download/PotchLogs로 복사한다.
-     *
-     * 복사 대상:
-     * - Super Frame CSV
-     * - Debug TXT
-     *
-     * 반환값:
-     * - CSV 파일이 저장된 경로
-     */
+    @Synchronized
     fun stopAndSave(): String? {
-        val sourceFile = workingLogFile ?: return null
-        val debugFile = workingDebugLogFile
-        val arousalFile = workingArousalLogFile
-        val heartRateDiagnosticFile = workingHeartRateDiagnosticLogFile
-
+        if (!isLogging) return lastSavedFilePath
         isLogging = false
 
-        if (!sourceFile.exists() || sourceFile.length() == 0L) {
-            return null
-        }
+        val files = listOfNotNull(
+            workingBurstFile,
+            workingDebugFile,
+            workingArousalFile,
+            workingHeartRateFile
+        ).filter { it.exists() }
 
-        val savedCsvPath = copyInternalFileToDownloads(
-            context = appContext,
-            sourceFile = sourceFile
-        )
-
-        if (debugFile != null && debugFile.exists() && debugFile.length() > 0L) {
-            copyInternalFileToDownloads(
-                context = appContext,
-                sourceFile = debugFile
-            )
-        }
-
-        if (arousalFile != null && arousalFile.exists() && arousalFile.length() > 0L) {
-            copyInternalFileToDownloads(
-                context = appContext,
-                sourceFile = arousalFile
-            )
-        }
-
-        if (
-            heartRateDiagnosticFile != null &&
-            heartRateDiagnosticFile.exists() &&
-            heartRateDiagnosticFile.length() > 0L
-        ) {
-            copyInternalFileToDownloads(
-                context = appContext,
-                sourceFile = heartRateDiagnosticFile
-            )
-        }
-
-        lastSavedFilePath = savedCsvPath
-
-        return savedCsvPath
+        val exported = files.mapNotNull { exportFileToDownloads(appContext, it) }
+        lastSavedFilePath = exported.firstOrNull()
+        clearWorkingReferences()
+        return lastSavedFilePath
     }
 
-    /**
-     * 현재 작업 중인 내부 CSV 파일 경로를 확인할 때 사용한다.
-     */
-    fun getWorkingLogPath(): String? {
-        return workingLogFile?.absolutePath
-    }
+    fun getWorkingLogPath(): String? = workingBurstFile?.absolutePath
+    fun getWorkingDebugLogPath(): String? = workingDebugFile?.absolutePath
+    fun getWorkingArousalLogPath(): String? = workingArousalFile?.absolutePath
+    fun getWorkingHeartRateDiagnosticLogPath(): String? = workingHeartRateFile?.absolutePath
 
-    /**
-     * 현재 작업 중인 내부 디버그 TXT 파일 경로를 확인할 때 사용한다.
-     */
-    fun getWorkingDebugLogPath(): String? {
-        return workingDebugLogFile?.absolutePath
-    }
-
-    /**
-     * 현재 작업 중인 내부 ArousalState CSV 파일 경로를 확인할 때 사용한다.
-     */
-    fun getWorkingArousalLogPath(): String? {
-        return workingArousalLogFile?.absolutePath
-    }
-
-    /**
-     * 현재 작업 중인 내부 HR 진단 CSV 파일 경로를 확인할 때 사용한다.
-     */
-    fun getWorkingHeartRateDiagnosticLogPath(): String? {
-        return workingHeartRateDiagnosticLogFile?.absolutePath
-    }
-
-    /**
-     * 저장하지 않고 현재 로그 상태를 초기화한다.
-     */
+    @Synchronized
     fun clear() {
         isLogging = false
-        workingLogFile = null
-        workingDebugLogFile = null
-        workingArousalLogFile = null
-        workingHeartRateDiagnosticLogFile = null
+        listOfNotNull(workingBurstFile, workingDebugFile, workingArousalFile, workingHeartRateFile)
+            .forEach { runCatching { it.delete() } }
+        clearWorkingReferences()
         lastSavedFilePath = null
     }
 
-    private fun formatDouble(
-        value: Double?,
-        digits: Int = 6
-    ): String {
-        if (value == null) return ""
-        return String.format(Locale.US, "%.${digits}f", value)
+    private fun clearWorkingReferences() {
+        workingBurstFile = null
+        workingDebugFile = null
+        workingArousalFile = null
+        workingHeartRateFile = null
     }
 
-    private fun formatLongList(
-        values: List<Long>
-    ): String {
-        return escapeCsv(
-            values.joinToString(";")
-        )
+    private fun appendCsv(file: File?, vararg values: Any?) {
+        file?.appendText(values.joinToString(",") { csv(it) } + "\n", Charsets.UTF_8)
     }
 
-    private fun formatDoubleList(
-        values: List<Double>,
-        digits: Int = 4
-    ): String {
-        return escapeCsv(
-            values.joinToString(";") { value ->
-                String.format(Locale.US, "%.${digits}f", value)
-            }
-        )
+    private fun csv(value: Any?): String {
+        val text = value?.toString() ?: ""
+        if (text.none { it == ',' || it == '"' || it == '\n' || it == '\r' }) return text
+        return "\"${text.replace("\"", "\"\"")}\""
     }
 
-    private fun escapeCsv(value: String): String {
-        return "\"" + value.replace("\"", "\"\"") + "\""
-    }
+    private fun phoneTime(millis: Long): String =
+        SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.getDefault()).format(Date(millis))
 
     companion object {
-        // Windows Excel이 CSV를 UTF-8로 자동 인식하도록 파일 맨 앞에 기록한다.
-        private const val UTF8_BOM = "\uFEFF"
         private const val INTERNAL_LOG_DIR_NAME = "PotchLogs"
-        private const val DOWNLOAD_LOG_DIR_NAME = "PotchLogs"
+        private const val DOWNLOAD_SUBDIRECTORY = "PotchLogs"
+        private const val UTF8_BOM = "\uFEFF"
 
-        /**
-         * 앱 내부 저장소에 남아 있는 Potch 로그 파일 목록을 가져온다.
-         *
-         * CSV와 TXT를 모두 보여준다.
-         */
         fun listInternalLogFiles(context: Context): List<InternalPotchLogFile> {
-            val dir = File(context.applicationContext.filesDir, INTERNAL_LOG_DIR_NAME)
-
-            if (!dir.exists()) return emptyList()
-
-            return dir.listFiles()
-                ?.filter { file ->
-                    file.isFile && isSupportedLogFile(file)
-                }
+            val directory = File(context.applicationContext.filesDir, INTERNAL_LOG_DIR_NAME)
+            return directory.listFiles()
+                ?.filter { it.isFile && isSupported(it) }
                 ?.sortedByDescending { it.lastModified() }
-                ?.map { file ->
+                ?.map {
                     InternalPotchLogFile(
-                        name = file.name,
-                        absolutePath = file.absolutePath,
-                        sizeBytes = file.length(),
-                        lastModifiedMillis = file.lastModified()
+                        name = it.name,
+                        absolutePath = it.absolutePath,
+                        sizeBytes = it.length(),
+                        lastModifiedMillis = it.lastModified()
                     )
                 }
-                ?: emptyList()
+                .orEmpty()
         }
 
-        /**
-         * 내부 저장소의 선택된 로그 파일들을 Download/PotchLogs로 내보낸다.
-         *
-         * CSV와 TXT를 모두 내보낼 수 있다.
-         */
         fun exportInternalLogFilesToDownloads(
             context: Context,
             fileNames: List<String>
         ): List<String> {
-            val appContext = context.applicationContext
-            val dir = File(appContext.filesDir, INTERNAL_LOG_DIR_NAME)
+            val directory = File(context.applicationContext.filesDir, INTERNAL_LOG_DIR_NAME)
+            if (!directory.isDirectory) return emptyList()
 
-            if (!dir.exists()) return emptyList()
-
-            val exportedPaths = mutableListOf<String>()
-
-            fileNames.distinct().forEach { fileName ->
-                val sourceFile = File(dir, fileName)
-
-                if (!sourceFile.exists() || !sourceFile.isFile) return@forEach
-                if (!isSupportedLogFile(sourceFile)) return@forEach
-
-                val exportedPath = copyInternalFileToDownloads(
-                    context = appContext,
-                    sourceFile = sourceFile
-                )
-
-                if (exportedPath != null) {
-                    exportedPaths.add(exportedPath)
-                }
-            }
-
-            return exportedPaths
-        }
-
-        /**
-         * CSV / TXT 로그 파일만 허용한다.
-         */
-        private fun isSupportedLogFile(file: File): Boolean {
-            val ext = file.extension.lowercase(Locale.ROOT)
-            return ext == "csv" || ext == "txt"
-        }
-
-        /**
-         * 내부 파일을 Download/PotchLogs로 복사한다.
-         *
-         * Android 10 이상:
-         * - MediaStore 사용
-         *
-         * Android 9 이하:
-         * - public Downloads 폴더에 직접 파일 복사
-         */
-        private fun copyInternalFileToDownloads(
-            context: Context,
-            sourceFile: File
-        ): String? {
-            return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                copyFileToDownloadsApi29AndAbove(
-                    context = context,
-                    sourceFile = sourceFile
-                )
+            val selected = if (fileNames.isEmpty()) {
+                directory.listFiles()?.filter { it.isFile && isSupported(it) }.orEmpty()
             } else {
-                copyFileToDownloadsBelowApi29(
-                    sourceFile = sourceFile
-                )
+                fileNames.distinct().mapNotNull { name ->
+                    val file = File(directory, name)
+                    val inside = runCatching { file.canonicalFile.parentFile == directory.canonicalFile }
+                        .getOrDefault(false)
+                    file.takeIf { inside && it.isFile && isSupported(it) }
+                }
+            }
+            return selected.mapNotNull { exportFileToDownloads(context.applicationContext, it) }
+        }
+
+        private fun exportFileToDownloads(context: Context, source: File): String? {
+            return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val values = ContentValues().apply {
+                    put(MediaStore.Downloads.DISPLAY_NAME, source.name)
+                    put(MediaStore.Downloads.MIME_TYPE, mimeType(source))
+                    put(
+                        MediaStore.Downloads.RELATIVE_PATH,
+                        Environment.DIRECTORY_DOWNLOADS + "/" + DOWNLOAD_SUBDIRECTORY
+                    )
+                    put(MediaStore.Downloads.IS_PENDING, 1)
+                }
+                val resolver = context.contentResolver
+                val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                    ?: return null
+                try {
+                    resolver.openOutputStream(uri)?.use { output ->
+                        FileInputStream(source).use { input -> input.copyTo(output) }
+                    } ?: return null
+                    values.clear()
+                    values.put(MediaStore.Downloads.IS_PENDING, 0)
+                    resolver.update(uri, values, null, null)
+                    uri.toString()
+                } catch (_: Exception) {
+                    resolver.delete(uri, null, null)
+                    null
+                }
+            } else {
+                val downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                val directory = File(downloads, DOWNLOAD_SUBDIRECTORY).apply { mkdirs() }
+                val target = uniqueTarget(directory, source.name)
+                runCatching {
+                    FileInputStream(source).use { input ->
+                        FileOutputStream(target).use { output -> input.copyTo(output) }
+                    }
+                    target.absolutePath
+                }.getOrNull()
             }
         }
 
-        /**
-         * Android 10 이상에서 MediaStore를 이용해 Downloads/PotchLogs로 복사한다.
-         *
-         * 중요:
-         * - CSV는 text/csv
-         * - TXT는 text/plain
-         *
-         * 이렇게 확장자별 MIME type을 맞춰야 debug txt가 txt.csv처럼 저장되는 문제를 줄일 수 있다.
-         */
-        @RequiresApi(Build.VERSION_CODES.Q)
-        private fun copyFileToDownloadsApi29AndAbove(
-            context: Context,
-            sourceFile: File
-        ): String? {
-            val resolver = context.contentResolver
-            val fileName = sourceFile.name
-
-            val mimeType =
-                when (sourceFile.extension.lowercase(Locale.ROOT)) {
-                    "csv" -> "text/csv"
-                    "txt" -> "text/plain"
-                    else -> "application/octet-stream"
-                }
-
-            val values = ContentValues().apply {
-                put(MediaStore.Downloads.DISPLAY_NAME, fileName)
-                put(MediaStore.Downloads.MIME_TYPE, mimeType)
-                put(
-                    MediaStore.Downloads.RELATIVE_PATH,
-                    Environment.DIRECTORY_DOWNLOADS + "/$DOWNLOAD_LOG_DIR_NAME"
-                )
+        private fun uniqueTarget(directory: File, name: String): File {
+            var candidate = File(directory, name)
+            if (!candidate.exists()) return candidate
+            val base = name.substringBeforeLast('.', name)
+            val extension = name.substringAfterLast('.', "")
+            var index = 1
+            while (candidate.exists()) {
+                val nextName = if (extension.isEmpty()) "$base($index)" else "$base($index).$extension"
+                candidate = File(directory, nextName)
+                index += 1
             }
-
-            val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-                ?: return null
-
-            resolver.openOutputStream(uri)?.use { output ->
-                FileInputStream(sourceFile).use { input ->
-                    input.copyTo(output, bufferSize = 1024 * 1024)
-                }
-            }
-
-            return "Download/$DOWNLOAD_LOG_DIR_NAME/$fileName"
+            return candidate
         }
 
-        /**
-         * Android 9 이하에서 Downloads/PotchLogs로 파일을 복사한다.
-         */
-        private fun copyFileToDownloadsBelowApi29(
-            sourceFile: File
-        ): String? {
-            val downloadsDir = Environment.getExternalStoragePublicDirectory(
-                Environment.DIRECTORY_DOWNLOADS
-            )
+        private fun isSupported(file: File): Boolean =
+            file.extension.lowercase() in setOf("csv", "txt")
 
-            val potchDir = File(downloadsDir, DOWNLOAD_LOG_DIR_NAME)
-            if (!potchDir.exists()) {
-                potchDir.mkdirs()
-            }
-
-            val targetFile = File(potchDir, sourceFile.name)
-
-            FileInputStream(sourceFile).use { input ->
-                FileOutputStream(targetFile).use { output ->
-                    input.copyTo(output, bufferSize = 1024 * 1024)
-                }
-            }
-
-            return targetFile.absolutePath
-        }
+        private fun mimeType(file: File): String =
+            if (file.extension.equals("csv", true)) "text/csv" else "text/plain"
     }
 }
