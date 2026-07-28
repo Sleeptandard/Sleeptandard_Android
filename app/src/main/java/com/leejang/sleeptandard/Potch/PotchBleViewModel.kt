@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 
 class PotchBleViewModel(
     application: Application
@@ -120,5 +121,75 @@ class PotchBleViewModel(
 
             refreshInternalLogFiles()
         }
+    }
+    fun deleteInternalLogFiles(fileNames: List<String>) {
+        val context = getApplication<Application>().applicationContext
+
+        viewModelScope.launch {
+            val isDeleteAll = fileNames.isEmpty()
+
+            _lastExportMessage.value =
+                if (isDeleteAll) {
+                    "전체 로그 파일 삭제 중..."
+                } else {
+                    "선택한 로그 파일 삭제 중..."
+                }
+
+            val deletedCount = withContext(Dispatchers.IO) {
+                val dir = File(context.filesDir, "PotchLogs")
+
+                if (!dir.exists() || !dir.isDirectory) {
+                    return@withContext 0
+                }
+
+                val targets = if (isDeleteAll) {
+                    dir.listFiles()
+                        ?.filter { file ->
+                            file.isFile && isSupportedInternalLogFile(file)
+                        }
+                        ?: emptyList()
+                } else {
+                    fileNames.distinct().mapNotNull { fileName ->
+                        val file = File(dir, fileName)
+
+                        val isInsideLogDir = runCatching {
+                            file.canonicalFile.parentFile == dir.canonicalFile
+                        }.getOrDefault(false)
+
+                        if (isInsideLogDir && file.exists() && file.isFile && isSupportedInternalLogFile(file)) {
+                            file
+                        } else {
+                            null
+                        }
+                    }
+                }
+
+                targets.count { file ->
+                    file.delete()
+                }
+            }
+
+            _lastExportMessage.value =
+                if (isDeleteAll) {
+                    if (deletedCount == 0) {
+                        "삭제할 내부 로그 파일이 없습니다."
+                    } else {
+                        "내부 로그 파일 ${deletedCount}개를 삭제했습니다."
+                    }
+                } else {
+                    if (deletedCount == 0) {
+                        "선택한 로그 파일 중 삭제된 파일이 없습니다."
+                    } else {
+                        "선택한 로그 파일 ${deletedCount}개를 삭제했습니다."
+                    }
+                }
+
+            refreshInternalLogFiles()
+        }
+    }
+
+    private fun isSupportedInternalLogFile(file: File): Boolean {
+        val ext = file.extension.lowercase()
+        return ext == "csv" || ext == "txt"
     }
 }

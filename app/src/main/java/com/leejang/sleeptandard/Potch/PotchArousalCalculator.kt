@@ -8,6 +8,25 @@ import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
 
+
+/**
+ * 각 지표의 현재 계산 가능 상태.
+ *
+ * VALID: 현재 유효한 결과가 계산됨
+ * COLLECTING: 최소 window/sample/interval을 모으는 중
+ * REJECTED: 데이터는 충분하지만 품질, 진폭, 이상치 필터 등의 이유로 계산 결과가 거부됨
+ */
+enum class MetricCalculationState {
+    VALID,
+    COLLECTING,
+    REJECTED
+}
+
+data class MetricCalculationStatus(
+    val state: MetricCalculationState = MetricCalculationState.COLLECTING,
+    val message: String = "데이터 수집 중"
+)
+
 // 계산 결과 상태
 data class ArousalState(
     // 1. Micro Movement
@@ -23,18 +42,40 @@ data class ArousalState(
     val rrFusionSource: RrFusionSource = RrFusionSource.NONE,
     val rrFusionConfidence: Double = 0.0,
     val rrFusionLog: String? = null,
+    val rrCalculationStatus: MetricCalculationStatus = MetricCalculationStatus(),
+
+    // RR 디버깅/검증용: 현재 45초 분석창에서 검출된 peak와 사용 interval.
+    // sample position은 현재 analysis segment 시작점을 0으로 하는 절대 sample index다.
+    val rrAnalysisSegmentId: Long = 0L,
+    val ppgRespPeakSamplePositions: List<Long> = emptyList(),
+    val ppgRespIntervalsSec: List<Double> = emptyList(),
+    val imuRespPeakSamplePositions: List<Long> = emptyList(),
+    val imuRespIntervalsSec: List<Double> = emptyList(),
+
+    // ExperimentScreen에서 실제 RR 전처리 파형과 peak 분류를 시각화하기 위한 snapshot.
+    val ppgRespirationGraphData: PpgRespirationGraphData = PpgRespirationGraphData(),
 
     // 3. Respiratory Rate Variability
-    val rrvRmssd: Double? = null,        // seconds 기준 RMSSD
+    val rrvRmssd: Double? = null,        // 최종 선택된 source의 seconds 기준 RMSSD
     val rrvRmssdMs: Double? = null,      // 로그/UI 확인용 ms
     val rrvScore: Double? = null,
     val rrvSource: RrvSource = RrvSource.NONE,
     val rrvQuality: Double = 0.0,
 
+    // PPG와 IMU RRV를 따로 기록하여 source별 정확도를 비교할 수 있게 한다.
+    val rrvFromPpgRmssdSec: Double? = null,
+    val rrvFromImuRmssdSec: Double? = null,
+    val rrvPpgIntervalCount: Int = 0,
+    val rrvImuIntervalCount: Int = 0,
+    val rrvPpgQuality: Double = 0.0,
+    val rrvImuQuality: Double = 0.0,
+    val rrvCalculationStatus: MetricCalculationStatus = MetricCalculationStatus(),
+
     // 4. Heart Rate
     val hrBpm: Int? = null,
     val hrGradient: Double? = null,
     val hrScore: Double? = null,
+    val hrCalculationStatus: MetricCalculationStatus = MetricCalculationStatus(),
 
     // 5. Heart Rate Variability
     val hrvRmssd: Double? = null,
@@ -45,6 +86,7 @@ data class ArousalState(
     val hrvScore: Double? = null,
     val hrvQuality: Double = 0.0,
     val hrvLog: String? = null,
+    val hrvCalculationStatus: MetricCalculationStatus = MetricCalculationStatus(),
 
     // 6. Skin Temperature
     val skinTemperatureCelsius: Double? = null,
@@ -90,6 +132,29 @@ data class ArousalConfig(
     // interval 튄 값 제거 기준
     val ppgRespIntervalOutlierTolerance: Double = 0.40,
 
+    // PPG RR 접촉/gap-aware 전처리.
+    // 0 또는 접촉 임계값 미만 샘플을 호흡 파형으로 그대로 연결하지 않는다.
+    val ppgRespContactMinValue: Double = 10_000.0,
+    val ppgRespSaturationHighValue: Double = 260_000.0,
+
+    // 짧은 gap은 선형 보간하고, 중간 gap은 BPF 연속성만 위해 보간하되
+    // gap을 가로지르는 호흡 interval은 최종 RR에서 제외한다.
+    val ppgRespShortGapMaxSeconds: Double = 0.20,
+    val ppgRespMediumGapMaxSeconds: Double = 0.50,
+
+    // gap 전후 local DC 수준 차이가 이 비율보다 크면 접촉 변화로 보고 보간하지 않는다.
+    val ppgRespGapEdgeMaxRelativeDifference: Double = 0.15,
+
+    // 보간 구간 및 주변에서는 인공 peak가 검출되지 않도록 제외한다.
+    val ppgRespPeakExclusionMarginSeconds: Double = 0.20,
+
+    // leading invalid 또는 긴 contact gap 뒤 첫 1초는 센서 LED/접촉 안정화 구간으로 제외한다.
+    val ppgRespContactSettleSeconds: Double = 1.0,
+
+    // 한 개의 큰 transient가 threshold와 진폭을 지배하지 않도록 robust percentile 사용.
+    val ppgRespRobustLowPercentile: Double = 0.05,
+    val ppgRespRobustHighPercentile: Double = 0.95,
+
     // IMU 기반 RR 계산용
     val imuRespWindowSeconds: Int = 45,
     val imuRespMinWindowSeconds: Int = 25,
@@ -102,16 +167,30 @@ data class ArousalConfig(
     // interval 튄 값 제거 기준
     val imuRespIntervalOutlierTolerance: Double = 0.40,
 
+    // RR peak 경로 안정화.
+    // PPG는 IR positive, IMU는 positive를 primary로 유지하고
+    // 일시적인 품질 차이만으로 source/polarity를 바꾸지 않는다.
+    val rrPathFailuresBeforeFallback: Int = 5,
+    val rrPathConfirmFrames: Int = 5,
+    val rrPathRecoveryConfirmFrames: Int = 5,
+    val rrPathPendingBpmTolerance: Double = 2.0,
+    val rrPathMinHoldMillis: Long = 10 * 1000L,
+
     // RR Fusion
-    val rrFusionAgreeDiffBpm: Double = 3.0,
+    // 두 센서가 1 bpm 이내로 일치할 때만 weighted fusion을 허용한다.
+    val rrFusionAgreeDiffBpm: Double = 1.0,
     val rrFusionStrongDisagreeDiffBpm: Double = 6.0,
 
-    // 기본적으로 IMU를 더 신뢰
-    val rrFusionImuBaseWeight: Double = 0.7,
-    val rrFusionPpgBaseWeight: Double = 0.3,
+    // 기본적으로 PPG를 더 신뢰
+    val rrFusionImuBaseWeight: Double = 0.3,
+    val rrFusionPpgBaseWeight: Double = 0.7,
 
-    // quality가 이 값보다 낮으면 신뢰도 낮은 RR로 판단
+    // 한 센서를 단독 후보로 사용할 수 있는 최소 quality.
     val rrFusionMinUsableQuality: Double = 0.35,
+
+    // IMU가 weighted fusion에 실제로 참여하기 위한 더 엄격한 quality 기준.
+    // 이번 paced-breathing 로그에서는 IMU가 PPG보다 오차가 컸으므로 보수적으로 둔다.
+    val rrFusionMinImuQualityForWeighting: Double = 0.70,
 
     // RR Score
     // 수면 중 호흡수가 이 값 이하이면 RR 자체만으로는 각성 신호로 거의 보지 않음
@@ -141,8 +220,19 @@ data class ArousalConfig(
     // RR history 보관 시간
     val rrHistoryWindowMillis: Long = 10 * 60 * 1000L,
 
+    // 신뢰 가능한 RR이 이 시간 동안 새로 들어오지 않으면 과거 RR history를 폐기한다.
+    val rrFreshnessTimeoutMillis: Long = 30 * 1000L,
+
     // RRV
-    val rrvMinIntervalCount: Int = 3,
+    // RR은 45초 창으로 빠르게 계산하지만 RRV는 최근 3분 interval을 별도로 누적한다.
+    val rrvWindowSeconds: Int = 180,
+
+    // RMSSD를 계산하기 위한 최소 유효 호흡 interval 수.
+    val rrvMinIntervalCount: Int = 8,
+
+    // interval 개수 품질 점수가 최대가 되는 권장 개수.
+    val rrvPreferredIntervalCount: Int = 20,
+
     val rrvIntervalOutlierTolerance: Double = 0.40,
 
     // 임시 score 기준.
@@ -165,11 +255,17 @@ data class ArousalConfig(
     val hrMinReasonableBpm: Int = 30,
     val hrOutlierToleranceBpm: Double = 25.0,
 
+    // 유효 HR이 이 시간 동안 새로 들어오지 않으면 과거 HR history를 폐기한다.
+    val hrFreshnessTimeoutMillis: Long = 10 * 1000L,
+
     // HRV
     val hrvWindowSeconds: Int = 60,
     val hrvMinIbiCount: Int = 8,
     val hrvIbiOutlierTolerance: Double = 0.30,
     val hrvMinEstimateQuality: Double = 0.35,
+
+    // 새 유효 IBI가 이 시간 동안 없으면 과거 HRV IBI buffer를 폐기한다.
+    val hrvFreshnessTimeoutMillis: Long = 10 * 1000L,
 
     // 임시 score 기준. 나중에는 개인 baseline 기반으로 바꾸는 게 좋음.
     val hrvRmssdScoreThresholdMs: Double = 80.0,
@@ -212,6 +308,9 @@ data class ArousalConfig(
     // 센서 접촉/환경 변화로 보기 어려운 1회성 급변 제거용
     val skinTempMaxSingleJumpCelsius: Double = 1.0,
 
+    // 유효 피부온도가 이 시간 동안 새로 들어오지 않으면 과거 온도 history를 폐기한다.
+    val skinTempFreshnessTimeoutMillis: Long = 30 * 1000L,
+
     // Final score
     val finalWakeThreshold: Double = 0.65,
     // 기본 각성 점수는 최대 0.8이 되도록 설계.
@@ -237,7 +336,7 @@ data class ArousalConfig(
     // 실제 펌웨어 설정이 다르면 이 값은 나중에 수정해야 함.
     val imuLsbPerG: Double = 1024.0,
 
-)
+    )
 
 /**
  * Micro Movement 계산 결과를 사람이 이해하기 쉬운 단계로 분류한다.
@@ -279,6 +378,39 @@ data class MicroMovementResult(
 )
 
 /**
+ * 호흡 peak 두 개 사이의 interval.
+ *
+ * sample position은 현재 analysis segment 안에서의 절대 위치이므로,
+ * rolling window를 매초 다시 계산해도 endSamplePosition으로 중복 제거할 수 있다.
+ */
+data class RespirationInterval(
+    val intervalSec: Double,
+    val startSamplePosition: Long,
+    val endSamplePosition: Long,
+
+    // packet/CRC discontinuity로 나뉘는 상위 분석 segment.
+    val segmentId: Long,
+
+    // 같은 packet segment 안에서도 PPG 접촉이 길게 끊기면 별도 continuity group으로 나눈다.
+    // RR은 group 내부 interval만 만들고, RRV도 group 경계를 넘는 연속 차이를 계산하지 않는다.
+    val continuityGroupId: Long = segmentId,
+
+    // 0.2~0.5초 중간 gap을 가로지르는 interval은 파형 표시에는 남겨도 RR 평균에는 쓰지 않는다.
+    val crossesInvalidGap: Boolean = false
+)
+
+private data class BufferedRespirationInterval(
+    val interval: RespirationInterval,
+    val qualityScore: Double
+)
+
+data class RrvCalculationBundle(
+    val ppg: RrvResult?,
+    val imu: RrvResult?,
+    val selected: RrvResult?
+)
+
+/**
  * PPG 기반 호흡 추정에 사용한 광학 채널.
  *
  * 기본은 IR을 우선 사용하고, IR에서 호흡 파형 검출이 실패하면 RED를 백업으로 사용한다.
@@ -287,6 +419,129 @@ enum class PpgRespirationChannel {
     IR,
     RED
 }
+
+/** RR 호흡 파형에서 현재 사용하는 peak 방향. */
+enum class RespirationPeakPolarity {
+    POSITIVE,
+    NEGATIVE,
+    NONE
+}
+
+/**
+ * ExperimentScreen에 노출하는 PPG 기반 RR 분석 파형 snapshot.
+ *
+ * samples는 실제 RR 계산과 동일하게 DC 제거 -> 0.1~0.5Hz BPF -> 2초 warm-up 제거를
+ * 적용한 뒤, 선택된 polarity가 위쪽 peak가 되도록 정렬한 파형이다.
+ */
+data class PpgRespirationGraphData(
+    val channel: PpgRespirationChannel? = null,
+    val selectedPolarity: RespirationPeakPolarity = RespirationPeakPolarity.NONE,
+    val processingState: MetricCalculationState = MetricCalculationState.COLLECTING,
+
+    val samples: List<Double> = emptyList(),
+    val windowSeconds: Double = 0.0,
+    val minimumWindowSeconds: Int = 25,
+
+    // 현재 graph window 기준 marker index.
+    // detected: threshold를 넘은 전체 호흡 peak
+    // accepted: 최종 RR 평균에 사용된 interval의 종료 peak
+    // rejected: 생리 범위 또는 median outlier filter에서 탈락한 interval의 종료 peak
+    // reference: 첫 번째 검출 peak이며 첫 호흡 interval의 시작 기준점
+    val detectedPeakSampleIndices: List<Int> = emptyList(),
+    val acceptedPeakSampleIndices: List<Int> = emptyList(),
+    val rejectedPeakSampleIndices: List<Int> = emptyList(),
+    val referencePeakSampleIndex: Int? = null,
+
+    // 여러 contact segment를 한 카드에 이어 보여줄 때 각 segment의 첫 peak와 경계를 표시한다.
+    val referencePeakSampleIndices: List<Int> = emptyList(),
+    val segmentBreakSampleIndices: List<Int> = emptyList(),
+
+    // 보간된 sample은 peak 후보에서는 제외되며 디버깅용 위치만 노출한다.
+    val interpolatedSampleIndices: List<Int> = emptyList(),
+
+    // window 품질/구성 진단.
+    val rawWindowSeconds: Double = 0.0,
+    val validOriginalSampleCount: Int = 0,
+    val invalidSampleCount: Int = 0,
+    val interpolatedSampleCount: Int = 0,
+    val settlingDiscardedSampleCount: Int = 0,
+    val segmentCount: Int = 0,
+    val shortGapCount: Int = 0,
+    val mediumGapCount: Int = 0,
+    val longGapCount: Int = 0,
+
+    val detectedPeakCount: Int = 0,
+    val rawIntervalCount: Int = 0,
+    val acceptedIntervalCount: Int = 0,
+    val rejectedIntervalCount: Int = 0,
+
+    val peakThreshold: Double? = null,
+    val peakToPeakAmplitude: Double? = null,
+    val calculatedRrBpm: Double? = null,
+    val qualityScore: Double? = null,
+    val description: String = "RR 분석용 PPG 수집 중"
+)
+
+/**
+ * PPG RR 검출 경로 우선순위.
+ *
+ * 평상시에는 IR 위쪽 peak만 사용한다. RED와 아래쪽 peak는
+ * primary가 지속적으로 실패한 경우에만 확인 후 fallback으로 전환한다.
+ */
+private enum class PpgRespirationDetectionPath(
+    val channel: PpgRespirationChannel,
+    val inverted: Boolean,
+    val label: String
+) {
+    IR_POSITIVE(PpgRespirationChannel.IR, false, "IR positive"),
+    RED_POSITIVE(PpgRespirationChannel.RED, false, "RED positive"),
+    IR_NEGATIVE(PpgRespirationChannel.IR, true, "IR negative"),
+    RED_NEGATIVE(PpgRespirationChannel.RED, true, "RED negative")
+}
+
+/** IMU RR은 positive를 primary, negative를 fallback으로 유지한다. */
+private enum class ImuRespirationDetectionPath(
+    val inverted: Boolean,
+    val label: String
+) {
+    POSITIVE(false, "IMU positive"),
+    NEGATIVE(true, "IMU negative")
+}
+
+private data class PpgRespirationCandidateAnalysis(
+    val result: PpgRespirationResult?,
+    val graphData: PpgRespirationGraphData
+)
+
+private data class PpgRespirationCandidates(
+    val positive: PpgRespirationCandidateAnalysis,
+    val negative: PpgRespirationCandidateAnalysis
+)
+
+
+/**
+ * 최근 RR window에서 접촉 불량/0값 gap을 정리한 하나의 연속 PPG segment.
+ */
+private data class GapAwarePpgRespirationSegment(
+    val startSamplePosition: Long,
+    val continuityGroupId: Long,
+    val values: DoubleArray,
+    val interpolatedMask: BooleanArray,
+    val peakExcludedMask: BooleanArray,
+    val mediumGapMask: BooleanArray
+)
+
+private data class GapAwarePpgRespirationWindow(
+    val segments: List<GapAwarePpgRespirationSegment>,
+    val rawWindowSampleCount: Int,
+    val validOriginalSampleCount: Int,
+    val invalidSampleCount: Int,
+    val interpolatedSampleCount: Int,
+    val settlingDiscardedSampleCount: Int,
+    val shortGapCount: Int,
+    val mediumGapCount: Int,
+    val longGapCount: Int
+)
 
 /**
  * PPG에서 추출한 호흡수 계산 결과.
@@ -302,8 +557,13 @@ data class PpgRespirationResult(
     val averageIntervalSec: Double,
     val peakToPeakAmplitude: Double,
     val qualityScore: Double,
+    val inverted: Boolean,
+    val peakSamplePositions: List<Long>,
+    val intervals: List<RespirationInterval>
+) {
     val intervalsSec: List<Double>
-)
+        get() = intervals.map { it.intervalSec }
+}
 
 /**
  * IMU g-magnitude에서 추출한 호흡수 계산 결과.
@@ -316,8 +576,12 @@ data class ImuRespirationResult(
     val peakToPeakAmplitudeG: Double,
     val qualityScore: Double,
     val inverted: Boolean,
+    val peakSamplePositions: List<Long>,
+    val intervals: List<RespirationInterval>
+) {
     val intervalsSec: List<Double>
-)
+        get() = intervals.map { it.intervalSec }
+}
 /**
  * 최종 RR이 어떤 센서 조합으로 결정되었는지 나타낸다.
  *
@@ -489,6 +753,8 @@ data class ArousalBufferSnapshot(
     val imuGSampleCount: Int,
     val temperatureSampleCount: Int,
     val heartRateSampleCount: Int,
+    val ppgRrvIntervalCount: Int,
+    val imuRrvIntervalCount: Int,
     val latestTemperatureCelsius: Double?,
     val latestHeartRateBpm: Int?
 )
@@ -522,6 +788,33 @@ class PotchArousalCalculator(
      */
     private val respirationRateBuffer = ArrayDeque<Pair<Long, Double>>()
 
+    // PPG RR 경로 hysteresis state.
+    private var activePpgRespirationPath =
+        PpgRespirationDetectionPath.IR_POSITIVE
+    private var activePpgRespirationPathSinceMillis: Long = 0L
+    private var ppgRespirationFailureStreak: Int = 0
+    private var pendingPpgRespirationPath: PpgRespirationDetectionPath? = null
+    private var pendingPpgRespirationSuccessStreak: Int = 0
+    private var pendingPpgRespirationLastRr: Double? = null
+    private var ppgPrimaryRecoveryStreak: Int = 0
+    private var ppgPrimaryRecoveryLastRr: Double? = null
+
+    // UI에는 선택된 PPG RR 경로의 실제 후처리 파형을 매 frame snapshot으로 노출한다.
+    private var latestPpgRespirationGraphData = PpgRespirationGraphData(
+        minimumWindowSeconds = config.ppgRespMinWindowSeconds
+    )
+
+    // IMU RR polarity hysteresis state.
+    private var activeImuRespirationPath =
+        ImuRespirationDetectionPath.POSITIVE
+    private var activeImuRespirationPathSinceMillis: Long = 0L
+    private var imuRespirationFailureStreak: Int = 0
+    private var pendingImuRespirationPath: ImuRespirationDetectionPath? = null
+    private var pendingImuRespirationSuccessStreak: Int = 0
+    private var pendingImuRespirationLastRr: Double? = null
+    private var imuPrimaryRecoveryStreak: Int = 0
+    private var imuPrimaryRecoveryLastRr: Double? = null
+
     /**
      * IMU G magnitude rolling buffer.
      *
@@ -538,7 +831,7 @@ class PotchArousalCalculator(
      * 용도:
      * - 직전 n분간 체온 변화량 계산
      *
-     * 지금 temperatureBuffer는 timestampMillis = sensorData.timestamp를 기준으로 window를 자르고 있어. 만약 펌웨어 timestamp가 밀리초가 아니라 초 단위거나 tick 단위라면 5 * 60 * 1000L 같은 window 계산이 틀어져.
+     * 시간 기준은 휴대폰의 System.currentTimeMillis()를 사용한다.
      */
     private val temperatureBuffer = ArrayDeque<Pair<Long, Double>>()
     /**
@@ -559,7 +852,39 @@ class PotchArousalCalculator(
      */
     private val hrvIbiBuffer = ArrayDeque<IbiInterval>()
 
-    private var lastAcceptedHrvIbiEndSampleIndex: Long = Long.MIN_VALUE
+    /**
+     * RRV 전용 source별 rolling interval buffer.
+     *
+     * RR 계산의 45초 창과 분리해 최근 config.rrvWindowSeconds(기본 180초)의
+     * 중복되지 않은 호흡 interval을 유지한다.
+     */
+    private val ppgRrvIntervalBuffer = ArrayDeque<BufferedRespirationInterval>()
+    private val imuRrvIntervalBuffer = ArrayDeque<BufferedRespirationInterval>()
+
+    // 현재 segment에서 각 source가 처리한 누적 sample 수.
+    private var totalPpgRespSampleCount: Long = 0L
+    private var totalImuRespSampleCount: Long = 0L
+
+    // rolling 재계산에서 동일 interval을 다시 넣지 않기 위한 마지막 end position.
+    private var lastAcceptedPpgRrvEndSamplePosition: Long = Long.MIN_VALUE
+    private var lastAcceptedImuRrvEndSamplePosition: Long = Long.MIN_VALUE
+
+    // 현재 유효한 분석 연속 구간과 HRV 중복 제거 위치.
+    private var currentAnalysisSegmentId: Long = 0L
+    private var lastAcceptedHrvIbiSegmentId: Long = Long.MIN_VALUE
+    private var lastAcceptedHrvIbiEndSamplePosition: Double = Double.NEGATIVE_INFINITY
+
+    // 각 계산 버퍼에 마지막으로 유효한 값이 들어온 휴대폰 시각.
+    private var lastValidHeartRateTimestampMillis: Long? = null
+    private var lastValidHrvTimestampMillis: Long? = null
+    private var lastValidRespirationTimestampMillis: Long? = null
+    private var lastValidTemperatureTimestampMillis: Long? = null
+
+    // 긴 품질 불량 구간 뒤 과거 데이터와 새 데이터를 섞지 않기 위한 상태.
+    private var heartRateBufferExpiredByGap: Boolean = false
+    private var hrvBufferExpiredByGap: Boolean = false
+    private var respirationBufferExpiredByGap: Boolean = false
+    private var temperatureBufferExpiredByGap: Boolean = false
 
     private val maxPpgSamples =
         (config.sampleRateHz * config.ppgWindowSeconds).toInt()
@@ -578,23 +903,47 @@ class PotchArousalCalculator(
      */
     fun process(
         sensorData: SensorData,
-        heartRateEstimate: HeartRateEstimate?
+        heartRateEstimate: HeartRateEstimate?,
+        heartRateSignalStatus: MetricCalculationStatus = MetricCalculationStatus(
+            state = MetricCalculationState.COLLECTING,
+            message = "합산 PPG 심박 신호 수집 중"
+        ),
+        analysisSegmentId: Long = currentAnalysisSegmentId
     ): ArousalState {
+        // 호출자가 segment 변경 알림을 먼저 주지 않았더라도 안전하게 경계를 적용한다.
+        if (analysisSegmentId != currentAnalysisSegmentId) {
+            onDataDiscontinuity(
+                newSegmentId = analysisSegmentId,
+                reason = "segment changed before valid frame"
+            )
+        }
+
+        // 펌웨어 timestamp 단위와 무관하게 stale/rolling window를 안정적으로 관리하기 위해
+        // 계산 버퍼의 시간 기준은 휴대폰 수신 시각을 사용한다.
+        val nowMillis = System.currentTimeMillis()
+
+        // 새 정상값이 없어도 매 프레임 오래된 값을 제거하고,
+        // 품질 불량 구간이 timeout을 넘으면 해당 history를 완전히 비운다.
+        expireStaleMetricBuffers(nowMillis)
+        trimMetricBuffersNow(nowMillis)
+
         appendPpg(sensorData.ppgData)
         appendImu(sensorData.imuData)
-        appendTemperature(sensorData.timestamp, sensorData.ntcCelsius)
+        appendTemperature(nowMillis, sensorData.ntcCelsius)
 
         if (heartRateEstimate != null) {
             appendHeartRate(
-                timestampMillis = sensorData.timestamp,
+                timestampMillis = nowMillis,
                 bpm = heartRateEstimate.bpm
             )
 
-            appendHeartRateEstimateToHrvBuffer(heartRateEstimate)
+            appendHeartRateEstimateToHrvBuffer(
+                estimate = heartRateEstimate,
+                acceptedAtMillis = nowMillis
+            )
         }
 
         val microMovement = calculateMicroMovement()
-        val microVariance = microMovement?.varianceG
 
         val ppgRespiration = calculatePpgRespiration()
         val imuRespiration = calculateImuRespiration()
@@ -609,7 +958,7 @@ class PotchArousalCalculator(
 
         if (rrFinal != null) {
             appendRespirationRate(
-                timestampMillis = sensorData.timestamp,
+                timestampMillis = nowMillis,
                 rrBpm = rrFinal,
                 confidence = rrFusion.confidence
             )
@@ -617,23 +966,85 @@ class PotchArousalCalculator(
 
         val rrArousalResult = calculateRespiratoryRateArousal(rrFusion)
 
-        val rrvResult = calculateRrvRmssd(
+        // 현재 45초 창에서 새로 나타난 interval만 source별 3분 RRV buffer에 누적한다.
+        appendRespirationIntervalsForRrv(
             ppg = ppgRespiration,
-            imu = imuRespiration,
+            imu = imuRespiration
+        )
+        trimRespirationVariabilityBuffers()
+
+        val rrvBundle = calculateRrvRmssd(
             rrFusion = rrFusion
         )
-        val rrvRmssd = rrvResult?.rmssdSec
+        val rrvResult = rrvBundle.selected
 
-        val hrResult = calculateHeartRateArousal()
-        val hrGradient = hrResult?.gradientBpm
+        val heartRateIsFresh = isFresh(
+            lastValidTimestampMillis = lastValidHeartRateTimestampMillis,
+            nowMillis = nowMillis,
+            timeoutMillis = config.hrFreshnessTimeoutMillis
+        )
 
-        val skinTempResult = calculateSkinTemperatureArousal()
-        val tempGradient = skinTempResult?.gradientCelsius
+        val hrvIsFresh = isFresh(
+            lastValidTimestampMillis = lastValidHrvTimestampMillis,
+            nowMillis = nowMillis,
+            timeoutMillis = config.hrvFreshnessTimeoutMillis
+        )
 
-        val hrvResult = calculateHeartRateVariability()
-        val hrvFrequencyResult = calculateHrvFrequencyDomain()
+        val temperatureIsFresh = isFresh(
+            lastValidTimestampMillis = lastValidTemperatureTimestampMillis,
+            nowMillis = nowMillis,
+            timeoutMillis = config.skinTempFreshnessTimeoutMillis
+        )
 
-        val hrvLfHf = hrvFrequencyResult?.lfHfRatio
+        val hrResult = if (heartRateIsFresh) {
+            calculateHeartRateArousal()
+        } else {
+            null
+        }
+
+        val skinTempResult = if (temperatureIsFresh) {
+            calculateSkinTemperatureArousal()
+        } else {
+            null
+        }
+
+        val hrvResult = if (hrvIsFresh) {
+            calculateHeartRateVariability()
+        } else {
+            null
+        }
+
+        val hrvFrequencyResult = if (hrvIsFresh) {
+            calculateHrvFrequencyDomain()
+        } else {
+            null
+        }
+
+        val rrCalculationStatus = buildRrCalculationStatus(
+            ppg = ppgRespiration,
+            imu = imuRespiration,
+            fusion = rrFusion
+        )
+
+        val rrvCalculationStatus = buildRrvCalculationStatus(
+            result = rrvResult,
+            rrStatus = rrCalculationStatus
+        )
+
+        val hrCalculationStatus = buildHrCalculationStatus(
+            heartRateEstimate = heartRateEstimate,
+            heartRateSignalStatus = heartRateSignalStatus,
+            result = hrResult,
+            isFresh = heartRateIsFresh
+        )
+
+        val hrvCalculationStatus = buildHrvCalculationStatus(
+            heartRateEstimate = heartRateEstimate,
+            heartRateSignalStatus = heartRateSignalStatus,
+            timeDomainResult = hrvResult,
+            frequencyResult = hrvFrequencyResult,
+            isFresh = hrvIsFresh
+        )
 
         val finalScore = calculateFinalWakeScore(
             microScore = microMovement?.score?.coerceIn(0.0, 1.0),
@@ -656,16 +1067,37 @@ class PotchArousalCalculator(
             rrFusionSource = rrFusion.source,
             rrFusionConfidence = rrFusion.confidence,
             rrFusionLog = rrFusion.log,
+            rrCalculationStatus = rrCalculationStatus,
+
+            rrAnalysisSegmentId = currentAnalysisSegmentId,
+            ppgRespPeakSamplePositions = ppgRespiration?.peakSamplePositions ?: emptyList(),
+            ppgRespIntervalsSec = ppgRespiration?.intervalsSec ?: emptyList(),
+            imuRespPeakSamplePositions = imuRespiration?.peakSamplePositions ?: emptyList(),
+            imuRespIntervalsSec = imuRespiration?.intervalsSec ?: emptyList(),
+            ppgRespirationGraphData = latestPpgRespirationGraphData,
 
             rrvRmssd = rrvResult?.rmssdSec,
             rrvRmssdMs = rrvResult?.rmssdMs,
             rrvScore = rrvResult?.score,
             rrvSource = rrvResult?.source ?: RrvSource.NONE,
             rrvQuality = rrvResult?.qualityScore ?: 0.0,
+            rrvFromPpgRmssdSec = rrvBundle.ppg?.rmssdSec,
+            rrvFromImuRmssdSec = rrvBundle.imu?.rmssdSec,
+            rrvPpgIntervalCount = rrvBundle.ppg?.intervalCount ?: ppgRrvIntervalBuffer.size,
+            rrvImuIntervalCount = rrvBundle.imu?.intervalCount ?: imuRrvIntervalBuffer.size,
+            rrvPpgQuality = rrvBundle.ppg?.qualityScore ?: 0.0,
+            rrvImuQuality = rrvBundle.imu?.qualityScore ?: 0.0,
+            rrvCalculationStatus = rrvCalculationStatus,
 
-            hrBpm = hrResult?.currentBpm ?: heartRateEstimate?.bpm ?: lastState.hrBpm,
-            hrGradient = hrGradient,
+            // stale 상태에서는 마지막 정상값을 유지하지 않고 null로 내린다.
+            hrBpm = if (heartRateIsFresh) {
+                hrResult?.currentBpm ?: heartRateEstimate?.bpm ?: heartRateBuffer.lastOrNull()?.second
+            } else {
+                null
+            },
+            hrGradient = hrResult?.gradientBpm,
             hrScore = hrResult?.score,
+            hrCalculationStatus = hrCalculationStatus,
 
             hrvRmssd = hrvResult?.rmssdSec,
             hrvRmssdMs = hrvResult?.rmssdMs,
@@ -675,9 +1107,14 @@ class PotchArousalCalculator(
             hrvScore = hrvFrequencyResult?.score ?: hrvResult?.score,
             hrvQuality = hrvFrequencyResult?.qualityScore ?: hrvResult?.qualityScore ?: 0.0,
             hrvLog = hrvFrequencyResult?.log ?: hrvResult?.log,
+            hrvCalculationStatus = hrvCalculationStatus,
 
-            skinTemperatureCelsius = skinTempResult?.currentCelsius ?: sensorData.ntcCelsius,
-            skinTemperatureGradient = tempGradient,
+            skinTemperatureCelsius = if (temperatureIsFresh) {
+                skinTempResult?.currentCelsius ?: temperatureBuffer.lastOrNull()?.second
+            } else {
+                null
+            },
+            skinTemperatureGradient = skinTempResult?.gradientCelsius,
             skinTemperatureScore = skinTempResult?.score,
 
             finalWakeScore = finalScore,
@@ -685,14 +1122,227 @@ class PotchArousalCalculator(
             lastLog = "Arousal score=$finalScore, " +
                     "micro=${microMovement?.level}, " +
                     "rr=${rrFusion.log}, rrScore=${rrArousalResult?.log}, " +
-                    "rrv=${rrvResult?.log}, " +
+                    "rrv=${rrvResult?.log}, ppgRrvN=${ppgRrvIntervalBuffer.size}, " +
+                    "imuRrvN=${imuRrvIntervalBuffer.size}, " +
                     "hr=${hrResult?.log}, " +
-                    "hrv=${hrvFrequencyResult?.log ?: hrvResult?.log}"+
+                    "hrv=${hrvFrequencyResult?.log ?: hrvResult?.log}, " +
                     "skin=${skinTempResult?.log}"
         )
 
         return lastState
     }
+
+    private fun buildRrCalculationStatus(
+        ppg: PpgRespirationResult?,
+        imu: ImuRespirationResult?,
+        fusion: RrFusionResult
+    ): MetricCalculationStatus {
+        if (fusion.rrBpm != null) {
+            return MetricCalculationStatus(
+                state = MetricCalculationState.VALID,
+                message = "정상 계산 중 (${fusion.source.name}, confidence=${"%.2f".format(fusion.confidence)})"
+            )
+        }
+
+        if (respirationBufferExpiredByGap) {
+            return MetricCalculationStatus(
+                state = MetricCalculationState.REJECTED,
+                message = "신뢰 가능한 RR이 ${config.rrFreshnessTimeoutMillis / 1000}초 이상 없어 " +
+                        "과거 RR history를 초기화했습니다"
+            )
+        }
+
+        val ppgMinSamples =
+            (config.sampleRateHz * config.ppgRespMinWindowSeconds).toInt()
+        val imuMinSamples =
+            (config.sampleRateHz * config.imuRespMinWindowSeconds).toInt()
+
+        // raw buffer 길이가 아니라 contact/gap-aware 전처리 후 실제 유효 PPG sample 수를 사용한다.
+        // 연결 직후 0값이나 긴 contact loss가 25초 수집량으로 잘못 계산되지 않게 한다.
+        val ppgSampleCount = latestPpgRespirationGraphData.validOriginalSampleCount
+        val imuSampleCount = imuGBuffer.size
+
+        val hasEnoughPpg = ppgSampleCount >= ppgMinSamples
+        val hasEnoughImu = imuSampleCount >= imuMinSamples
+
+        if (!hasEnoughPpg && !hasEnoughImu) {
+            val ppgSeconds = ppgSampleCount / config.sampleRateHz
+            val imuSeconds = imuSampleCount / config.sampleRateHz
+
+            return MetricCalculationStatus(
+                state = MetricCalculationState.COLLECTING,
+                message = "호흡 파형 수집 중: PPG ${"%.1f".format(ppgSeconds)}초, " +
+                        "IMU ${"%.1f".format(imuSeconds)}초 / 최소 ${config.ppgRespMinWindowSeconds}초"
+            )
+        }
+
+        val sourceHint = when {
+            ppg == null && imu == null -> "PPG/IMU 모두"
+            ppg == null -> "PPG"
+            imu == null -> "IMU"
+            else -> "fusion"
+        }
+
+        return MetricCalculationStatus(
+            state = MetricCalculationState.REJECTED,
+            message = "$sourceHint 유효 호흡 파형 없음: 접촉 불량, 움직임 잡음, " +
+                    "낮은 진폭 또는 interval 이상치 필터링 가능"
+        )
+    }
+
+    private fun buildRrvCalculationStatus(
+        result: RrvResult?,
+        rrStatus: MetricCalculationStatus
+    ): MetricCalculationStatus {
+        if (result != null) {
+            return MetricCalculationStatus(
+                state = MetricCalculationState.VALID,
+                message = "정상 계산 중 (${result.source.name}, interval=${result.intervalCount}, " +
+                        "quality=${"%.2f".format(result.qualityScore)}, " +
+                        "PPG buffer=${ppgRrvIntervalBuffer.size}, " +
+                        "IMU buffer=${imuRrvIntervalBuffer.size})"
+            )
+        }
+
+        val ppgCount = ppgRrvIntervalBuffer.size
+        val imuCount = imuRrvIntervalBuffer.size
+        val maxCount = maxOf(ppgCount, imuCount)
+
+        if (rrStatus.state == MetricCalculationState.COLLECTING) {
+            return MetricCalculationStatus(
+                state = MetricCalculationState.COLLECTING,
+                message = "RRV 전용 ${config.rrvWindowSeconds}초 buffer 수집 중: " +
+                        "PPG=$ppgCount, IMU=$imuCount / 최소 ${config.rrvMinIntervalCount}개"
+            )
+        }
+
+        if (rrStatus.state == MetricCalculationState.REJECTED) {
+            return MetricCalculationStatus(
+                state = MetricCalculationState.REJECTED,
+                message = "현재 RR 계산 실패로 RRV 출력 보류. " +
+                        "누적 buffer: PPG=$ppgCount, IMU=$imuCount"
+            )
+        }
+
+        return if (maxCount < config.rrvMinIntervalCount) {
+            MetricCalculationStatus(
+                state = MetricCalculationState.COLLECTING,
+                message = "RRV 전용 호흡 interval 수집 중: PPG=$ppgCount, IMU=$imuCount / " +
+                        "최소 ${config.rrvMinIntervalCount}개"
+            )
+        } else {
+            MetricCalculationStatus(
+                state = MetricCalculationState.REJECTED,
+                message = "누적 호흡 interval이 quality 또는 중앙값 이상치 필터에서 제외되어 " +
+                        "RRV 계산 불가: PPG=$ppgCount, IMU=$imuCount"
+            )
+        }
+    }
+
+    private fun buildHrCalculationStatus(
+        heartRateEstimate: HeartRateEstimate?,
+        heartRateSignalStatus: MetricCalculationStatus,
+        result: HeartRateArousalResult?,
+        isFresh: Boolean
+    ): MetricCalculationStatus {
+        if (!isFresh && heartRateBufferExpiredByGap) {
+            return MetricCalculationStatus(
+                state = MetricCalculationState.REJECTED,
+                message = "유효 HR이 ${config.hrFreshnessTimeoutMillis / 1000}초 이상 없어 " +
+                        "과거 HR history를 초기화했습니다"
+            )
+        }
+
+        if (result != null && isFresh) {
+            return MetricCalculationStatus(
+                state = MetricCalculationState.VALID,
+                message = "정상 계산 중: 합산 PPG HR 추세 window ${"%.0f".format(result.windowSeconds)}초"
+            )
+        }
+
+        if (heartRateEstimate == null) {
+            return heartRateSignalStatus
+        }
+
+        if (heartRateBuffer.size < config.hrMinSampleCount) {
+            return MetricCalculationStatus(
+                state = MetricCalculationState.COLLECTING,
+                message = "합산 PPG HR은 검출됨. 각성 추세용 HR sample 수집 중: " +
+                        "${heartRateBuffer.size}/${config.hrMinSampleCount}"
+            )
+        }
+
+        val durationMillis =
+            heartRateBuffer.last().first - heartRateBuffer.first().first
+
+        if (durationMillis < config.hrGradientMinWindowMillis) {
+            return MetricCalculationStatus(
+                state = MetricCalculationState.COLLECTING,
+                message = "합산 PPG HR은 검출됨. HR 추세 계산용 최소 1분 수집 중: " +
+                        "${durationMillis / 1000}초/60초"
+            )
+        }
+
+        return MetricCalculationStatus(
+            state = MetricCalculationState.REJECTED,
+            message = "HR history의 이상치 제거 후 유효 sample이 부족해 각성 추세 계산 불가"
+        )
+    }
+
+    private fun buildHrvCalculationStatus(
+        heartRateEstimate: HeartRateEstimate?,
+        heartRateSignalStatus: MetricCalculationStatus,
+        timeDomainResult: HeartRateVariabilityResult?,
+        frequencyResult: HrvFrequencyResult?,
+        isFresh: Boolean
+    ): MetricCalculationStatus {
+        val currentSegmentIbiCount = currentSegmentHrvIbis().size
+
+        if (!isFresh && hrvBufferExpiredByGap) {
+            return MetricCalculationStatus(
+                state = MetricCalculationState.REJECTED,
+                message = "새 유효 IBI가 ${config.hrvFreshnessTimeoutMillis / 1000}초 이상 없어 " +
+                        "과거 HRV buffer를 초기화했습니다"
+            )
+        }
+
+        if (timeDomainResult != null && isFresh) {
+            val message = if (frequencyResult != null) {
+                "RMSSD와 LF/HF 정상 계산 중 (IBI=${timeDomainResult.ibiCount})"
+            } else {
+                "RMSSD 정상 계산 중. LF/HF용 IBI 수집 중: " +
+                        "${currentSegmentIbiCount}/${config.hrvSpectralMinIbiCount}"
+            }
+
+            return MetricCalculationStatus(
+                state = MetricCalculationState.VALID,
+                message = message
+            )
+        }
+
+        if (currentSegmentIbiCount < config.hrvMinIbiCount) {
+            if (heartRateEstimate == null &&
+                heartRateSignalStatus.state == MetricCalculationState.REJECTED
+            ) {
+                return MetricCalculationStatus(
+                    state = MetricCalculationState.REJECTED,
+                    message = "PPG peak/IBI 추출 실패로 HRV 계산 불가: " +
+                            heartRateSignalStatus.message
+                )
+            }
+
+            return MetricCalculationStatus(
+                state = MetricCalculationState.COLLECTING,
+                message = "유효 IBI 수집 중: ${currentSegmentIbiCount}/${config.hrvMinIbiCount}"
+            )
+        }
+
+        return MetricCalculationStatus(
+            state = MetricCalculationState.REJECTED,
+            message = "IBI가 품질 또는 중앙값 이상치 필터에서 제외되어 HRV 계산 불가"
+        )
+    }
+
     /**
      * 최종 기상 후보 점수를 계산한다.
      *
@@ -815,6 +1465,9 @@ class PotchArousalCalculator(
                 ppgIrBuffer.removeFirst()
             }
         }
+
+        // RED/IR은 같은 sample 시각을 공유하므로 한 채널 sample 수만 누적한다.
+        totalPpgRespSampleCount += minOf(redSamples.size, irSamples.size).toLong()
     }
 
     /**
@@ -856,6 +1509,8 @@ class PotchArousalCalculator(
             if (microFilteredBuffer.size > maxImuSamples) {
                 microFilteredBuffer.removeFirst()
             }
+
+            totalImuRespSampleCount += 1L
         }
     }
 
@@ -867,18 +1522,21 @@ class PotchArousalCalculator(
     private fun appendTemperature(
         timestampMillis: Long,
         celsius: Double
-    ) {
-        if (celsius == -999.0) return
-        if (celsius.isNaN()) return
-        if (celsius < 0.0 || celsius > 60.0) return
+    ): Boolean {
+        if (celsius == -999.0) return false
+        if (!celsius.isFinite()) return false
+        if (celsius < 0.0 || celsius > 60.0) return false
 
         temperatureBuffer.addLast(timestampMillis to celsius)
+        lastValidTemperatureTimestampMillis = timestampMillis
+        temperatureBufferExpiredByGap = false
 
         trimTimeBuffer(
             buffer = temperatureBuffer,
             nowMillis = timestampMillis,
             windowMillis = config.temperatureWindowMillis
         )
+        return true
     }
 
     /**
@@ -887,33 +1545,94 @@ class PotchArousalCalculator(
     private fun appendHeartRate(
         timestampMillis: Long,
         bpm: Int
-    ) {
-        if (bpm !in 30..220) return
+    ): Boolean {
+        if (bpm !in config.hrMinReasonableBpm..config.hrMaxReasonableBpm) return false
 
         heartRateBuffer.addLast(timestampMillis to bpm)
+        lastValidHeartRateTimestampMillis = timestampMillis
+        heartRateBufferExpiredByGap = false
 
         trimTimeBuffer(
             buffer = heartRateBuffer,
             nowMillis = timestampMillis,
             windowMillis = config.heartRateWindowMillis
         )
+        return true
     }
 
     private fun appendRespirationRate(
         timestampMillis: Long,
         rrBpm: Double,
         confidence: Double
-    ) {
-        if (rrBpm !in config.rrMinBpm..config.rrMaxBpm) return
-        if (confidence < config.rrScoreMinUsableConfidence) return
+    ): Boolean {
+        if (rrBpm !in config.rrMinBpm..config.rrMaxBpm) return false
+        if (confidence < config.rrScoreMinUsableConfidence) return false
 
         respirationRateBuffer.addLast(timestampMillis to rrBpm)
+        lastValidRespirationTimestampMillis = timestampMillis
+        respirationBufferExpiredByGap = false
 
         trimTimeBuffer(
             buffer = respirationRateBuffer,
             nowMillis = timestampMillis,
             windowMillis = config.rrHistoryWindowMillis
         )
+        return true
+    }
+
+    /** 현재 시각 기준으로 시간형 rolling buffer를 매 프레임 정리한다. */
+    private fun trimMetricBuffersNow(nowMillis: Long) {
+        trimTimeBuffer(heartRateBuffer, nowMillis, config.heartRateWindowMillis)
+        trimTimeBuffer(respirationRateBuffer, nowMillis, config.rrHistoryWindowMillis)
+        trimTimeBuffer(temperatureBuffer, nowMillis, config.temperatureWindowMillis)
+    }
+
+    /** 마지막 유효값 이후 허용 시간을 넘긴 history는 전부 폐기한다. */
+    private fun expireStaleMetricBuffers(nowMillis: Long) {
+        if (hasExpired(lastValidHeartRateTimestampMillis, nowMillis, config.hrFreshnessTimeoutMillis)) {
+            heartRateBuffer.clear()
+            lastValidHeartRateTimestampMillis = null
+            heartRateBufferExpiredByGap = true
+        }
+
+        if (hasExpired(lastValidHrvTimestampMillis, nowMillis, config.hrvFreshnessTimeoutMillis)) {
+            hrvIbiBuffer.clear()
+            lastAcceptedHrvIbiSegmentId = Long.MIN_VALUE
+            lastAcceptedHrvIbiEndSamplePosition = Double.NEGATIVE_INFINITY
+            lastValidHrvTimestampMillis = null
+            hrvBufferExpiredByGap = true
+        }
+
+        if (hasExpired(lastValidRespirationTimestampMillis, nowMillis, config.rrFreshnessTimeoutMillis)) {
+            respirationRateBuffer.clear()
+            clearRespirationVariabilityBuffers(resetSampleCounters = false)
+            lastValidRespirationTimestampMillis = null
+            respirationBufferExpiredByGap = true
+        }
+
+        if (hasExpired(lastValidTemperatureTimestampMillis, nowMillis, config.skinTempFreshnessTimeoutMillis)) {
+            temperatureBuffer.clear()
+            lastValidTemperatureTimestampMillis = null
+            temperatureBufferExpiredByGap = true
+        }
+    }
+
+    private fun hasExpired(
+        lastValidTimestampMillis: Long?,
+        nowMillis: Long,
+        timeoutMillis: Long
+    ): Boolean {
+        if (lastValidTimestampMillis == null) return false
+        return nowMillis - lastValidTimestampMillis > timeoutMillis
+    }
+
+    private fun isFresh(
+        lastValidTimestampMillis: Long?,
+        nowMillis: Long,
+        timeoutMillis: Long
+    ): Boolean {
+        if (lastValidTimestampMillis == null) return false
+        return nowMillis - lastValidTimestampMillis <= timeoutMillis
     }
 
     /**
@@ -926,6 +1645,8 @@ class PotchArousalCalculator(
             imuGSampleCount = imuGBuffer.size,
             temperatureSampleCount = temperatureBuffer.size,
             heartRateSampleCount = heartRateBuffer.size,
+            ppgRrvIntervalCount = ppgRrvIntervalBuffer.size,
+            imuRrvIntervalCount = imuRrvIntervalBuffer.size,
             latestTemperatureCelsius = temperatureBuffer.lastOrNull()?.second,
             latestHeartRateBpm = heartRateBuffer.lastOrNull()?.second
         )
@@ -1036,12 +1757,106 @@ class PotchArousalCalculator(
     }
 
     /**
+     * packet은 정상 수신됐지만 강한 움직임으로 현재 PPG 구간을 HR에서 제외할 때 호출한다.
+     *
+     * RR/micro movement의 raw buffer는 유지하고, HRV IBI 연속성만 끊는다.
+     * 따라서 움직임 전 IBI와 움직임 후 IBI가 RMSSD에서 이웃 값으로 연결되지 않는다.
+     */
+    fun onHeartRateDiscontinuity(reason: String): ArousalState {
+        hrvIbiBuffer.clear()
+        lastAcceptedHrvIbiSegmentId = Long.MIN_VALUE
+        lastAcceptedHrvIbiEndSamplePosition = Double.NEGATIVE_INFINITY
+        lastValidHrvTimestampMillis = null
+        hrvBufferExpiredByGap = true
+
+        lastState = lastState.copy(
+            hrvRmssd = null,
+            hrvRmssdMs = null,
+            hrvLf = null,
+            hrvHf = null,
+            hrvLfHf = null,
+            hrvScore = null,
+            hrvQuality = 0.0,
+            hrvLog = "HR artifact 구간으로 HRV IBI 연속성 중단: $reason",
+            hrvCalculationStatus = MetricCalculationStatus(
+                state = MetricCalculationState.REJECTED,
+                message = "HR artifact 이후 새 IBI를 다시 수집해야 함"
+            )
+        )
+
+        return lastState
+    }
+
+    /**
+     * 패킷 누락/CRC 오류로 샘플 연속성이 끊겼을 때 호출한다.
+     *
+     * sample-domain 신호(PPG/IMU/micro filter)는 즉시 비워 누락 전후 파형이
+     * 하나의 연속 신호처럼 처리되지 않게 한다. 시간 기반 history는 손상 프레임을
+     * 추가하지 않은 채 유지하지만 freshness를 끊어 이전 결과를 현재 결과로 재사용하지 않는다.
+     */
+    fun onDataDiscontinuity(
+        newSegmentId: Long,
+        reason: String
+    ): ArousalState {
+        currentAnalysisSegmentId = newSegmentId
+
+        ppgIrBuffer.clear()
+        ppgRedBuffer.clear()
+        imuGBuffer.clear()
+        microFilteredBuffer.clear()
+        microBpf.reset()
+        clearRespirationVariabilityBuffers(resetSampleCounters = true)
+        resetRespirationPathSelection()
+
+        // HRV는 한 개의 연속 segment 안에서만 계산한다.
+        hrvIbiBuffer.clear()
+        lastAcceptedHrvIbiSegmentId = Long.MIN_VALUE
+        lastAcceptedHrvIbiEndSamplePosition = Double.NEGATIVE_INFINITY
+
+        lastValidHeartRateTimestampMillis = null
+        lastValidHrvTimestampMillis = null
+        lastValidRespirationTimestampMillis = null
+        lastValidTemperatureTimestampMillis = null
+
+        heartRateBufferExpiredByGap = true
+        hrvBufferExpiredByGap = true
+        respirationBufferExpiredByGap = true
+        temperatureBufferExpiredByGap = true
+
+        lastState = ArousalState(
+            rrCalculationStatus = MetricCalculationStatus(
+                state = MetricCalculationState.REJECTED,
+                message = "데이터 연속성 중단: $reason"
+            ),
+            rrvCalculationStatus = MetricCalculationStatus(
+                state = MetricCalculationState.REJECTED,
+                message = "데이터 연속성 중단으로 현재 호흡 interval 사용 불가"
+            ),
+            hrCalculationStatus = MetricCalculationStatus(
+                state = MetricCalculationState.REJECTED,
+                message = "데이터 연속성 중단: $reason"
+            ),
+            hrvCalculationStatus = MetricCalculationStatus(
+                state = MetricCalculationState.REJECTED,
+                message = "새 segment($newSegmentId)의 IBI를 다시 수집해야 함"
+            ),
+            finalWakeScore = 0.0,
+            isWakeTimingCandidate = false,
+            lastLog = "Analysis continuity break: segment=$newSegmentId, reason=$reason"
+        )
+
+        return lastState
+    }
+
+    fun getLastState(): ArousalState = lastState
+
+    /**
      * 계산기 내부의 모든 rolling buffer와 상태형 필터를 초기화한다.
      *
      * BLE 연결을 새로 시작하거나 실험을 재시작할 때 이전 데이터가
      * 새 계산에 섞이지 않도록 호출한다.
      */
-    fun reset() {
+    fun reset(initialSegmentId: Long = 0L) {
         ppgIrBuffer.clear()
         ppgRedBuffer.clear()
         imuGBuffer.clear()
@@ -1050,8 +1865,24 @@ class PotchArousalCalculator(
         heartRateBuffer.clear()
         respirationRateBuffer.clear()
         hrvIbiBuffer.clear()
-        lastAcceptedHrvIbiEndSampleIndex = Long.MIN_VALUE
+        clearRespirationVariabilityBuffers(resetSampleCounters = true)
+        resetRespirationPathSelection()
 
+        currentAnalysisSegmentId = initialSegmentId
+        lastAcceptedHrvIbiSegmentId = Long.MIN_VALUE
+        lastAcceptedHrvIbiEndSamplePosition = Double.NEGATIVE_INFINITY
+
+        lastValidHeartRateTimestampMillis = null
+        lastValidHrvTimestampMillis = null
+        lastValidRespirationTimestampMillis = null
+        lastValidTemperatureTimestampMillis = null
+
+        heartRateBufferExpiredByGap = false
+        hrvBufferExpiredByGap = false
+        respirationBufferExpiredByGap = false
+        temperatureBufferExpiredByGap = false
+
+        lastState = ArousalState()
         microBpf.reset()
     }
 
@@ -1313,54 +2144,151 @@ class PotchArousalCalculator(
     /**
      * PPG 기반 호흡수를 계산한다.
      *
-     * IR 채널을 우선 사용하고, IR에서 유효한 호흡 파형을 찾지 못하면
-     * RED 채널을 백업으로 사용한다.
+     * IR positive를 primary로 유지하고, 지속 실패한 경우에만
+     * RED positive -> IR negative -> RED negative 순으로 확인 후 전환한다.
      */
     fun calculatePpgRespiration(): PpgRespirationResult? {
-        val irResult = calculatePpgRespirationFromBuffer(
+        val minSampleCount =
+            (config.sampleRateHz * config.ppgRespMinWindowSeconds).toInt()
+
+        val irCandidates = calculatePpgRespirationCandidatesFromBuffer(
             channel = PpgRespirationChannel.IR,
             buffer = ppgIrBuffer
         )
 
-        if (irResult != null) {
-            return irResult
+        var redCandidatesCalculated = false
+        var redCandidates: PpgRespirationCandidates? = null
+
+        fun candidatesForChannel(
+            channel: PpgRespirationChannel
+        ): PpgRespirationCandidates? {
+            return when (channel) {
+                PpgRespirationChannel.IR -> irCandidates
+                PpgRespirationChannel.RED -> {
+                    if (!redCandidatesCalculated) {
+                        redCandidates = calculatePpgRespirationCandidatesFromBuffer(
+                            channel = PpgRespirationChannel.RED,
+                            buffer = ppgRedBuffer
+                        )
+                        redCandidatesCalculated = true
+                    }
+                    redCandidates
+                }
+            }
         }
 
-        // IR에서 호흡 파형 검출이 실패하면 RED를 백업으로 사용
-        return calculatePpgRespirationFromBuffer(
-            channel = PpgRespirationChannel.RED,
-            buffer = ppgRedBuffer
+        fun analysisFor(
+            path: PpgRespirationDetectionPath
+        ): PpgRespirationCandidateAnalysis? {
+            val candidates = candidatesForChannel(path.channel) ?: return null
+            return if (path.inverted) candidates.negative else candidates.positive
+        }
+
+        fun candidateFor(
+            path: PpgRespirationDetectionPath
+        ): PpgRespirationResult? {
+            return analysisFor(path)?.result
+        }
+
+        val irValidSampleCount =
+            irCandidates?.positive?.graphData?.validOriginalSampleCount ?: 0
+
+        // IR 접촉 유효량이 부족하면 RED가 실제로 25초를 확보했는지도 확인한다.
+        val redValidSampleCount =
+            if (irValidSampleCount < minSampleCount) {
+                candidatesForChannel(PpgRespirationChannel.RED)
+                    ?.positive
+                    ?.graphData
+                    ?.validOriginalSampleCount
+                    ?: 0
+            } else {
+                0
+            }
+
+        // raw 25초가 아니라 최근 45초 안의 실제 original-valid PPG 총량을 기준으로 한다.
+        // 중간의 긴 gap은 segment로 분리하지만, gap 전 정상 interval을 버리지는 않는다.
+        val enoughWindow =
+            maxOf(irValidSampleCount, redValidSampleCount) >= minSampleCount
+
+        if (!enoughWindow) {
+            latestPpgRespirationGraphData =
+                analysisFor(activePpgRespirationPath)?.graphData
+                    ?: PpgRespirationGraphData(
+                        channel = activePpgRespirationPath.channel,
+                        selectedPolarity = activePpgRespirationPath.toPublicPolarity(),
+                        minimumWindowSeconds = config.ppgRespMinWindowSeconds,
+                        description = "유효 PPG 접촉 구간 수집 중"
+                    )
+            return null
+        }
+
+        val selectedResult = selectStablePpgRespirationPath(
+            candidateFor = ::candidateFor,
+            nowMillis = System.currentTimeMillis()
         )
+
+        val graphPath = selectedResult?.let { result ->
+            ppgRespirationPathOf(result)
+        } ?: activePpgRespirationPath
+
+        latestPpgRespirationGraphData =
+            analysisFor(graphPath)?.graphData
+                ?: PpgRespirationGraphData(
+                    channel = graphPath.channel,
+                    selectedPolarity = graphPath.toPublicPolarity(),
+                    processingState = MetricCalculationState.REJECTED,
+                    minimumWindowSeconds = config.ppgRespMinWindowSeconds,
+                    description = "선택된 RR 경로의 gap-aware 파형을 만들 수 없음"
+                )
+
+        return selectedResult
+    }
+
+    private fun PpgRespirationDetectionPath.toPublicPolarity(): RespirationPeakPolarity {
+        return if (inverted) {
+            RespirationPeakPolarity.NEGATIVE
+        } else {
+            RespirationPeakPolarity.POSITIVE
+        }
+    }
+
+    private fun ppgRespirationPathOf(
+        result: PpgRespirationResult
+    ): PpgRespirationDetectionPath {
+        return when {
+            result.channel == PpgRespirationChannel.IR && !result.inverted ->
+                PpgRespirationDetectionPath.IR_POSITIVE
+
+            result.channel == PpgRespirationChannel.RED && !result.inverted ->
+                PpgRespirationDetectionPath.RED_POSITIVE
+
+            result.channel == PpgRespirationChannel.IR && result.inverted ->
+                PpgRespirationDetectionPath.IR_NEGATIVE
+
+            else -> PpgRespirationDetectionPath.RED_NEGATIVE
+        }
     }
 
     /**
      * PPG 기반 RR bpm만 간단히 얻기 위한 helper.
-     *
-     * 상세 품질 정보가 필요한 경우에는 calculatePpgRespiration() 결과를 직접 사용한다.
      */
     private fun calculateRrFromPpg(): Double? {
         return calculatePpgRespiration()?.rrBpm
     }
 
     /**
-     * 지정된 PPG 채널 buffer에서 호흡 파형을 추출한다.
-     *
-     * 최근 window를 가져와 DC 제거 후 0.1~0.5Hz BPF를 적용하고,
-     * 양/음 peak 방향을 모두 시도해 더 품질이 좋은 결과를 선택한다.
+     * 지정 채널의 최근 45초 raw PPG에서 contact/gap-aware segment를 만들고,
+     * segment별로 DC 제거 -> 0.1~0.5Hz BPF -> 2초 warm-up 제거를 적용한다.
      */
-    private fun calculatePpgRespirationFromBuffer(
+    private fun calculatePpgRespirationCandidatesFromBuffer(
         channel: PpgRespirationChannel,
         buffer: ArrayDeque<Double>
-    ): PpgRespirationResult? {
+    ): PpgRespirationCandidates? {
         val windowSampleCount =
             (config.sampleRateHz * config.ppgRespWindowSeconds).toInt()
 
         val minSampleCount =
             (config.sampleRateHz * config.ppgRespMinWindowSeconds).toInt()
-
-        if (buffer.size < minSampleCount) {
-            return null
-        }
 
         val rawWindow =
             if (buffer.size > windowSampleCount) {
@@ -1369,187 +2297,657 @@ class PotchArousalCalculator(
                 buffer.toList()
             }
 
-        if (rawWindow.size < minSampleCount) {
+        if (rawWindow.isEmpty()) {
             return null
         }
 
-        // 1. DC 제거
-        val mean = rawWindow.average()
-        val acSignal = DoubleArray(rawWindow.size) { i ->
-            rawWindow[i] - mean
-        }
+        val windowStartSamplePosition =
+            totalPpgRespSampleCount - rawWindow.size.toLong()
 
-        // 2. 호흡 대역 BPF: 0.1~0.5Hz
-        // 주의: 계산할 때마다 window 전체를 새로 필터링한다.
-        // append 시점에 상태형 필터를 계속 적용하는 방식은 나중에 최적화 가능.
-        val respBpf = SimpleBandPassFilter(
-            sampleRateHz = config.sampleRateHz,
-            lowCutHz = config.respLowCutHz,
-            highCutHz = config.respHighCutHz
+        val prepared = prepareGapAwarePpgRespirationWindow(
+            rawWindow = rawWindow,
+            windowStartSamplePosition = windowStartSamplePosition
         )
 
-        val filtered = DoubleArray(acSignal.size) { i ->
-            respBpf.filter(acSignal[i])
-        }
+        val enoughWindow = prepared.validOriginalSampleCount >= minSampleCount
 
-        // 3. 필터 초기 구간은 안정화 전이라 버림
-        val warmupSamples = (config.sampleRateHz * 2.0).toInt()
-        if (filtered.size <= warmupSamples + 10) {
-            return null
-        }
-
-        val usableStartIndex = warmupSamples
-        val usableValues = filtered.drop(usableStartIndex)
-
-        val maxValue = usableValues.maxOrNull() ?: return null
-        val minValue = usableValues.minOrNull() ?: return null
-        val peakToPeakAmplitude = maxValue - minValue
-
-        // 4. 호흡 파형 진폭이 너무 작으면 실패
-        if (peakToPeakAmplitude < config.ppgRespMinPeakToPeakAmplitude) {
-            return null
-        }
-
-        // 5. 양의 peak와 음의 peak 둘 다 시도
-        // PPG 호흡 파형은 부착/압박/개인차에 따라 방향이 뒤집혀 보일 수 있음.
-        val positiveResult = calculateRrFromRespWave(
-            channel = channel,
-            filtered = filtered,
-            usableStartIndex = usableStartIndex,
-            peakToPeakAmplitude = peakToPeakAmplitude,
-            invert = false
-        )
-
-        val negativeResult = calculateRrFromRespWave(
-            channel = channel,
-            filtered = filtered,
-            usableStartIndex = usableStartIndex,
-            peakToPeakAmplitude = peakToPeakAmplitude,
-            invert = true
-        )
-
-        return chooseBetterRespirationResult(
-            positiveResult,
-            negativeResult
+        return PpgRespirationCandidates(
+            positive = analyzeGapAwareRrFromRespSegments(
+                channel = channel,
+                prepared = prepared,
+                invert = false,
+                enoughWindow = enoughWindow
+            ),
+            negative = analyzeGapAwareRrFromRespSegments(
+                channel = channel,
+                prepared = prepared,
+                invert = true,
+                enoughWindow = enoughWindow
+            )
         )
     }
 
     /**
-     * 필터링된 PPG 호흡 후보 파형에서 peak interval 기반 RR을 계산한다.
-     *
-     * peak threshold, 최소 peak 간격, 생리적 호흡수 범위를 적용해
-     * 노이즈 peak를 줄이고 RR bpm과 interval 리스트를 산출한다.
+     * sample 값 자체가 실제 PPG 접촉값으로 사용할 수 있는지 판정한다.
+     * 0/저접촉 값과 ADC 상단 포화값은 RR 파형에 직접 넣지 않는다.
      */
-    private fun calculateRrFromRespWave(
-        channel: PpgRespirationChannel,
-        filtered: DoubleArray,
-        usableStartIndex: Int,
-        peakToPeakAmplitude: Double,
-        invert: Boolean
-    ): PpgRespirationResult? {
-        val wave = if (invert) {
-            DoubleArray(filtered.size) { i -> -filtered[i] }
-        } else {
-            filtered
+    private fun isValidPpgRespirationSample(value: Double): Boolean {
+        return value.isFinite() &&
+                value >= config.ppgRespContactMinValue &&
+                value < config.ppgRespSaturationHighValue
+    }
+
+    /**
+     * 짧은/중간 invalid gap은 양쪽 local DC가 비슷할 때만 보간하고,
+     * 긴 gap 또는 접촉 수준이 달라진 gap은 segment 경계로 남긴다.
+     */
+    private fun prepareGapAwarePpgRespirationWindow(
+        rawWindow: List<Double>,
+        windowStartSamplePosition: Long
+    ): GapAwarePpgRespirationWindow {
+        val size = rawWindow.size
+        val values = rawWindow.toDoubleArray()
+        val originalValid = BooleanArray(size) { index ->
+            isValidPpgRespirationSample(values[index])
+        }
+        val preparedValid = originalValid.copyOf()
+        val interpolatedMask = BooleanArray(size)
+        val peakExcludedMask = BooleanArray(size)
+        val mediumGapMask = BooleanArray(size)
+
+        val shortGapMaxSamples =
+            (config.sampleRateHz * config.ppgRespShortGapMaxSeconds)
+                .toInt()
+                .coerceAtLeast(1)
+        val mediumGapMaxSamples =
+            (config.sampleRateHz * config.ppgRespMediumGapMaxSeconds)
+                .toInt()
+                .coerceAtLeast(shortGapMaxSamples)
+        val peakExclusionMarginSamples =
+            (config.sampleRateHz * config.ppgRespPeakExclusionMarginSeconds)
+                .toInt()
+                .coerceAtLeast(0)
+
+        fun localMedian(startInclusive: Int, endExclusive: Int): Double? {
+            if (startInclusive >= endExclusive) return null
+            val local = mutableListOf<Double>()
+            for (index in startInclusive until endExclusive) {
+                if (index in values.indices && originalValid[index]) {
+                    local.add(values[index])
+                }
+            }
+            if (local.isEmpty()) return null
+            local.sort()
+            val middle = local.size / 2
+            return if (local.size % 2 == 0) {
+                (local[middle - 1] + local[middle]) / 2.0
+            } else {
+                local[middle]
+            }
         }
 
-        val usable = wave.drop(usableStartIndex)
-        if (usable.isEmpty()) return null
+        fun edgeLevelsAreCompatible(
+            gapStart: Int,
+            gapEndExclusive: Int
+        ): Boolean {
+            val localSpan = (config.sampleRateHz * 0.20).toInt().coerceAtLeast(3)
+            val leftLevel = localMedian(
+                startInclusive = (gapStart - localSpan).coerceAtLeast(0),
+                endExclusive = gapStart
+            ) ?: return false
+            val rightLevel = localMedian(
+                startInclusive = gapEndExclusive,
+                endExclusive = (gapEndExclusive + localSpan).coerceAtMost(size)
+            ) ?: return false
 
-        val maxValue = usable.maxOrNull() ?: return null
-        val minValue = usable.minOrNull() ?: return null
-        val threshold = minValue + (maxValue - minValue) * 0.55
+            val denominator =
+                maxOf(
+                    (kotlin.math.abs(leftLevel) + kotlin.math.abs(rightLevel)) / 2.0,
+                    config.ppgRespContactMinValue
+                )
+            val relativeDifference =
+                kotlin.math.abs(leftLevel - rightLevel) / denominator
 
-        val minPeakDistanceSamples =
-            (config.sampleRateHz * (60.0 / config.rrMaxBpm)).toInt()
+            return relativeDifference <= config.ppgRespGapEdgeMaxRelativeDifference
+        }
 
-        val maxPeakDistanceSamples =
-            (config.sampleRateHz * (60.0 / config.rrMinBpm)).toInt()
+        var shortGapCount = 0
+        var mediumGapCount = 0
+        var longGapCount = 0
+        var cursor = 0
 
-        val peakIndices = mutableListOf<Int>()
-        var lastPeakIndex = -minPeakDistanceSamples
+        while (cursor < size) {
+            if (originalValid[cursor]) {
+                cursor += 1
+                continue
+            }
 
-        for (i in usableStartIndex + 1 until wave.size - 1) {
-            val isPeak =
-                wave[i] > wave[i - 1] &&
-                        wave[i] > wave[i + 1] &&
-                        wave[i] > threshold
+            val gapStart = cursor
+            while (cursor < size && !originalValid[cursor]) {
+                cursor += 1
+            }
+            val gapEndExclusive = cursor
+            val gapLength = gapEndExclusive - gapStart
 
-            if (!isPeak) continue
+            val boundedByValidSamples =
+                gapStart > 0 &&
+                        gapEndExclusive < size &&
+                        originalValid[gapStart - 1] &&
+                        originalValid[gapEndExclusive]
 
-            val distance = i - lastPeakIndex
+            val canBridge =
+                boundedByValidSamples &&
+                        gapLength <= mediumGapMaxSamples &&
+                        edgeLevelsAreCompatible(gapStart, gapEndExclusive)
 
-            if (distance >= minPeakDistanceSamples) {
-                peakIndices.add(i)
-                lastPeakIndex = i
-            } else if (peakIndices.isNotEmpty()) {
-                val last = peakIndices.last()
+            if (!canBridge) {
+                // leading/trailing invalid는 연결할 양쪽 값이 없으므로 버리고,
+                // 내부 unbridgeable gap만 continuity break로 센다.
+                if (boundedByValidSamples) {
+                    longGapCount += 1
+                }
+                continue
+            }
 
-                // 너무 가까운 peak가 여러 개 잡히면 더 높은 peak로 교체
-                if (wave[i] > wave[last]) {
-                    peakIndices[peakIndices.lastIndex] = i
-                    lastPeakIndex = i
+            val leftValue = values[gapStart - 1]
+            val rightValue = values[gapEndExclusive]
+
+            for (offset in 0 until gapLength) {
+                val fraction = (offset + 1).toDouble() / (gapLength + 1).toDouble()
+                val index = gapStart + offset
+                values[index] = leftValue + (rightValue - leftValue) * fraction
+                preparedValid[index] = true
+                interpolatedMask[index] = true
+            }
+
+            val exclusionStart =
+                (gapStart - peakExclusionMarginSamples).coerceAtLeast(0)
+            val exclusionEnd =
+                (gapEndExclusive + peakExclusionMarginSamples).coerceAtMost(size)
+            for (index in exclusionStart until exclusionEnd) {
+                peakExcludedMask[index] = true
+            }
+
+            if (gapLength <= shortGapMaxSamples) {
+                shortGapCount += 1
+            } else {
+                mediumGapCount += 1
+                for (index in gapStart until gapEndExclusive) {
+                    mediumGapMask[index] = true
                 }
             }
         }
 
-        if (peakIndices.size < 3) {
-            return null
+        val segments = mutableListOf<GapAwarePpgRespirationSegment>()
+        val contactSettleSamples =
+            (config.sampleRateHz * config.ppgRespContactSettleSeconds)
+                .toInt()
+                .coerceAtLeast(0)
+        var settlingDiscardedSampleCount = 0
+        cursor = 0
+        var segmentOrdinal = 0
+
+        while (cursor < size) {
+            while (cursor < size && !preparedValid[cursor]) {
+                cursor += 1
+            }
+            if (cursor >= size) break
+
+            val detectedStart = cursor
+            while (cursor < size && preparedValid[cursor]) {
+                cursor += 1
+            }
+            val endExclusive = cursor
+
+            // window 안에서 leading invalid 또는 내부 long gap 뒤에 시작한 contact segment는
+            // 첫 1초를 센서/접촉 안정화 구간으로 버린다. window 첫 sample부터 이어진 segment는
+            // 이미 이전부터 안정적으로 측정 중일 수 있으므로 추가로 자르지 않는다.
+            val startsAfterVisibleBreak = detectedStart > 0
+            val settleTrim =
+                if (startsAfterVisibleBreak) {
+                    minOf(contactSettleSamples, endExclusive - detectedStart)
+                } else {
+                    0
+                }
+            val start = detectedStart + settleTrim
+            settlingDiscardedSampleCount += settleTrim
+
+            val length = endExclusive - start
+            if (length <= 0) continue
+
+            val segmentStartSamplePosition =
+                windowStartSamplePosition + start.toLong()
+
+            // 첫 segment는 rolling window 시작이 움직여도 current analysis segment ID를 유지한다.
+            // 내부 gap 이후 segment는 gap 뒤 실제 절대 sample position을 stable continuity ID로 사용한다.
+            val continuityGroupId =
+                if (segmentOrdinal == 0) {
+                    currentAnalysisSegmentId
+                } else {
+                    segmentStartSamplePosition
+                }
+
+            segments.add(
+                GapAwarePpgRespirationSegment(
+                    startSamplePosition = segmentStartSamplePosition,
+                    continuityGroupId = continuityGroupId,
+                    values = DoubleArray(length) { local -> values[start + local] },
+                    interpolatedMask = BooleanArray(length) { local ->
+                        interpolatedMask[start + local]
+                    },
+                    peakExcludedMask = BooleanArray(length) { local ->
+                        peakExcludedMask[start + local]
+                    },
+                    mediumGapMask = BooleanArray(length) { local ->
+                        mediumGapMask[start + local]
+                    }
+                )
+            )
+            segmentOrdinal += 1
         }
 
-        val intervals = mutableListOf<Double>()
+        val originalContactValidSampleCount = originalValid.count { it }
+        val validOriginalSampleCount =
+            (originalContactValidSampleCount - settlingDiscardedSampleCount)
+                .coerceAtLeast(0)
+        val invalidSampleCount = size - originalContactValidSampleCount
+        val interpolatedSampleCount = interpolatedMask.count { it }
 
-        for (i in 1 until peakIndices.size) {
-            val diffSamples = peakIndices[i] - peakIndices[i - 1]
-            val intervalSec = diffSamples / config.sampleRateHz
+        return GapAwarePpgRespirationWindow(
+            segments = segments,
+            rawWindowSampleCount = size,
+            validOriginalSampleCount = validOriginalSampleCount,
+            invalidSampleCount = invalidSampleCount,
+            interpolatedSampleCount = interpolatedSampleCount,
+            settlingDiscardedSampleCount = settlingDiscardedSampleCount,
+            shortGapCount = shortGapCount,
+            mediumGapCount = mediumGapCount,
+            longGapCount = longGapCount
+        )
+    }
 
-            val minIntervalSec = 60.0 / config.rrMaxBpm
-            val maxIntervalSec = 60.0 / config.rrMinBpm
+    /**
+     * 한 개의 큰 step/spike가 진폭 및 peak threshold 전체를 지배하지 않도록
+     * 정렬 percentile을 선형 보간해 반환한다.
+     */
+    private fun calculateRespirationPercentile(
+        values: List<Double>,
+        percentile: Double
+    ): Double? {
+        val finite = values.filter { it.isFinite() }.sorted()
+        if (finite.isEmpty()) return null
+        if (finite.size == 1) return finite.first()
 
-            if (intervalSec in minIntervalSec..maxIntervalSec) {
-                intervals.add(intervalSec)
+        val p = percentile.coerceIn(0.0, 1.0)
+        val position = p * (finite.size - 1).toDouble()
+        val lower = kotlin.math.floor(position).toInt()
+        val upper = kotlin.math.ceil(position).toInt()
+        if (lower == upper) return finite[lower]
+
+        val fraction = position - lower.toDouble()
+        return finite[lower] + (finite[upper] - finite[lower]) * fraction
+    }
+
+    /**
+     * 여러 contact segment를 독립적으로 필터링하고, 같은 segment 안의 peak interval만 만든다.
+     * 짧은 gap은 보간 후 peak에서 제외하고, 중간 gap crossing interval은 rejected 처리한다.
+     */
+    private fun analyzeGapAwareRrFromRespSegments(
+        channel: PpgRespirationChannel,
+        prepared: GapAwarePpgRespirationWindow,
+        invert: Boolean,
+        enoughWindow: Boolean
+    ): PpgRespirationCandidateAnalysis {
+        val warmupSamples = (config.sampleRateHz * 2.0).toInt()
+        val minPeakDistanceSamples =
+            (config.sampleRateHz * (60.0 / config.rrMaxBpm)).toInt()
+
+        val graphSamples = mutableListOf<Double>()
+        val segmentBreakSampleIndices = mutableListOf<Int>()
+        val interpolatedGraphIndices = mutableListOf<Int>()
+        val positionToGraphIndex = mutableMapOf<Long, Int>()
+        val allPeakSamplePositions = mutableListOf<Long>()
+        val referencePeakSamplePositions = mutableListOf<Long>()
+        val allIntervals = mutableListOf<RespirationInterval>()
+        val weightedThresholds = mutableListOf<Pair<Double, Int>>()
+        var analyzedSegmentCount = 0
+
+        for (segment in prepared.segments) {
+            if (segment.values.size <= warmupSamples + 10) {
+                continue
+            }
+
+            val mean = segment.values.average()
+            val acSignal = DoubleArray(segment.values.size) { index ->
+                segment.values[index] - mean
+            }
+
+            // segment 경계마다 BPF state를 새로 시작한다.
+            // 접촉 전/후 DC step이 하나의 호흡 파형으로 이어지는 것을 방지한다.
+            val respBpf = SimpleBandPassFilter(
+                sampleRateHz = config.sampleRateHz,
+                lowCutHz = config.respLowCutHz,
+                highCutHz = config.respHighCutHz
+            )
+            val filtered = DoubleArray(acSignal.size) { index ->
+                respBpf.filter(acSignal[index])
+            }
+            val wave = if (invert) {
+                DoubleArray(filtered.size) { index -> -filtered[index] }
+            } else {
+                filtered
+            }
+
+            val usableSamples =
+                (warmupSamples until wave.size).map { index -> wave[index] }
+            if (usableSamples.size < 3) continue
+
+            val robustLow = calculateRespirationPercentile(
+                usableSamples,
+                config.ppgRespRobustLowPercentile
+            ) ?: continue
+            val robustHigh = calculateRespirationPercentile(
+                usableSamples,
+                config.ppgRespRobustHighPercentile
+            ) ?: continue
+            val robustRange = robustHigh - robustLow
+            val threshold = robustLow + robustRange * 0.55
+
+            val graphOffset = graphSamples.size
+            if (graphOffset > 0) {
+                segmentBreakSampleIndices.add(graphOffset)
+            }
+            graphSamples.addAll(usableSamples)
+            analyzedSegmentCount += 1
+            weightedThresholds.add(threshold to usableSamples.size)
+
+            for (localIndex in warmupSamples until segment.values.size) {
+                val graphIndex = graphOffset + (localIndex - warmupSamples)
+                val absolutePosition =
+                    segment.startSamplePosition + localIndex.toLong()
+                positionToGraphIndex[absolutePosition] = graphIndex
+                if (segment.interpolatedMask[localIndex]) {
+                    interpolatedGraphIndices.add(graphIndex)
+                }
+            }
+
+            val mediumGapPrefix = IntArray(segment.mediumGapMask.size + 1)
+            for (index in segment.mediumGapMask.indices) {
+                mediumGapPrefix[index + 1] =
+                    mediumGapPrefix[index] + if (segment.mediumGapMask[index]) 1 else 0
+            }
+
+            fun crossesMediumGap(startIndex: Int, endIndex: Int): Boolean {
+                val start = startIndex.coerceIn(0, segment.mediumGapMask.size)
+                val endExclusive = (endIndex + 1).coerceIn(0, segment.mediumGapMask.size)
+                if (endExclusive <= start) return false
+                return mediumGapPrefix[endExclusive] - mediumGapPrefix[start] > 0
+            }
+
+            val peakIndices = mutableListOf<Int>()
+            var lastPeakIndex = -minPeakDistanceSamples
+
+            if (robustRange.isFinite() && robustRange > 0.0) {
+                for (index in warmupSamples + 1 until wave.size - 1) {
+                    if (segment.peakExcludedMask[index]) continue
+
+                    val isPeak =
+                        wave[index] > wave[index - 1] &&
+                                wave[index] > wave[index + 1] &&
+                                wave[index] > threshold
+                    if (!isPeak) continue
+
+                    val distance = index - lastPeakIndex
+                    if (distance >= minPeakDistanceSamples) {
+                        peakIndices.add(index)
+                        lastPeakIndex = index
+                    } else if (peakIndices.isNotEmpty()) {
+                        val previousIndex = peakIndices.last()
+                        if (wave[index] > wave[previousIndex]) {
+                            peakIndices[peakIndices.lastIndex] = index
+                            lastPeakIndex = index
+                        }
+                    }
+                }
+            }
+
+            val peakSamplePositions = peakIndices.map { index ->
+                segment.startSamplePosition + index.toLong()
+            }
+            allPeakSamplePositions.addAll(peakSamplePositions)
+            peakSamplePositions.firstOrNull()?.let(referencePeakSamplePositions::add)
+
+            for (index in 1 until peakIndices.size) {
+                val startIndex = peakIndices[index - 1]
+                val endIndex = peakIndices[index]
+                val startPosition =
+                    segment.startSamplePosition + startIndex.toLong()
+                val endPosition =
+                    segment.startSamplePosition + endIndex.toLong()
+                val intervalSec =
+                    (endPosition - startPosition) / config.sampleRateHz
+
+                allIntervals.add(
+                    RespirationInterval(
+                        intervalSec = intervalSec,
+                        startSamplePosition = startPosition,
+                        endSamplePosition = endPosition,
+                        segmentId = currentAnalysisSegmentId,
+                        continuityGroupId = segment.continuityGroupId,
+                        crossesInvalidGap = crossesMediumGap(startIndex, endIndex)
+                    )
+                )
             }
         }
 
-        if (intervals.size < 2) {
-            return null
+        val robustLowAll = calculateRespirationPercentile(
+            graphSamples,
+            config.ppgRespRobustLowPercentile
+        )
+        val robustHighAll = calculateRespirationPercentile(
+            graphSamples,
+            config.ppgRespRobustHighPercentile
+        )
+        val peakToPeakAmplitude =
+            if (robustLowAll != null && robustHighAll != null) {
+                robustHighAll - robustLowAll
+            } else {
+                0.0
+            }
+
+        val weightedThreshold =
+            weightedThresholds.takeIf { it.isNotEmpty() }?.let { entries ->
+                val totalWeight = entries.sumOf { it.second }.coerceAtLeast(1)
+                entries.sumOf { (value, weight) -> value * weight } / totalWeight.toDouble()
+            }
+
+        val minIntervalSec = 60.0 / config.rrMaxBpm
+        val maxIntervalSec = 60.0 / config.rrMinBpm
+        val physiologicalIntervals = allIntervals.filter { interval ->
+            !interval.crossesInvalidGap &&
+                    interval.intervalSec in minIntervalSec..maxIntervalSec
         }
+        val usedIntervals = removeRespIntervalOutliers(physiologicalIntervals)
 
-        val usedIntervals = removeRespIntervalOutliers(intervals)
+        val usedIntervalValues = usedIntervals.map { it.intervalSec }
+        val averageIntervalSec =
+            usedIntervalValues.takeIf { it.isNotEmpty() }?.average()
+        val rrBpm = averageIntervalSec
+            ?.takeIf { it.isFinite() && it > 0.0 }
+            ?.let { 60.0 / it }
 
-        if (usedIntervals.size < 2) {
-            return null
-        }
+        val amplitudeValid =
+            peakToPeakAmplitude >= config.ppgRespMinPeakToPeakAmplitude
+        val peakCountValid = allPeakSamplePositions.size >= 3
+        val intervalCountValid = physiologicalIntervals.size >= 2
+        val usedIntervalCountValid = usedIntervals.size >= 2
+        val rrValid = rrBpm != null && rrBpm in config.rrMinBpm..config.rrMaxBpm
 
-        val averageIntervalSec = usedIntervals.average()
-        if (averageIntervalSec <= 0.0) {
-            return null
-        }
-
-        val rrBpm = 60.0 / averageIntervalSec
-
-        if (rrBpm !in config.rrMinBpm..config.rrMaxBpm) {
-            return null
-        }
-
-        val intervalRegularityScore = calculateIntervalRegularityScore(usedIntervals)
+        val intervalRegularityScore =
+            if (usedIntervalValues.size >= 2) {
+                calculateIntervalRegularityScore(usedIntervalValues)
+            } else {
+                0.0
+            }
         val amplitudeScore =
             (peakToPeakAmplitude / config.ppgRespMinPeakToPeakAmplitude)
                 .coerceIn(0.0, 3.0) / 3.0
-
         val qualityScore =
             (intervalRegularityScore * 0.7 + amplitudeScore * 0.3)
                 .coerceIn(0.0, 1.0)
 
-        return PpgRespirationResult(
-            channel = channel,
-            rrBpm = rrBpm,
-            peakCount = peakIndices.size,
-            intervalCount = usedIntervals.size,
-            averageIntervalSec = averageIntervalSec,
-            peakToPeakAmplitude = peakToPeakAmplitude,
-            qualityScore = qualityScore,
-            intervalsSec = usedIntervals
+        val result =
+            if (
+                enoughWindow && amplitudeValid && peakCountValid &&
+                intervalCountValid && usedIntervalCountValid && rrValid
+            ) {
+                PpgRespirationResult(
+                    channel = channel,
+                    rrBpm = rrBpm!!,
+                    peakCount = allPeakSamplePositions.size,
+                    intervalCount = usedIntervals.size,
+                    averageIntervalSec = averageIntervalSec,
+                    peakToPeakAmplitude = peakToPeakAmplitude,
+                    qualityScore = qualityScore,
+                    inverted = invert,
+                    peakSamplePositions = allPeakSamplePositions.sorted(),
+                    intervals = usedIntervals.sortedBy { it.endSamplePosition }
+                )
+            } else {
+                null
+            }
+
+        val acceptedEndPositions =
+            usedIntervals.map { it.endSamplePosition }.toSet()
+        val rejectedEndPositions =
+            allIntervals
+                .map { it.endSamplePosition }
+                .filterNot { it in acceptedEndPositions }
+                .distinct()
+
+        val detectedPeakSampleIndices =
+            allPeakSamplePositions
+                .mapNotNull(positionToGraphIndex::get)
+                .distinct()
+                .sorted()
+        val acceptedPeakSampleIndices =
+            acceptedEndPositions
+                .mapNotNull(positionToGraphIndex::get)
+                .distinct()
+                .sorted()
+        val rejectedPeakSampleIndices =
+            rejectedEndPositions
+                .mapNotNull(positionToGraphIndex::get)
+                .distinct()
+                .sorted()
+        val referencePeakSampleIndices =
+            referencePeakSamplePositions
+                .mapNotNull(positionToGraphIndex::get)
+                .distinct()
+                .sorted()
+
+        val validSeconds =
+            prepared.validOriginalSampleCount / config.sampleRateHz
+        val rawWindowSeconds =
+            prepared.rawWindowSampleCount / config.sampleRateHz
+
+        val state: MetricCalculationState
+        val description: String
+        when {
+            !enoughWindow -> {
+                state = MetricCalculationState.COLLECTING
+                description = "유효 PPG 수집 중: " +
+                        "${"%.1f".format(validSeconds)}초 / " +
+                        "최소 ${config.ppgRespMinWindowSeconds}초 · " +
+                        "segments=$analyzedSegmentCount · " +
+                        "gaps=${prepared.shortGapCount}/" +
+                        "${prepared.mediumGapCount}/${prepared.longGapCount}"
+            }
+
+            analyzedSegmentCount <= 0 -> {
+                state = MetricCalculationState.REJECTED
+                description = "접촉 복구 후 2초 BPF warm-up을 통과한 segment가 없음"
+            }
+
+            !amplitudeValid -> {
+                state = MetricCalculationState.REJECTED
+                description = "robust 호흡 진폭 부족: " +
+                        "${"%.2f".format(peakToPeakAmplitude)} < " +
+                        "${"%.2f".format(config.ppgRespMinPeakToPeakAmplitude)}"
+            }
+
+            !peakCountValid -> {
+                state = MetricCalculationState.REJECTED
+                description = "호흡 peak 부족: ${allPeakSamplePositions.size}개 / 최소 3개"
+            }
+
+            !intervalCountValid -> {
+                state = MetricCalculationState.REJECTED
+                description = "segment 내부 2~10초 호흡 interval 부족: " +
+                        "${physiologicalIntervals.size}개"
+            }
+
+            !usedIntervalCountValid -> {
+                state = MetricCalculationState.REJECTED
+                description = "median ±${(config.ppgRespIntervalOutlierTolerance * 100).toInt()}% " +
+                        "필터 통과 interval 부족: ${usedIntervals.size}개"
+            }
+
+            !rrValid -> {
+                state = MetricCalculationState.REJECTED
+                description = "RR 범위 초과: " +
+                        "${rrBpm?.let { "%.1f".format(it) } ?: "--"} bpm"
+            }
+
+            else -> {
+                state = MetricCalculationState.VALID
+                description = "${channel.name} " +
+                        "${if (invert) "negative" else "positive"} · " +
+                        "RR ${"%.1f".format(rrBpm)} bpm · " +
+                        "valid=${"%.1f".format(validSeconds)}초 · " +
+                        "segments=$analyzedSegmentCount"
+            }
+        }
+
+        return PpgRespirationCandidateAnalysis(
+            result = result,
+            graphData = PpgRespirationGraphData(
+                channel = channel,
+                selectedPolarity = if (invert) {
+                    RespirationPeakPolarity.NEGATIVE
+                } else {
+                    RespirationPeakPolarity.POSITIVE
+                },
+                processingState = state,
+                samples = graphSamples,
+                windowSeconds = validSeconds,
+                minimumWindowSeconds = config.ppgRespMinWindowSeconds,
+                detectedPeakSampleIndices = detectedPeakSampleIndices,
+                acceptedPeakSampleIndices = acceptedPeakSampleIndices,
+                rejectedPeakSampleIndices = rejectedPeakSampleIndices,
+                referencePeakSampleIndex = referencePeakSampleIndices.firstOrNull(),
+                referencePeakSampleIndices = referencePeakSampleIndices,
+                segmentBreakSampleIndices = segmentBreakSampleIndices,
+                interpolatedSampleIndices = interpolatedGraphIndices.distinct().sorted(),
+                rawWindowSeconds = rawWindowSeconds,
+                validOriginalSampleCount = prepared.validOriginalSampleCount,
+                invalidSampleCount = prepared.invalidSampleCount,
+                interpolatedSampleCount = prepared.interpolatedSampleCount,
+                settlingDiscardedSampleCount = prepared.settlingDiscardedSampleCount,
+                segmentCount = analyzedSegmentCount,
+                shortGapCount = prepared.shortGapCount,
+                mediumGapCount = prepared.mediumGapCount,
+                longGapCount = prepared.longGapCount,
+                detectedPeakCount = allPeakSamplePositions.size,
+                rawIntervalCount = allIntervals.size,
+                acceptedIntervalCount = usedIntervals.size,
+                rejectedIntervalCount = rejectedEndPositions.size,
+                peakThreshold = weightedThreshold,
+                peakToPeakAmplitude = peakToPeakAmplitude,
+                calculatedRrBpm = rrBpm,
+                qualityScore = result?.qualityScore ?: qualityScore.takeIf { usedIntervals.isNotEmpty() },
+                description = description
+            )
         )
     }
 
@@ -1558,26 +2956,36 @@ class PotchArousalCalculator(
      *
      * 중앙값 대비 허용 비율을 벗어난 interval을 버려
      * 잘못 검출된 peak가 RR/RRV 계산에 주는 영향을 줄인다.
+     *
+     * 필터 결과가 부족하거나 비어도 원본을 복구하지 않는다.
+     * 빈 결과는 상위 계산 함수가 null/REJECTED로 처리한다.
      */
     private fun removeRespIntervalOutliers(
-        intervals: List<Double>
-    ): List<Double> {
+        intervals: List<RespirationInterval>
+    ): List<RespirationInterval> {
         if (intervals.size < 3) {
             return intervals
         }
 
-        val sorted = intervals.sorted()
+        val sorted = intervals.map { it.intervalSec }.sorted()
         val median = sorted[sorted.size / 2]
 
-        if (median <= 0.0) {
-            return intervals
+        if (!median.isFinite() || median <= 0.0) {
+            // 유효하지 않은 기준값으로는 outlier 판정을 신뢰할 수 없으므로
+            // 원본 interval을 되살리지 않고 계산 실패를 상위 함수에 전달한다.
+            return emptyList()
         }
 
-        val filtered = intervals.filter { interval ->
-            abs(interval - median) / median <= config.ppgRespIntervalOutlierTolerance
+        val tolerance = config.ppgRespIntervalOutlierTolerance
+        if (!tolerance.isFinite() || tolerance < 0.0) {
+            return emptyList()
         }
 
-        return filtered.ifEmpty { intervals }
+        return intervals.filter { interval ->
+            interval.intervalSec.isFinite() &&
+                    interval.intervalSec > 0.0 &&
+                    abs(interval.intervalSec - median) / median <= tolerance
+        }
     }
 
     /**
@@ -1619,14 +3027,132 @@ class PotchArousalCalculator(
      * 부착 상태에 따라 PPG 호흡 파형 방향이 뒤집힐 수 있으므로
      * 두 방향을 모두 계산한 뒤 qualityScore가 높은 쪽을 사용한다.
      */
-    private fun chooseBetterRespirationResult(
-        a: PpgRespirationResult?,
-        b: PpgRespirationResult?
+    private fun selectStablePpgRespirationPath(
+        candidateFor: (PpgRespirationDetectionPath) -> PpgRespirationResult?,
+        nowMillis: Long
     ): PpgRespirationResult? {
-        if (a == null) return b
-        if (b == null) return a
+        val primaryPath = PpgRespirationDetectionPath.IR_POSITIVE
 
-        return if (a.qualityScore >= b.qualityScore) a else b
+        // fallback 사용 중에는 IR positive가 연속적으로 복구됐을 때만 primary로 돌아간다.
+        if (activePpgRespirationPath != primaryPath) {
+            val primaryCandidate = candidateFor(primaryPath)
+
+            if (primaryCandidate != null) {
+                if (isPendingRrConsistent(
+                        previousRr = ppgPrimaryRecoveryLastRr,
+                        currentRr = primaryCandidate.rrBpm
+                    )) {
+                    ppgPrimaryRecoveryStreak += 1
+                } else {
+                    ppgPrimaryRecoveryStreak = 1
+                }
+                ppgPrimaryRecoveryLastRr = primaryCandidate.rrBpm
+
+                if (
+                    ppgPrimaryRecoveryStreak >= config.rrPathRecoveryConfirmFrames &&
+                    canSwitchRespirationPath(
+                        activeSinceMillis = activePpgRespirationPathSinceMillis,
+                        nowMillis = nowMillis
+                    )
+                ) {
+                    activatePpgRespirationPath(primaryPath, nowMillis)
+                    return primaryCandidate
+                }
+            } else {
+                ppgPrimaryRecoveryStreak = 0
+                ppgPrimaryRecoveryLastRr = null
+            }
+        }
+
+        val activeCandidate = candidateFor(activePpgRespirationPath)
+        if (activeCandidate != null) {
+            ppgRespirationFailureStreak = 0
+            clearPendingPpgRespirationPath()
+            return activeCandidate
+        }
+
+        ppgRespirationFailureStreak += 1
+        if (ppgRespirationFailureStreak < config.rrPathFailuresBeforeFallback) {
+            // 경로는 유지하되 오래된 RR을 새 결과처럼 재사용하지 않는다.
+            return null
+        }
+
+        val fallbackOrder = listOf(
+            PpgRespirationDetectionPath.RED_POSITIVE,
+            PpgRespirationDetectionPath.IR_NEGATIVE,
+            PpgRespirationDetectionPath.RED_NEGATIVE
+        )
+
+        var fallbackPath: PpgRespirationDetectionPath? = null
+        var fallbackCandidate: PpgRespirationResult? = null
+
+        for (path in fallbackOrder) {
+            if (path == activePpgRespirationPath) continue
+
+            val candidate = candidateFor(path)
+            if (candidate != null) {
+                fallbackPath = path
+                fallbackCandidate = candidate
+                break
+            }
+        }
+
+        if (fallbackPath == null || fallbackCandidate == null) {
+            clearPendingPpgRespirationPath()
+            return null
+        }
+
+        registerPendingPpgRespirationCandidate(
+            path = fallbackPath,
+            rrBpm = fallbackCandidate.rrBpm
+        )
+
+        if (
+            pendingPpgRespirationSuccessStreak >= config.rrPathConfirmFrames &&
+            canSwitchRespirationPath(
+                activeSinceMillis = activePpgRespirationPathSinceMillis,
+                nowMillis = nowMillis
+            )
+        ) {
+            activatePpgRespirationPath(fallbackPath, nowMillis)
+            return fallbackCandidate
+        }
+
+        return null
+    }
+
+    private fun registerPendingPpgRespirationCandidate(
+        path: PpgRespirationDetectionPath,
+        rrBpm: Double
+    ) {
+        val samePath = pendingPpgRespirationPath == path
+        val consistent = samePath && isPendingRrConsistent(
+            previousRr = pendingPpgRespirationLastRr,
+            currentRr = rrBpm
+        )
+
+        pendingPpgRespirationSuccessStreak =
+            if (consistent) pendingPpgRespirationSuccessStreak + 1 else 1
+        pendingPpgRespirationPath = path
+        pendingPpgRespirationLastRr = rrBpm
+    }
+
+    private fun activatePpgRespirationPath(
+        path: PpgRespirationDetectionPath,
+        nowMillis: Long
+    ) {
+        activePpgRespirationPath = path
+        activePpgRespirationPathSinceMillis = nowMillis
+        ppgRespirationFailureStreak = 0
+        ppgPrimaryRecoveryStreak = 0
+        ppgPrimaryRecoveryLastRr = null
+        clearPendingPpgRespirationPath()
+    }
+
+    private fun clearPendingPpgRespirationPath() {
+        pendingPpgRespirationPath = null
+        pendingPpgRespirationSuccessStreak = 0
+        pendingPpgRespirationLastRr = null
     }
 
     /**
@@ -1665,6 +3191,9 @@ class PotchArousalCalculator(
             } else {
                 imuGBuffer.toList()
             }
+
+        val windowStartSamplePosition =
+            totalImuRespSampleCount - rawWindow.size.toLong()
 
         if (rawWindow.size < minSampleCount) {
             return null
@@ -1707,24 +3236,27 @@ class PotchArousalCalculator(
             return null
         }
 
-        // 5. 양의 peak / 음의 peak 둘 다 시도
+        // 5. 양의 peak / 음의 peak 후보를 만들고 stable polarity selector에 전달
         val positiveResult = calculateRrFromImuRespWave(
             filtered = filtered,
             usableStartIndex = warmupSamples,
             peakToPeakAmplitudeG = peakToPeakAmplitudeG,
-            invert = false
+            invert = false,
+            windowStartSamplePosition = windowStartSamplePosition
         )
 
         val negativeResult = calculateRrFromImuRespWave(
             filtered = filtered,
             usableStartIndex = warmupSamples,
             peakToPeakAmplitudeG = peakToPeakAmplitudeG,
-            invert = true
+            invert = true,
+            windowStartSamplePosition = windowStartSamplePosition
         )
 
-        return chooseBetterImuRespirationResult(
-            positiveResult,
-            negativeResult
+        return selectStableImuRespirationPath(
+            positiveResult = positiveResult,
+            negativeResult = negativeResult,
+            nowMillis = System.currentTimeMillis()
         )
     }
     /**
@@ -1746,7 +3278,8 @@ class PotchArousalCalculator(
         filtered: DoubleArray,
         usableStartIndex: Int,
         peakToPeakAmplitudeG: Double,
-        invert: Boolean
+        invert: Boolean,
+        windowStartSamplePosition: Long
     ): ImuRespirationResult? {
         val wave =
             if (invert) {
@@ -1803,17 +3336,30 @@ class PotchArousalCalculator(
             return null
         }
 
-        val intervals = mutableListOf<Double>()
+        val peakSamplePositions = peakIndices.map { index ->
+            windowStartSamplePosition + index.toLong()
+        }
+
+        val intervals = mutableListOf<RespirationInterval>()
 
         val minIntervalSec = 60.0 / config.rrMaxBpm
         val maxIntervalSec = 60.0 / config.rrMinBpm
 
-        for (i in 1 until peakIndices.size) {
-            val diffSamples = peakIndices[i] - peakIndices[i - 1]
-            val intervalSec = diffSamples / config.sampleRateHz
+        for (i in 1 until peakSamplePositions.size) {
+            val startPosition = peakSamplePositions[i - 1]
+            val endPosition = peakSamplePositions[i]
+            val intervalSec =
+                (endPosition - startPosition) / config.sampleRateHz
 
             if (intervalSec in minIntervalSec..maxIntervalSec) {
-                intervals.add(intervalSec)
+                intervals.add(
+                    RespirationInterval(
+                        intervalSec = intervalSec,
+                        startSamplePosition = startPosition,
+                        endSamplePosition = endPosition,
+                        segmentId = currentAnalysisSegmentId
+                    )
+                )
             }
         }
 
@@ -1827,7 +3373,8 @@ class PotchArousalCalculator(
             return null
         }
 
-        val averageIntervalSec = usedIntervals.average()
+        val usedIntervalValues = usedIntervals.map { it.intervalSec }
+        val averageIntervalSec = usedIntervalValues.average()
 
         if (averageIntervalSec <= 0.0) {
             return null
@@ -1840,7 +3387,7 @@ class PotchArousalCalculator(
         }
 
         val intervalRegularityScore =
-            calculateImuIntervalRegularityScore(usedIntervals)
+            calculateImuIntervalRegularityScore(usedIntervalValues)
 
         val amplitudeScore =
             (peakToPeakAmplitudeG / config.imuRespMinPeakToPeakAmplitudeG)
@@ -1858,7 +3405,8 @@ class PotchArousalCalculator(
             peakToPeakAmplitudeG = peakToPeakAmplitudeG,
             qualityScore = qualityScore,
             inverted = invert,
-            intervalsSec = usedIntervals
+            peakSamplePositions = peakSamplePositions,
+            intervals = usedIntervals
         )
     }
 
@@ -1869,25 +3417,29 @@ class PotchArousalCalculator(
      * 큰 움직임이나 잘못 잡힌 peak의 영향을 줄인다.
      */
     private fun removeImuRespIntervalOutliers(
-        intervals: List<Double>
-    ): List<Double> {
+        intervals: List<RespirationInterval>
+    ): List<RespirationInterval> {
         if (intervals.size < 3) {
             return intervals
         }
 
-        val sorted = intervals.sorted()
+        val sorted = intervals.map { it.intervalSec }.sorted()
         val median = sorted[sorted.size / 2]
 
-        if (median <= 0.0) {
-            return intervals
+        if (!median.isFinite() || median <= 0.0) {
+            return emptyList()
         }
 
-        val filtered = intervals.filter { interval ->
-            kotlin.math.abs(interval - median) / median <=
-                    config.imuRespIntervalOutlierTolerance
+        val tolerance = config.imuRespIntervalOutlierTolerance
+        if (!tolerance.isFinite() || tolerance < 0.0) {
+            return emptyList()
         }
 
-        return filtered.ifEmpty { intervals }
+        return intervals.filter { interval ->
+            interval.intervalSec.isFinite() &&
+                    interval.intervalSec > 0.0 &&
+                    kotlin.math.abs(interval.intervalSec - median) / median <= tolerance
+        }
     }
 
     /**
@@ -1925,19 +3477,161 @@ class PotchArousalCalculator(
     }
 
     /**
-     * 양의 peak와 음의 peak 중 더 신뢰할 수 있는 IMU 호흡 결과를 선택한다.
-     *
-     * 센서 부착 방향이나 자세에 따라 호흡 파형 부호가 바뀔 수 있어
-     * 두 방향 중 qualityScore가 높은 결과를 사용한다.
+     * IMU positive를 primary로 유지하고, 연속 실패와 연속 확인을 거친 경우에만
+     * negative fallback으로 전환한다. 순간 quality 차이로는 polarity를 바꾸지 않는다.
      */
-    private fun chooseBetterImuRespirationResult(
-        a: ImuRespirationResult?,
-        b: ImuRespirationResult?
+    private fun selectStableImuRespirationPath(
+        positiveResult: ImuRespirationResult?,
+        negativeResult: ImuRespirationResult?,
+        nowMillis: Long
     ): ImuRespirationResult? {
-        if (a == null) return b
-        if (b == null) return a
+        fun candidateFor(path: ImuRespirationDetectionPath): ImuRespirationResult? {
+            return if (path.inverted) negativeResult else positiveResult
+        }
 
-        return if (a.qualityScore >= b.qualityScore) a else b
+        val primaryPath = ImuRespirationDetectionPath.POSITIVE
+
+        if (activeImuRespirationPath != primaryPath) {
+            val primaryCandidate = candidateFor(primaryPath)
+
+            if (primaryCandidate != null) {
+                if (isPendingRrConsistent(
+                        previousRr = imuPrimaryRecoveryLastRr,
+                        currentRr = primaryCandidate.rrBpm
+                    )) {
+                    imuPrimaryRecoveryStreak += 1
+                } else {
+                    imuPrimaryRecoveryStreak = 1
+                }
+                imuPrimaryRecoveryLastRr = primaryCandidate.rrBpm
+
+                if (
+                    imuPrimaryRecoveryStreak >= config.rrPathRecoveryConfirmFrames &&
+                    canSwitchRespirationPath(
+                        activeSinceMillis = activeImuRespirationPathSinceMillis,
+                        nowMillis = nowMillis
+                    )
+                ) {
+                    activateImuRespirationPath(primaryPath, nowMillis)
+                    return primaryCandidate
+                }
+            } else {
+                imuPrimaryRecoveryStreak = 0
+                imuPrimaryRecoveryLastRr = null
+            }
+        }
+
+        val activeCandidate = candidateFor(activeImuRespirationPath)
+        if (activeCandidate != null) {
+            imuRespirationFailureStreak = 0
+            clearPendingImuRespirationPath()
+            return activeCandidate
+        }
+
+        imuRespirationFailureStreak += 1
+        if (imuRespirationFailureStreak < config.rrPathFailuresBeforeFallback) {
+            return null
+        }
+
+        val fallbackPath =
+            if (activeImuRespirationPath == ImuRespirationDetectionPath.POSITIVE) {
+                ImuRespirationDetectionPath.NEGATIVE
+            } else {
+                ImuRespirationDetectionPath.POSITIVE
+            }
+
+        val fallbackCandidate = candidateFor(fallbackPath)
+        if (fallbackCandidate == null) {
+            clearPendingImuRespirationPath()
+            return null
+        }
+
+        registerPendingImuRespirationCandidate(
+            path = fallbackPath,
+            rrBpm = fallbackCandidate.rrBpm
+        )
+
+        if (
+            pendingImuRespirationSuccessStreak >= config.rrPathConfirmFrames &&
+            canSwitchRespirationPath(
+                activeSinceMillis = activeImuRespirationPathSinceMillis,
+                nowMillis = nowMillis
+            )
+        ) {
+            activateImuRespirationPath(fallbackPath, nowMillis)
+            return fallbackCandidate
+        }
+
+        return null
+    }
+
+    private fun registerPendingImuRespirationCandidate(
+        path: ImuRespirationDetectionPath,
+        rrBpm: Double
+    ) {
+        val samePath = pendingImuRespirationPath == path
+        val consistent = samePath && isPendingRrConsistent(
+            previousRr = pendingImuRespirationLastRr,
+            currentRr = rrBpm
+        )
+
+        pendingImuRespirationSuccessStreak =
+            if (consistent) pendingImuRespirationSuccessStreak + 1 else 1
+        pendingImuRespirationPath = path
+        pendingImuRespirationLastRr = rrBpm
+    }
+
+    private fun activateImuRespirationPath(
+        path: ImuRespirationDetectionPath,
+        nowMillis: Long
+    ) {
+        activeImuRespirationPath = path
+        activeImuRespirationPathSinceMillis = nowMillis
+        imuRespirationFailureStreak = 0
+        imuPrimaryRecoveryStreak = 0
+        imuPrimaryRecoveryLastRr = null
+        clearPendingImuRespirationPath()
+    }
+
+    private fun clearPendingImuRespirationPath() {
+        pendingImuRespirationPath = null
+        pendingImuRespirationSuccessStreak = 0
+        pendingImuRespirationLastRr = null
+    }
+
+    private fun isPendingRrConsistent(
+        previousRr: Double?,
+        currentRr: Double
+    ): Boolean {
+        return previousRr == null ||
+                abs(currentRr - previousRr) <= config.rrPathPendingBpmTolerance
+    }
+
+    private fun canSwitchRespirationPath(
+        activeSinceMillis: Long,
+        nowMillis: Long
+    ): Boolean {
+        return activeSinceMillis <= 0L ||
+                nowMillis - activeSinceMillis >= config.rrPathMinHoldMillis
+    }
+
+    private fun resetRespirationPathSelection() {
+        activePpgRespirationPath = PpgRespirationDetectionPath.IR_POSITIVE
+        activePpgRespirationPathSinceMillis = 0L
+        ppgRespirationFailureStreak = 0
+        ppgPrimaryRecoveryStreak = 0
+        ppgPrimaryRecoveryLastRr = null
+        clearPendingPpgRespirationPath()
+        latestPpgRespirationGraphData = PpgRespirationGraphData(
+            minimumWindowSeconds = config.ppgRespMinWindowSeconds
+        )
+
+        activeImuRespirationPath = ImuRespirationDetectionPath.POSITIVE
+        activeImuRespirationPathSinceMillis = 0L
+        imuRespirationFailureStreak = 0
+        imuPrimaryRecoveryStreak = 0
+        imuPrimaryRecoveryLastRr = null
+        clearPendingImuRespirationPath()
     }
 
     /********************* //RR from IMU ********************/
@@ -1947,8 +3641,8 @@ class PotchArousalCalculator(
     /**
      * PPG RR과 IMU RR을 합성해 최종 RR을 결정한다.
      *
-     * 두 센서가 비슷하면 품질 기반 가중 평균을 사용하고,
-     * 한쪽만 유효하거나 서로 크게 다르면 IMU 우선 정책과 quality를 기준으로 선택한다.
+     * 두 센서가 비슷하면 PPG 가중치를 더 크게 둔 품질 기반 가중 평균을 사용하고,
+     * 한쪽만 유효하거나 서로 크게 다르면 PPG 우선 정책과 quality를 기준으로 선택한다.
      */
     fun fuseRespiration(
         ppg: PpgRespirationResult?,
@@ -1956,6 +3650,12 @@ class PotchArousalCalculator(
     ): RrFusionResult {
         val ppgValid = ppg?.rrBpm?.let { isValidRr(it) } == true
         val imuValid = imu?.rrBpm?.let { isValidRr(it) } == true
+        val ppgPathLabel = ppg?.let {
+            "${it.channel.name} ${if (it.inverted) "negative" else "positive"}"
+        }
+        val imuPathLabel = imu?.let {
+            if (it.inverted) "IMU negative" else "IMU positive"
+        }
 
         if (!ppgValid && !imuValid) {
             return RrFusionResult(
@@ -1967,7 +3667,8 @@ class PotchArousalCalculator(
                 imuQuality = imu?.qualityScore,
                 diffBpm = null,
                 confidence = 0.0,
-                log = "RR fusion failed: no valid PPG/IMU RR"
+                log = "RR fusion failed: no valid PPG/IMU RR " +
+                        "(ppgPath=$ppgPathLabel, imuPath=$imuPathLabel)"
             )
         }
 
@@ -1980,8 +3681,8 @@ class PotchArousalCalculator(
                 ppgQuality = ppg?.qualityScore,
                 imuQuality = imu.qualityScore,
                 diffBpm = null,
-                confidence = imu.qualityScore.coerceIn(0.0, 1.0),
-                log = "RR fusion: IMU only"
+                confidence = (imu.qualityScore * 0.8).coerceIn(0.0, 1.0),
+                log = "RR fusion: IMU only (PPG unavailable, path=$imuPathLabel)"
             )
         }
 
@@ -1994,8 +3695,8 @@ class PotchArousalCalculator(
                 ppgQuality = ppg.qualityScore,
                 imuQuality = imu?.qualityScore,
                 diffBpm = null,
-                confidence = (ppg.qualityScore * 0.8).coerceIn(0.0, 1.0),
-                log = "RR fusion: PPG only"
+                confidence = ppg.qualityScore.coerceIn(0.0, 1.0),
+                log = "RR fusion: PPG only (path=$ppgPathLabel)"
             )
         }
 
@@ -2006,8 +3707,22 @@ class PotchArousalCalculator(
         val ppgQuality = ppg.qualityScore.coerceIn(0.0, 1.0)
         val imuQuality = imu.qualityScore.coerceIn(0.0, 1.0)
 
-        // 1. 둘이 충분히 비슷하면 가중 평균
-        if (diff <= config.rrFusionAgreeDiffBpm) {
+        val ppgUsable =
+            ppgQuality >= config.rrFusionMinUsableQuality
+
+        val imuUsable =
+            imuQuality >= config.rrFusionMinUsableQuality
+
+        val imuStrongEnoughForWeighting =
+            imuQuality >= config.rrFusionMinImuQualityForWeighting
+
+        // 1. 두 값이 1 bpm 이내이고 양쪽 품질이 충분하며,
+        // IMU가 엄격한 weighting 품질 기준까지 통과할 때만 가중 평균한다.
+        if (
+            diff <= config.rrFusionAgreeDiffBpm &&
+            ppgUsable &&
+            imuStrongEnoughForWeighting
+        ) {
             val imuWeight =
                 config.rrFusionImuBaseWeight * (0.5 + imuQuality)
 
@@ -2018,7 +3733,7 @@ class PotchArousalCalculator(
 
             val fusedRr =
                 if (totalWeight <= 0.0) {
-                    imuRr
+                    ppgRr
                 } else {
                     (imuRr * imuWeight + ppgRr * ppgWeight) / totalWeight
                 }
@@ -2029,8 +3744,8 @@ class PotchArousalCalculator(
 
             val confidence =
                 (agreementScore * 0.5 +
-                        imuQuality * 0.35 +
-                        ppgQuality * 0.15)
+                        ppgQuality * 0.35 +
+                        imuQuality * 0.15)
                     .coerceIn(0.0, 1.0)
 
             return RrFusionResult(
@@ -2042,39 +3757,41 @@ class PotchArousalCalculator(
                 imuQuality = imuQuality,
                 diffBpm = diff,
                 confidence = confidence,
-                log = "RR fusion: weighted, diff=${"%.2f".format(diff)}"
+                log = "RR fusion: weighted, diff=${"%.2f".format(diff)}, " +
+                        "ppgQ=${"%.2f".format(ppgQuality)}, imuQ=${"%.2f".format(imuQuality)}, " +
+                        "ppgPath=$ppgPathLabel, imuPath=$imuPathLabel"
             )
         }
 
-        // 2. 차이가 크면 기본적으로 IMU 우선
-        // 단, IMU quality가 낮고 PPG quality가 높으면 PPG 사용
-        val imuUsable = imuQuality >= config.rrFusionMinUsableQuality
-        val ppgUsable = ppgQuality >= config.rrFusionMinUsableQuality
-
-        if (!imuUsable && ppgUsable) {
+        // 2. weighted fusion 조건을 만족하지 못하면 기본적으로 PPG를 사용한다.
+        // PPG가 usable하지 않고 IMU만 usable한 경우에만 IMU를 백업으로 사용한다.
+        if (!ppgUsable && imuUsable) {
             return RrFusionResult(
-                rrBpm = ppgRr,
-                source = RrFusionSource.PPG_PREFERRED_DISAGREE,
+                rrBpm = imuRr,
+                source = RrFusionSource.IMU_PREFERRED_DISAGREE,
                 ppgRrBpm = ppgRr,
                 imuRrBpm = imuRr,
                 ppgQuality = ppgQuality,
                 imuQuality = imuQuality,
                 diffBpm = diff,
-                confidence = (ppgQuality * 0.7).coerceIn(0.0, 1.0),
-                log = "RR fusion: disagree, PPG preferred because IMU quality is low"
+                confidence = (imuQuality * 0.7).coerceIn(0.0, 1.0),
+                log = "RR fusion: disagree, IMU used because PPG quality is low " +
+                        "(path=$imuPathLabel)"
             )
         }
 
         return RrFusionResult(
-            rrBpm = imuRr,
-            source = RrFusionSource.IMU_PREFERRED_DISAGREE,
+            rrBpm = ppgRr,
+            source = RrFusionSource.PPG_PREFERRED_DISAGREE,
             ppgRrBpm = ppgRr,
             imuRrBpm = imuRr,
             ppgQuality = ppgQuality,
             imuQuality = imuQuality,
             diffBpm = diff,
-            confidence = (imuQuality * 0.8).coerceIn(0.0, 1.0),
-            log = "RR fusion: disagree, IMU preferred"
+            confidence = (ppgQuality * 0.8).coerceIn(0.0, 1.0),
+            log = "RR fusion: PPG preferred, weighted blocked " +
+                    "(diff=${"%.2f".format(diff)}, ppgQ=${"%.2f".format(ppgQuality)}, " +
+                    "imuQ=${"%.2f".format(imuQuality)})"
         )
     }
 
@@ -2252,11 +3969,16 @@ class PotchArousalCalculator(
         val sortedRr = values.map { it.second }.sorted()
         val median = sortedRr[sortedRr.size / 2]
 
-        val filtered = values.filter { (_, rrBpm) ->
-            abs(rrBpm - median) <= config.rrScoreOutlierToleranceBpm
+        val tolerance = config.rrScoreOutlierToleranceBpm
+        if (!median.isFinite() || !tolerance.isFinite() || tolerance < 0.0) {
+            return emptyList()
         }
 
-        return filtered.ifEmpty { values }
+        return values.filter { (_, rrBpm) ->
+            rrBpm.isFinite() &&
+                    rrBpm > 0.0 &&
+                    abs(rrBpm - median) <= tolerance
+        }
     }
 
     private fun scoreRespiratoryRateAbsolute(
@@ -2296,93 +4018,282 @@ class PotchArousalCalculator(
      * RR fusion source에 맞춰 IMU/PPG interval 중 더 적절한 쪽을 선택하고,
      * 호흡 interval의 연속 차이를 이용해 RMSSD를 산출한다.
      */
-    private fun calculateRrvRmssd(
+    private fun appendRespirationIntervalsForRrv(
         ppg: PpgRespirationResult?,
-        imu: ImuRespirationResult?,
-        rrFusion: RrFusionResult
-    ): RrvResult? {
-        val imuRrv = buildRrvResultFromIntervals(
-            source = RrvSource.IMU,
-            intervalsSec = imu?.intervalsSec,
-            respirationQuality = imu?.qualityScore
-        )
+        imu: ImuRespirationResult?
+    ) {
+        if (ppg != null) {
+            appendRespirationIntervalsForRrvSource(
+                source = RrvSource.PPG,
+                intervals = ppg.intervals,
+                qualityScore = ppg.qualityScore
+            )
+        }
 
-        val ppgRrv = buildRrvResultFromIntervals(
-            source = RrvSource.PPG,
-            intervalsSec = ppg?.intervalsSec,
-            respirationQuality = ppg?.qualityScore
-        )
-
-        return when (rrFusion.source) {
-            RrFusionSource.BOTH_WEIGHTED,
-            RrFusionSource.IMU_ONLY,
-            RrFusionSource.IMU_PREFERRED_DISAGREE -> {
-                imuRrv ?: ppgRrv
-            }
-
-            RrFusionSource.PPG_ONLY,
-            RrFusionSource.PPG_PREFERRED_DISAGREE -> {
-                ppgRrv ?: imuRrv
-            }
-
-            RrFusionSource.NONE -> {
-                chooseBetterRrvResult(imuRrv, ppgRrv)
-            }
+        if (imu != null) {
+            appendRespirationIntervalsForRrvSource(
+                source = RrvSource.IMU,
+                intervals = imu.intervals,
+                qualityScore = imu.qualityScore
+            )
         }
     }
 
     /**
-     * 선택된 호흡 interval 리스트 하나를 RRV 결과로 변환한다.
-     *
-     * interval 품질, 최소 개수, outlier 제거를 거친 뒤
-     * RMSSD, score, qualityScore를 계산한다.
+     * rolling RR 계산으로 동일 interval이 매초 다시 전달되므로
+     * source별 마지막 endSamplePosition보다 새로운 interval만 추가한다.
+     */
+    private fun appendRespirationIntervalsForRrvSource(
+        source: RrvSource,
+        intervals: List<RespirationInterval>,
+        qualityScore: Double
+    ): Int {
+        if (source == RrvSource.NONE) return 0
+        if (qualityScore < config.rrvMinUsableQuality) return 0
+
+        val buffer =
+            when (source) {
+                RrvSource.PPG -> ppgRrvIntervalBuffer
+                RrvSource.IMU -> imuRrvIntervalBuffer
+                RrvSource.NONE -> return 0
+            }
+
+        var lastAcceptedEnd =
+            when (source) {
+                RrvSource.PPG -> lastAcceptedPpgRrvEndSamplePosition
+                RrvSource.IMU -> lastAcceptedImuRrvEndSamplePosition
+                RrvSource.NONE -> Long.MAX_VALUE
+            }
+
+        // 같은 peak를 rolling window에서 몇 sample 다르게 다시 찾는 경우를 중복으로 보지 않는다.
+        // 새 호흡 peak는 최소 허용 호흡 간격의 절반 이상 진행된 뒤에만 받는다.
+        val minimumNewPeakAdvanceSamples =
+            (config.sampleRateHz * (60.0 / config.rrMaxBpm) * 0.5)
+                .toLong()
+                .coerceAtLeast(1L)
+
+        // 양/음 peak 방향이 바뀌면서 이전 interval과 겹치는 후보가 들어오는 것을 막는다.
+        val allowedPeakPositionJitterSamples =
+            (config.sampleRateHz * 0.15)
+                .toLong()
+                .coerceAtLeast(1L)
+
+        var acceptedCount = 0
+
+        intervals
+            .asSequence()
+            .filter { it.segmentId == currentAnalysisSegmentId }
+            .sortedBy { it.endSamplePosition }
+            .forEach { interval ->
+                if (!interval.intervalSec.isFinite() || interval.intervalSec <= 0.0) {
+                    return@forEach
+                }
+
+                if (lastAcceptedEnd != Long.MIN_VALUE) {
+                    val endAdvance =
+                        interval.endSamplePosition - lastAcceptedEnd
+
+                    if (endAdvance < minimumNewPeakAdvanceSamples) {
+                        return@forEach
+                    }
+
+                    // 이전에 수락한 호흡 peak보다 훨씬 앞에서 시작한 interval은
+                    // 반대 polarity에서 나온 겹치는 interval일 가능성이 높다.
+                    if (
+                        interval.startSamplePosition <
+                        lastAcceptedEnd - allowedPeakPositionJitterSamples
+                    ) {
+                        return@forEach
+                    }
+                }
+
+                buffer.addLast(
+                    BufferedRespirationInterval(
+                        interval = interval,
+                        qualityScore = qualityScore.coerceIn(0.0, 1.0)
+                    )
+                )
+
+                lastAcceptedEnd = interval.endSamplePosition
+                acceptedCount += 1
+            }
+
+        when (source) {
+            RrvSource.PPG ->
+                lastAcceptedPpgRrvEndSamplePosition = lastAcceptedEnd
+            RrvSource.IMU ->
+                lastAcceptedImuRrvEndSamplePosition = lastAcceptedEnd
+            RrvSource.NONE -> Unit
+        }
+
+        return acceptedCount
+    }
+
+    /**
+     * source별 RRV buffer에서 최근 config.rrvWindowSeconds 밖의 interval을 제거한다.
+     */
+    private fun trimRespirationVariabilityBuffers() {
+        trimRespirationVariabilityBuffer(
+            buffer = ppgRrvIntervalBuffer,
+            newestSamplePosition = totalPpgRespSampleCount
+        )
+
+        trimRespirationVariabilityBuffer(
+            buffer = imuRrvIntervalBuffer,
+            newestSamplePosition = totalImuRespSampleCount
+        )
+    }
+
+    private fun trimRespirationVariabilityBuffer(
+        buffer: ArrayDeque<BufferedRespirationInterval>,
+        newestSamplePosition: Long
+    ) {
+        val windowSamples =
+            (config.sampleRateHz * config.rrvWindowSeconds)
+                .toLong()
+                .coerceAtLeast(1L)
+
+        val minimumEndSamplePosition =
+            newestSamplePosition - windowSamples
+
+        while (
+            buffer.isNotEmpty() &&
+            buffer.first().interval.endSamplePosition < minimumEndSamplePosition
+        ) {
+            buffer.removeFirst()
+        }
+    }
+
+    private fun clearRespirationVariabilityBuffers(
+        resetSampleCounters: Boolean
+    ) {
+        ppgRrvIntervalBuffer.clear()
+        imuRrvIntervalBuffer.clear()
+
+        lastAcceptedPpgRrvEndSamplePosition = Long.MIN_VALUE
+        lastAcceptedImuRrvEndSamplePosition = Long.MIN_VALUE
+
+        if (resetSampleCounters) {
+            totalPpgRespSampleCount = 0L
+            totalImuRespSampleCount = 0L
+        }
+    }
+
+    /**
+     * PPG/IMU의 최근 3분 interval buffer에서 각각 RRV를 계산한 뒤,
+     * 현재 RR fusion source에 맞는 결과를 최종 선택한다.
+     */
+    private fun calculateRrvRmssd(
+        rrFusion: RrFusionResult
+    ): RrvCalculationBundle {
+        val ppgRrv = buildRrvResultFromIntervals(
+            source = RrvSource.PPG,
+            bufferedIntervals = ppgRrvIntervalBuffer.toList()
+        )
+
+        val imuRrv = buildRrvResultFromIntervals(
+            source = RrvSource.IMU,
+            bufferedIntervals = imuRrvIntervalBuffer.toList()
+        )
+
+        val selected =
+            when (rrFusion.source) {
+                RrFusionSource.BOTH_WEIGHTED,
+                RrFusionSource.PPG_ONLY,
+                RrFusionSource.PPG_PREFERRED_DISAGREE -> {
+                    ppgRrv ?: imuRrv
+                }
+
+                RrFusionSource.IMU_ONLY,
+                RrFusionSource.IMU_PREFERRED_DISAGREE -> {
+                    imuRrv ?: ppgRrv
+                }
+
+                // 현재 프레임에서 RR 자체가 유효하지 않으면 오래된 RRV를 재사용하지 않는다.
+                RrFusionSource.NONE -> null
+            }
+
+        return RrvCalculationBundle(
+            ppg = ppgRrv,
+            imu = imuRrv,
+            selected = selected
+        )
+    }
+
+    /**
+     * 선택된 source의 RRV 전용 rolling interval buffer로 RMSSD를 계산한다.
      */
     private fun buildRrvResultFromIntervals(
         source: RrvSource,
-        intervalsSec: List<Double>?,
-        respirationQuality: Double?
+        bufferedIntervals: List<BufferedRespirationInterval>
     ): RrvResult? {
-        if (intervalsSec == null) return null
-        if (respirationQuality == null) return null
+        if (bufferedIntervals.isEmpty()) return null
 
-        if (respirationQuality < config.rrvMinUsableQuality) {
-            return null
-        }
+        val orderedIntervals =
+            bufferedIntervals
+                .filter {
+                    it.interval.segmentId == currentAnalysisSegmentId &&
+                            it.qualityScore >= config.rrvMinUsableQuality
+                }
+                .sortedBy { it.interval.endSamplePosition }
 
-        val cleanedIntervals = removeRrvIntervalOutliers(intervalsSec)
+        val cleanedIntervals =
+            removeRrvIntervalOutliers(orderedIntervals)
 
         if (cleanedIntervals.size < config.rrvMinIntervalCount) {
             return null
         }
 
-        val successiveDiffs = mutableListOf<Double>()
+        val intervalValues =
+            cleanedIntervals.map { it.interval.intervalSec }
 
-        for (i in 1 until cleanedIntervals.size) {
-            val diff = cleanedIntervals[i] - cleanedIntervals[i - 1]
-            successiveDiffs.add(diff)
-        }
+        // contact loss로 분리된 PPG continuity group 경계에서는
+        // 이전 segment 마지막 interval과 다음 segment 첫 interval의 차이를 RRV로 계산하지 않는다.
+        val successiveDiffs =
+            cleanedIntervals.zipWithNext().mapNotNull { (previous, current) ->
+                if (
+                    previous.interval.continuityGroupId ==
+                    current.interval.continuityGroupId
+                ) {
+                    current.interval.intervalSec - previous.interval.intervalSec
+                } else {
+                    null
+                }
+            }
 
         if (successiveDiffs.isEmpty()) {
             return null
         }
 
-        var sumSquaredDiff = 0.0
+        val rmssdSec =
+            sqrt(
+                successiveDiffs
+                    .map { diff -> diff * diff }
+                    .average()
+            )
 
-        for (diff in successiveDiffs) {
-            sumSquaredDiff += diff * diff
-        }
-
-        val rmssdSec = sqrt(sumSquaredDiff / successiveDiffs.size)
         val rmssdMs = rmssdSec * 1000.0
-        val meanIntervalSec = cleanedIntervals.average()
-
+        val meanIntervalSec = intervalValues.average()
         val score = scoreRrvRmssd(rmssdSec)
 
+        val meanRespirationQuality =
+            cleanedIntervals
+                .map { it.qualityScore }
+                .average()
+                .coerceIn(0.0, 1.0)
+
+        val preferredCount =
+            config.rrvPreferredIntervalCount
+                .coerceAtLeast(config.rrvMinIntervalCount)
+                .toDouble()
+
         val intervalCountScore =
-            (cleanedIntervals.size / 8.0).coerceIn(0.0, 1.0)
+            (cleanedIntervals.size / preferredCount)
+                .coerceIn(0.0, 1.0)
 
         val qualityScore =
-            (respirationQuality * 0.7 + intervalCountScore * 0.3)
+            (meanRespirationQuality * 0.7 +
+                    intervalCountScore * 0.3)
                 .coerceIn(0.0, 1.0)
 
         return RrvResult(
@@ -2393,7 +4304,9 @@ class PotchArousalCalculator(
             meanIntervalSec = meanIntervalSec,
             score = score,
             qualityScore = qualityScore,
-            log = "RRV ${source.name}: rmssd=${"%.3f".format(rmssdSec)}s, intervals=${cleanedIntervals.size}"
+            log = "RRV ${source.name}: rmssd=${"%.3f".format(rmssdSec)}s, " +
+                    "intervals=${cleanedIntervals.size}, " +
+                    "window=${config.rrvWindowSeconds}s"
         )
     }
 
@@ -2404,24 +4317,32 @@ class PotchArousalCalculator(
      * 중앙값 기준 허용 범위 밖의 값을 제외한다.
      */
     private fun removeRrvIntervalOutliers(
-        intervals: List<Double>
-    ): List<Double> {
+        intervals: List<BufferedRespirationInterval>
+    ): List<BufferedRespirationInterval> {
         if (intervals.size < 3) {
             return intervals
         }
 
-        val sorted = intervals.sorted()
+        val sorted =
+            intervals.map { it.interval.intervalSec }.sorted()
         val median = sorted[sorted.size / 2]
 
-        if (median <= 0.0) {
-            return intervals
+        if (!median.isFinite() || median <= 0.0) {
+            return emptyList()
         }
 
-        val filtered = intervals.filter { interval ->
-            abs(interval - median) / median <= config.rrvIntervalOutlierTolerance
+        val tolerance = config.rrvIntervalOutlierTolerance
+        if (!tolerance.isFinite() || tolerance < 0.0) {
+            return emptyList()
         }
 
-        return filtered.ifEmpty { intervals }
+        return intervals.filter { buffered ->
+            val interval = buffered.interval.intervalSec
+
+            interval.isFinite() &&
+                    interval > 0.0 &&
+                    abs(interval - median) / median <= tolerance
+        }
     }
 
     /**
@@ -2559,11 +4480,14 @@ class PotchArousalCalculator(
         val bpmValues = values.map { it.second }.sorted()
         val median = bpmValues[bpmValues.size / 2]
 
-        val filtered = values.filter { (_, bpm) ->
-            abs(bpm - median) <= config.hrOutlierToleranceBpm
+        val tolerance = config.hrOutlierToleranceBpm
+        if (!tolerance.isFinite() || tolerance < 0.0) {
+            return emptyList()
         }
 
-        return filtered.ifEmpty { values }
+        return values.filter { (_, bpm) ->
+            bpm > 0 && abs(bpm - median) <= tolerance
+        }
     }
 
     /**
@@ -2594,20 +4518,32 @@ class PotchArousalCalculator(
      * DataProcessor에서 넘어온 HeartRateEstimate의 IBI들을 HRV buffer에 저장한다.
      *
      * rolling buffer 재계산 때문에 같은 IBI가 반복 전달될 수 있으므로
-     * endSampleIndex를 이용해 이미 저장한 interval은 건너뛴다.
+     * 포물선 보간된 endSamplePosition을 이용해 이미 저장한 interval은 건너뛴다.
      */
     private fun appendHeartRateEstimateToHrvBuffer(
-        estimate: HeartRateEstimate
-    ) {
+        estimate: HeartRateEstimate,
+        acceptedAtMillis: Long
+    ): Int {
         if (estimate.qualityScore < config.hrvMinEstimateQuality) {
-            return
+            return 0
         }
 
+        var acceptedCount = 0
         val sortedIntervals = estimate.ibiIntervals
-            .sortedBy { it.endSampleIndex }
+            .filter { it.segmentId == currentAnalysisSegmentId }
+            .sortedBy { it.endSamplePosition }
 
         for (ibi in sortedIntervals) {
-            if (ibi.endSampleIndex <= lastAcceptedHrvIbiEndSampleIndex) {
+            if (!ibi.endSamplePosition.isFinite()) {
+                continue
+            }
+
+            if (ibi.segmentId != lastAcceptedHrvIbiSegmentId) {
+                lastAcceptedHrvIbiSegmentId = ibi.segmentId
+                lastAcceptedHrvIbiEndSamplePosition = Double.NEGATIVE_INFINITY
+            }
+
+            if (ibi.endSamplePosition <= lastAcceptedHrvIbiEndSamplePosition) {
                 continue
             }
 
@@ -2616,10 +4552,27 @@ class PotchArousalCalculator(
             }
 
             hrvIbiBuffer.addLast(ibi)
-            lastAcceptedHrvIbiEndSampleIndex = ibi.endSampleIndex
+            lastAcceptedHrvIbiEndSamplePosition = ibi.endSamplePosition
+            acceptedCount += 1
+        }
+
+        if (acceptedCount > 0) {
+            lastValidHrvTimestampMillis = acceptedAtMillis
+            hrvBufferExpiredByGap = false
         }
 
         trimHrvIbiBuffer()
+        return acceptedCount
+    }
+
+    /**
+     * 현재 연속 구간에 속한 IBI만 반환한다.
+     * 이전 segment의 IBI는 보관 중이어도 RMSSD/LF-HF 계산에는 사용하지 않는다.
+     */
+    private fun currentSegmentHrvIbis(): List<IbiInterval> {
+        return hrvIbiBuffer.filter {
+            it.segmentId == currentAnalysisSegmentId
+        }
     }
 
     /**
@@ -2630,14 +4583,33 @@ class PotchArousalCalculator(
     private fun trimHrvIbiBuffer() {
         if (hrvIbiBuffer.isEmpty()) return
 
-        val newestSampleIndex = hrvIbiBuffer.last().endSampleIndex
-        val windowSamples =
-            (config.sampleRateHz * config.hrvWindowSeconds).toLong()
+        // 현재 segment 이전 데이터는 이후 계산에 다시 쓰지 않으므로 제거한다.
+        while (
+            hrvIbiBuffer.isNotEmpty() &&
+            hrvIbiBuffer.first().segmentId < currentAnalysisSegmentId
+        ) {
+            hrvIbiBuffer.removeFirst()
+        }
 
-        val minSampleIndex = newestSampleIndex - windowSamples
+        val currentIbis = currentSegmentHrvIbis()
+        if (currentIbis.isEmpty()) return
+
+        val newestSamplePosition =
+            currentIbis.last().endSamplePosition
+
+        val windowSamples =
+            config.sampleRateHz * config.hrvWindowSeconds
+
+        val minSamplePosition =
+            newestSamplePosition - windowSamples
 
         while (hrvIbiBuffer.isNotEmpty()) {
-            if (hrvIbiBuffer.first().endSampleIndex >= minSampleIndex) {
+            val first = hrvIbiBuffer.first()
+
+            if (
+                first.segmentId == currentAnalysisSegmentId &&
+                first.endSamplePosition >= minSamplePosition
+            ) {
                 break
             }
 
@@ -2652,11 +4624,13 @@ class PotchArousalCalculator(
      * RMSSD(ms)를 구하고 HRV score와 품질 점수를 함께 반환한다.
      */
     fun calculateHeartRateVariability(): HeartRateVariabilityResult? {
-        if (hrvIbiBuffer.size < config.hrvMinIbiCount) {
+        val segmentIbis = currentSegmentHrvIbis()
+
+        if (segmentIbis.size < config.hrvMinIbiCount) {
             return null
         }
 
-        val cleanedIbis = removeHrvIbiOutliers(hrvIbiBuffer.toList())
+        val cleanedIbis = removeHrvIbiOutliers(segmentIbis)
 
         if (cleanedIbis.size < config.hrvMinIbiCount) {
             return null
@@ -2723,15 +4697,20 @@ class PotchArousalCalculator(
         val sorted = ibis.map { it.intervalSec }.sorted()
         val median = sorted[sorted.size / 2]
 
-        if (median <= 0.0) {
-            return ibis
+        if (!median.isFinite() || median <= 0.0) {
+            return emptyList()
         }
 
-        val filtered = ibis.filter { ibi ->
-            abs(ibi.intervalSec - median) / median <= config.hrvIbiOutlierTolerance
+        val tolerance = config.hrvIbiOutlierTolerance
+        if (!tolerance.isFinite() || tolerance < 0.0) {
+            return emptyList()
         }
 
-        return filtered.ifEmpty { ibis }
+        return ibis.filter { ibi ->
+            ibi.intervalSec.isFinite() &&
+                    ibi.intervalSec > 0.0 &&
+                    abs(ibi.intervalSec - median) / median <= tolerance
+        }
     }
 
     /**
@@ -2792,11 +4771,13 @@ class PotchArousalCalculator(
      * 평균 제거, Hamming window, FFT power spectrum을 거쳐 LF/HF power를 구한다.
      */
     fun calculateHrvFrequencyDomain(): HrvFrequencyResult? {
-        if (hrvIbiBuffer.size < config.hrvSpectralMinIbiCount) {
+        val segmentIbis = currentSegmentHrvIbis()
+
+        if (segmentIbis.size < config.hrvSpectralMinIbiCount) {
             return null
         }
 
-        val cleanedIbis = removeHrvIbiOutliers(hrvIbiBuffer.toList())
+        val cleanedIbis = removeHrvIbiOutliers(segmentIbis)
 
         if (cleanedIbis.size < config.hrvSpectralMinIbiCount) {
             return null
@@ -2886,13 +4867,19 @@ class PotchArousalCalculator(
     ): List<IbiInterval> {
         if (ibis.isEmpty()) return emptyList()
 
-        val newestSampleIndex = ibis.last().endSampleIndex
+        val newestSamplePosition =
+            ibis.last().endSamplePosition
+
         val windowSamples =
-            (config.sampleRateHz * config.hrvFrequencyWindowSeconds).toLong()
+            config.sampleRateHz * config.hrvFrequencyWindowSeconds
 
-        val minSampleIndex = newestSampleIndex - windowSamples
+        val minSamplePosition =
+            newestSamplePosition - windowSamples
 
-        return ibis.filter { it.endSampleIndex >= minSampleIndex }
+        return ibis.filter {
+            it.endSamplePosition.isFinite() &&
+                    it.endSamplePosition >= minSamplePosition
+        }
     }
 
     /**
@@ -2908,12 +4895,24 @@ class PotchArousalCalculator(
         if (ibis.size < 2) return null
         if (resampleRateHz <= 0.0) return null
 
+        val targetSegmentId = ibis.last().segmentId
+
         val points = ibis
-            .sortedBy { it.endSampleIndex }
+            .filter {
+                it.segmentId == targetSegmentId &&
+                        it.endSamplePosition.isFinite() &&
+                        it.intervalSec.isFinite() &&
+                        it.intervalSec > 0.0
+            }
+            .sortedBy { it.endSamplePosition }
             .map { ibi ->
-                val timeSec = ibi.endSampleIndex / config.sampleRateHz
+                val timeSec =
+                    ibi.endSamplePosition / config.sampleRateHz
+
                 timeSec to ibi.intervalSec
             }
+
+        if (points.size < 2) return null
 
         val startTime = points.first().first
         val endTime = points.last().first
@@ -3233,11 +5232,15 @@ class PotchArousalCalculator(
         val sortedTemps = values.map { it.second }.sorted()
         val median = sortedTemps[sortedTemps.size / 2]
 
-        val filtered = values.filter { (_, celsius) ->
-            abs(celsius - median) <= config.skinTempOutlierToleranceCelsius
+        val tolerance = config.skinTempOutlierToleranceCelsius
+        if (!median.isFinite() || !tolerance.isFinite() || tolerance < 0.0) {
+            return emptyList()
         }
 
-        return filtered.ifEmpty { values }
+        return values.filter { (_, celsius) ->
+            celsius.isFinite() &&
+                    abs(celsius - median) <= tolerance
+        }
     }
 
     /**
@@ -3266,7 +5269,9 @@ class PotchArousalCalculator(
             }
         }
 
-        return result.ifEmpty { values }
+        // 첫 번째 값을 항상 넣으므로 정상 입력에서는 비어 있지 않다.
+        // 향후 로직이 바뀌더라도 원본 이상치를 되살리지 않도록 결과를 그대로 반환한다.
+        return result
     }
 
     /**

@@ -324,6 +324,8 @@ class PotchBleManager(
 
                 error(msg)
 
+                // 오류 연결의 분석 상태를 다음 연결로 넘기지 않는다.
+                dataProcessor.reset()
                 closeGatt()
 
                 if (!manualDisconnect) {
@@ -336,6 +338,10 @@ class PotchBleManager(
             }
             when (newState) {
                 BluetoothProfile.STATE_CONNECTED -> {
+                    // 새 GATT 연결(최초 연결/재연결)마다 분석 session을 완전히 초기화한다.
+                    // 이전 연결의 partial frame, PPG window, HRV IBI가 새 연결과 섞이지 않게 한다.
+                    dataProcessor.reset()
+
                     // 연결된 기기 이름을 가져온다.
                     val name = getDeviceName(gatt.device)
 
@@ -375,6 +381,8 @@ class PotchBleManager(
                 BluetoothProfile.STATE_DISCONNECTED -> {
                     val name = getDeviceName(gatt.device)
 
+                    // 연결 경계에서 분석 버퍼를 즉시 폐기한다.
+                    dataProcessor.reset()
                     closeGatt()
 
                     if (!manualDisconnect) {
@@ -709,6 +717,7 @@ class PotchBleManager(
         isReconnecting = false
         reconnectAttempt = 0
 
+        dataProcessor.reset()
         gatt?.disconnect()
         closeGatt()
 
@@ -1084,6 +1093,7 @@ class PotchBleManager(
         reconnectAttempt = 0
 
         stopScan()
+        dataProcessor.reset()
         gatt?.disconnect()
         closeGatt()
 
@@ -1121,6 +1131,7 @@ class PotchBleManager(
         dataLogger.logDebug(TAG, "stopReconnectOnly() Called")
 
         stopScan()
+        dataProcessor.reset()
         gatt?.disconnect()
         closeGatt()
 
