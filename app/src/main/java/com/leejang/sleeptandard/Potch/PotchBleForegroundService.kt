@@ -60,7 +60,10 @@ class PotchBleForegroundService : Service() {
         const val EXTRA_COMMAND_PAYLOAD = "extra_command_payload"
         const val EXTRA_COMMAND_WITHOUT_RESPONSE = "extra_command_without_response"
 
-        /** ble(3).c 기반 LED/Vibe 트리거 명령(0x01) 전송. */
+        /**
+         * 구버전 펌웨어 호환용 action.
+         * 최신 펌웨어는 0x01 write를 수신해도 LED/Vibe를 실행하지 않으므로 전송하지 않는다.
+         */
         const val ACTION_TRIGGER_LED_FLASH =
             "com.leejang.sleeptandard.Potch.ACTION_TRIGGER_LED_FLASH"
         /**
@@ -195,11 +198,13 @@ class PotchBleForegroundService : Service() {
                 )
             }
             ACTION_TRIGGER_LED_FLASH -> {
+                // 최신 펌웨어의 rx_write_cb에서 trigger_led_flash() 호출이 제거되었다.
+                // 의미 없는 0x01 write를 보내지 않고 명확한 호환성 로그만 남긴다.
                 val started = bleManager?.triggerLedFlash() ?: false
                 dataLogger?.logDebug(
                     TAG,
-                    "ACTION_TRIGGER_LED_FLASH command=0x01, started=$started",
-                    if (started) "I" else "E"
+                    "ACTION_TRIGGER_LED_FLASH unsupported_by_firmware=true, started=$started",
+                    "W"
                 )
             }
 

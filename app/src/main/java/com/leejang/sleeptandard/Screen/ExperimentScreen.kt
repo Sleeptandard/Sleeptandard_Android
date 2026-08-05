@@ -220,10 +220,15 @@ private fun ConnectionSection(
             else -> "대기"
         })
         StatusLine("기기", bleState.deviceName ?: "--")
+        StatusLine("Bond", bondStateLabel(bleState.bondState))
         StatusLine("MTU", bleState.mtu.toString())
         StatusLine(
+            "PHY",
+            "TX=${phyLabel(bleState.txPhy)} · RX=${phyLabel(bleState.rxPhy)}"
+        )
+        StatusLine(
             "Characteristic",
-            "Notify · Write=${bleState.supportsWrite} · WriteNR=${bleState.supportsWriteWithoutResponse}"
+            "NotifyReady=${bleState.isNotificationReady} · Write=${bleState.supportsWrite} · WriteNR=${bleState.supportsWriteWithoutResponse}"
         )
         StatusLine("마지막 로그", bleState.lastLog)
         bleState.lastError?.let { StatusLine("오류", it, Color(0xFFFF7777)) }
@@ -240,10 +245,10 @@ private fun ConnectionSection(
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             ActionButton(
-                label = "LED/Vibe 0x01",
+                label = "LED/Vibe 미지원",
                 onClick = onTrigger,
                 modifier = Modifier.weight(1f),
-                enabled = bleState.isConnected && bleState.supportsWriteWithoutResponse
+                enabled = bleState.isConnected && bleState.supportsLedTrigger
             )
             ActionButton("분석 초기화", onReset, Modifier.weight(1f))
         }
@@ -853,6 +858,21 @@ private fun baselineStateColor(state: BaselineLifecycleState): Color = when (sta
     BaselineLifecycleState.COLLECTING -> Color(0xFFFFD166)
     BaselineLifecycleState.PROVISIONAL -> Color(0xFF52A7FF)
     BaselineLifecycleState.MATURE -> Color(0xFF54E2A0)
+}
+
+private fun bondStateLabel(state: Int): String = when (state) {
+    android.bluetooth.BluetoothDevice.BOND_NONE -> "NONE"
+    android.bluetooth.BluetoothDevice.BOND_BONDING -> "BONDING"
+    android.bluetooth.BluetoothDevice.BOND_BONDED -> "BONDED"
+    else -> "UNKNOWN($state)"
+}
+
+private fun phyLabel(phy: Int?): String = when (phy) {
+    null -> "--"
+    android.bluetooth.BluetoothDevice.PHY_LE_1M -> "1M"
+    android.bluetooth.BluetoothDevice.PHY_LE_2M -> "2M"
+    android.bluetooth.BluetoothDevice.PHY_LE_CODED -> "CODED"
+    else -> "UNKNOWN($phy)"
 }
 
 private fun statusColor(state: MetricCalculationState): Color = when (state) {
