@@ -684,6 +684,10 @@ class PotchDataProcessor(
             diagnostics = diagnostics
         )
 
+        stabilityCalculator?.activeBaselinesSnapshot()?.let { baselines ->
+            arousalCalculator.updatePersonalBaselines(baselines)
+        }
+
         val arousalState =
             arousalCalculator.processBurst(sensorData, freshEstimate, status)
         val stabilityState = stabilityCalculator?.processFrame(
@@ -2886,8 +2890,11 @@ class PotchDataProcessor(
         private const val POTCH_PPG_SAMPLE_RATE_HZ = 128.0
         private const val IMU_LSB_PER_G = 8192.0
 
-        private const val HR_WINDOW_SAMPLES = 1024
-        private const val MAX_HR_BUFFER_SAMPLES = 1280
+        // Green PPG 128 Hz 기준 최대 12초 분석창.
+        private const val HR_WINDOW_SAMPLES = 1536
+        // 12초 분석창보다 3초 더 보관해 continuity/정리 과정의 여유를 둔다.
+        private const val MAX_HR_BUFFER_SAMPLES = 1920
+        // 초기 계산 시작 조건은 기존과 동일하게 약 3초를 유지한다.
         private const val MIN_HR_SAMPLES = 384
         private const val ADAPTIVE_FIT_PREFERRED_SAMPLES = 768
 

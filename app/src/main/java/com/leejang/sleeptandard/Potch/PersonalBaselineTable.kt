@@ -11,6 +11,7 @@ enum class BaselineMetricType(val candidateColumn: String) {
     RRV("rrv_median"),
     HR("hr_median"),
     HRV_RMSSD("hrv_rmssd_median"),
+    HRV_LF_HF("hrv_lf_hf_median"),
     TEMPERATURE("temperature_median")
 }
 

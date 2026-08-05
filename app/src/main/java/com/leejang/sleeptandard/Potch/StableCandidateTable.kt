@@ -60,6 +60,19 @@ data class StableCandidateRecord(
     val rrvMean: Double? = null,
     val hrMean: Double? = null,
     val hrvRmssdMean: Double? = null,
+
+    // LF/HF 중앙값은 개인 LF/HF 기준선 생성을 위해 SQLite에도 저장한다.
+    // 아래 mean/count/rejection 값은 episode CSV 감사 로그 전용이다.
+    val hrvLfHfMedian: Double? = null,
+    val hrvLfHfMean: Double? = null,
+    val hrvFrequencyUsableFrameCount: Int = 0,
+    val hrvFrequencyRejectedFrameCount: Int = 0,
+    val hrvFrequencyRejectionSummary: String? = null,
+    val hrvRmssdQualityMedian: Double? = null,
+    val hrvFrequencyQualityMedian: Double? = null,
+    val hrvRmssdStabilityMedian: Double? = null,
+    val hrvLfHfStabilityMedian: Double? = null,
+
     val temperatureMean: Double? = null
 )
 
@@ -68,7 +81,7 @@ data class StableCandidateRecord(
  */
 internal object PotchStabilitySchema {
     const val DATABASE_NAME = "potch_stability.db"
-    const val DATABASE_VERSION = 1
+    const val DATABASE_VERSION = 2
 
     const val STABLE_CANDIDATE_TABLE = "stable_candidate"
     const val PERSONAL_BASELINE_TABLE = "personal_baseline"
@@ -88,6 +101,7 @@ internal object PotchStabilitySchema {
             hrv_rmssd_median REAL,
             hrv_lf_median REAL,
             hrv_hf_median REAL,
+            hrv_lf_hf_median REAL,
             temperature_median REAL,
             temperature_slope_median REAL,
 
@@ -150,7 +164,12 @@ internal class PotchStabilityDbHelper(context: Context) : SQLiteOpenHelper(
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        // 첫 구현 버전. 이후 스키마가 변경되면 데이터 보존 migration을 여기에 추가한다.
+        if (oldVersion < 2) {
+            db.execSQL(
+                "ALTER TABLE ${PotchStabilitySchema.STABLE_CANDIDATE_TABLE} " +
+                        "ADD COLUMN hrv_lf_hf_median REAL"
+            )
+        }
     }
 }
 
@@ -344,6 +363,7 @@ class StableCandidateTable(context: Context) {
             putNullable("hrv_rmssd_median", hrvRmssdMedian)
             putNullable("hrv_lf_median", hrvLfMedian)
             putNullable("hrv_hf_median", hrvHfMedian)
+            putNullable("hrv_lf_hf_median", hrvLfHfMedian)
             putNullable("temperature_median", temperatureMedian)
             putNullable("temperature_slope_median", temperatureSlopeMedian)
 

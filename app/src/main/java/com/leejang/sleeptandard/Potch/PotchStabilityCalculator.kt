@@ -10,7 +10,8 @@ import kotlin.math.sqrt
 
 /** 안정점수 및 개인 기준선 계산의 초기 조정값. */
 data class StabilityConfig(
-    val algorithmVersion: Int = 1,
+    // HRV 안정점수 구조가 변경되어 이전 후보/기준선과 섞이지 않도록 version을 올린다.
+    val algorithmVersion: Int = 3,
 
     val minimumMetricQuality: Double = 0.35,
     val minimumDomainCount: Int = 3,
@@ -30,6 +31,10 @@ data class StabilityConfig(
     val rrvMetricWeight: Double = 0.35,
     val hrMetricWeight: Double = 0.55,
     val hrvMetricWeight: Double = 0.45,
+
+    // HRV 영역 내부 고정 가중치. 사용 불가 구성요소는 0점/0품질 몫으로 남긴다.
+    val hrvFrequencyStabilityWeight: Double = 0.70,
+    val hrvRmssdStabilityWeight: Double = 0.30,
 
     val fourDomainCoveragePenalty: Double = 1.00,
     val threeDomainCoveragePenalty: Double = 0.90,
@@ -52,6 +57,8 @@ data class StabilityConfig(
     val hrSlopeScalePerMinute: Double = 1.0,
     val hrvVariationScaleSec: Double = 0.040,
     val hrvSlopeScaleSecPerMinute: Double = 0.020,
+    val hrvLfHfVariationScale: Double = 0.75,
+    val hrvLfHfSlopeScalePerMinute: Double = 0.50,
     val temperatureVariationScaleCelsius: Double = 0.15,
     val temperatureSlopeScalePerMinute: Double = 0.03,
 
@@ -59,6 +66,7 @@ data class StabilityConfig(
     val rrvMinimumBaselineScale: Double = 0.05,
     val hrMinimumBaselineScale: Double = 2.0,
     val hrvMinimumBaselineScale: Double = 0.01,
+    val hrvLfHfMinimumBaselineScale: Double = 0.15,
     val temperatureMinimumBaselineScale: Double = 0.05,
 
     val rrConsistencyWindowMillis: Long = 60_000L,
@@ -69,6 +77,8 @@ data class StabilityConfig(
     val hrSlopeWindowMillis: Long = 180_000L,
     val hrvConsistencyWindowMillis: Long = 60_000L,
     val hrvSlopeWindowMillis: Long = 120_000L,
+    val hrvLfHfConsistencyWindowMillis: Long = 120_000L,
+    val hrvLfHfSlopeWindowMillis: Long = 120_000L,
     val temperatureConsistencyWindowMillis: Long = 120_000L,
     val temperatureSlopeWindowMillis: Long = 300_000L,
 
@@ -115,6 +125,10 @@ data class StabilityState(
     val rrvStabilityScore: Double? = null,
     val hrStabilityScore: Double? = null,
     val hrvStabilityScore: Double? = null,
+    val hrvRmssdStabilityScore: Double? = null,
+    val hrvLfHfStabilityScore: Double? = null,
+    val hrvFrequencyUsable: Boolean = false,
+    val hrvFrequencyRejectionReasons: String? = null,
     val usedDomainCount: Int = 0,
     val enteringDurationSec: Int = 0,
     val activeEpisodeDurationSec: Int = 0,
@@ -161,16 +175,23 @@ private data class StabilityFrameSample(
     val hrvRmssd: Double?,
     val hrvLf: Double?,
     val hrvHf: Double?,
+    val hrvLfHf: Double?,
+    val hrvFrequencyUsable: Boolean,
+    val hrvFrequencyRejectionReasons: String?,
     val temperature: Double?,
     val temperatureSlope: Double?,
     val rrQuality: Double?,
     val rrvQuality: Double?,
     val hrQuality: Double?,
     val hrvQuality: Double?,
+    val hrvRmssdQuality: Double?,
+    val hrvFrequencyQuality: Double?,
     val temperatureQuality: Double?,
     val movementScore: Double?,
     val respiratoryScore: Double?,
     val cardiacScore: Double?,
+    val hrvRmssdStabilityScore: Double?,
+    val hrvLfHfStabilityScore: Double?,
     val temperatureScore: Double?,
     val overallScore: Double,
     val usedDomainCount: Int,
@@ -214,6 +235,7 @@ class PotchStabilityCalculator(
     private val config: StabilityConfig = StabilityConfig()
 ) {
     private val histories = BaselineMetricType.values().associateWith { ArrayDeque<TimedMetricValue>() }
+    private val hrvLfHfHistory = ArrayDeque<TimedMetricValue>()
 
     private var sessionId: String? = null
     private var sessionActive = false
@@ -269,6 +291,7 @@ class PotchStabilityCalculator(
         finalizeActiveEpisode(endTime, "continuity break: $reason")
         resetEntryState()
         histories.values.forEach { it.clear() }
+        hrvLfHfHistory.clear()
         lastAnalysisSegmentId = newSegmentId
 
         lastState = lastState.copy(
@@ -308,13 +331,15 @@ class PotchStabilityCalculator(
         val rrQuality = state.rrFusionConfidence.coerceIn(0.0, 1.0)
         val rrvQuality = state.rrvQuality.coerceIn(0.0, 1.0)
         val hrQuality = (diagnostics.qualityScore ?: 0.0).coerceIn(0.0, 1.0)
-        val hrvQuality = state.hrvQuality.coerceIn(0.0, 1.0)
+        val hrvRmssdQuality = state.hrvRmssdQuality.coerceIn(0.0, 1.0)
+        val hrvFrequencyQuality = state.hrvFrequencyQuality.coerceIn(0.0, 1.0)
         val temperatureQuality = state.skinTemperatureQuality.coerceIn(0.0, 1.0)
 
         val rrSignalConsistency = calculateRrSignalConsistency(state)
         val rrvSignalConsistency = calculateRrvSignalConsistency(state)
         val hrSignalConsistency = calculateHrSignalConsistency(diagnostics)
-        val hrvSignalConsistency = calculateHrvSignalConsistency(state)
+        val hrvRmssdSignalConsistency = calculateHrvRmssdSignalConsistency(state)
+        val hrvFrequencySignalConsistency = calculateHrvFrequencySignalConsistency(state)
         val temperatureSignalConsistency = calculateTemperatureSignalConsistency(state)
 
         val rrScore = addAndCalculateMetric(
@@ -338,12 +363,22 @@ class PotchStabilityCalculator(
             signalConsistency = hrSignalConsistency,
             nowMillis = input.phoneTimeMillis
         )
-        val hrvScore = addAndCalculateMetric(
+        val hrvRmssdScore = addAndCalculateMetric(
             metricType = BaselineMetricType.HRV_RMSSD,
             value = state.hrvRmssd,
-            quality = hrvQuality,
-            signalConsistency = hrvSignalConsistency,
+            quality = hrvRmssdQuality,
+            signalConsistency = hrvRmssdSignalConsistency,
             nowMillis = input.phoneTimeMillis
+        )
+        val hrvLfHfScore = addAndCalculateHrvFrequencyMetric(
+            state = state,
+            quality = hrvFrequencyQuality,
+            signalConsistency = hrvFrequencySignalConsistency,
+            nowMillis = input.phoneTimeMillis
+        )
+        val hrvScore = combineHrvStability(
+            frequency = hrvLfHfScore,
+            rmssd = hrvRmssdScore
         )
         val temperatureScore = addAndCalculateMetric(
             metricType = BaselineMetricType.TEMPERATURE,
@@ -360,11 +395,9 @@ class PotchStabilityCalculator(
                 rrvScore to config.rrvMetricWeight
             )
         )
-        val cardiacDomain = combineMetrics(
-            listOf(
-                hrScore to config.hrMetricWeight,
-                hrvScore to config.hrvMetricWeight
-            )
+        val cardiacDomain = combineCardiacMetrics(
+            hr = hrScore,
+            hrv = hrvScore
         )
         val temperatureDomain = temperatureScore?.let {
             DomainStabilityScore(it.score, it.quality)
@@ -418,19 +451,27 @@ class PotchStabilityCalculator(
                 rr = rrScore?.value,
                 rrv = rrvScore?.value,
                 hr = hrScore?.value,
-                hrvRmssd = hrvScore?.value,
-                hrvLf = state.hrvLf,
-                hrvHf = state.hrvHf,
+                hrvRmssd = hrvRmssdScore?.value,
+                // 사용 제한을 통과한 주파수 값만 안정 episode 개인 기준선 후보에 포함한다.
+                hrvLf = state.hrvLf.takeIf { state.hrvFrequencyUsable },
+                hrvHf = state.hrvHf.takeIf { state.hrvFrequencyUsable },
+                hrvLfHf = state.hrvLfHf.takeIf { state.hrvFrequencyUsable },
+                hrvFrequencyUsable = state.hrvFrequencyUsable,
+                hrvFrequencyRejectionReasons = state.hrvFrequencyRejectionReasons,
                 temperature = temperatureScore?.value,
                 temperatureSlope = state.skinTemperatureGradient,
                 rrQuality = rrScore?.quality,
                 rrvQuality = rrvScore?.quality,
                 hrQuality = hrScore?.quality,
                 hrvQuality = hrvScore?.quality,
+                hrvRmssdQuality = hrvRmssdScore?.quality,
+                hrvFrequencyQuality = hrvLfHfScore?.quality ?: state.hrvFrequencyQuality,
                 temperatureQuality = temperatureScore?.quality,
                 movementScore = movementDomain?.score,
                 respiratoryScore = respiratoryDomain?.score,
                 cardiacScore = cardiacDomain?.score,
+                hrvRmssdStabilityScore = hrvRmssdScore?.score,
+                hrvLfHfStabilityScore = hrvLfHfScore?.score,
                 temperatureScore = temperatureDomain?.score,
                 overallScore = it,
                 usedDomainCount = usedDomainCount,
@@ -462,6 +503,10 @@ class PotchStabilityCalculator(
             rrvStabilityScore = rrvScore?.score,
             hrStabilityScore = hrScore?.score,
             hrvStabilityScore = hrvScore?.score,
+            hrvRmssdStabilityScore = hrvRmssdScore?.score,
+            hrvLfHfStabilityScore = hrvLfHfScore?.score,
+            hrvFrequencyUsable = state.hrvFrequencyUsable,
+            hrvFrequencyRejectionReasons = state.hrvFrequencyRejectionReasons,
             usedDomainCount = usedDomainCount,
             enteringDurationSec = enteringDuration,
             activeEpisodeDurationSec = activeDuration,
@@ -476,6 +521,11 @@ class PotchStabilityCalculator(
                 append(", rrv=${rrvScore?.score?.let { "%.1f".format(it) }}")
                 append(", hr=${hrScore?.score?.let { "%.1f".format(it) }}")
                 append(", hrv=${hrvScore?.score?.let { "%.1f".format(it) }}")
+                append("(lfhf=${hrvLfHfScore?.score?.let { "%.1f".format(it) }},")
+                append("rmssd=${hrvRmssdScore?.score?.let { "%.1f".format(it) }})")
+                if (!state.hrvFrequencyUsable) {
+                    append(", lfhfRejected=${state.hrvFrequencyRejectionReasons ?: "UNKNOWN"}")
+                }
             }
         )
 
@@ -484,6 +534,14 @@ class PotchStabilityCalculator(
 
     @Synchronized
     fun currentState(): StabilityState = lastState
+
+    /**
+     * 현재 수면 세션 시작 시 고정한 개인 기준선 snapshot.
+     * ArousalCalculator가 같은 기준선을 사용하도록 복사본을 반환한다.
+     */
+    @Synchronized
+    fun activeBaselinesSnapshot(): Map<BaselineMetricType, PersonalBaselineRecord> =
+        frozenBaselines.toMap()
 
     /**
      * 현재 수면 세션을 종료하고 안정 후보를 저장한 뒤 개인 기준선을 갱신한다.
@@ -678,6 +736,87 @@ class PotchStabilityCalculator(
         )
     }
 
+
+    /**
+     * LF/HF도 안정 episode에서 만든 개인 기준선과 비교한다.
+     * 주파수영역 사용 제한을 통과한 frame만 history와 안정점수에 반영한다.
+     */
+    private fun addAndCalculateHrvFrequencyMetric(
+        state: ArousalState,
+        quality: Double,
+        signalConsistency: Double,
+        nowMillis: Long
+    ): DomainStabilityScore? {
+        if (!state.hrvFrequencyUsable) return null
+        val metric = addAndCalculateMetric(
+            metricType = BaselineMetricType.HRV_LF_HF,
+            value = state.hrvLfHf,
+            quality = quality,
+            signalConsistency = signalConsistency,
+            nowMillis = nowMillis
+        ) ?: return null
+        return DomainStabilityScore(
+            score = metric.score,
+            quality = metric.quality
+        )
+    }
+
+    /**
+     * LF/HF 70%, RMSSD 30%를 기본 비율로 사용한다.
+     * 사용할 수 없는 구성요소는 점수 분모에서 제외하되 전체 quality는 그 몫만큼 낮아진다.
+     */
+    private fun combineHrvStability(
+        frequency: DomainStabilityScore?,
+        rmssd: MetricStabilityScore?
+    ): DomainStabilityScore? {
+        if (frequency == null && rmssd == null) return null
+
+        val parts = listOfNotNull(
+            frequency?.let {
+                Triple(it.score, it.quality, config.hrvFrequencyStabilityWeight)
+            },
+            rmssd?.let {
+                Triple(it.score, it.quality, config.hrvRmssdStabilityWeight)
+            }
+        )
+        val effectiveWeight = parts.sumOf { (_, quality, baseWeight) ->
+            quality.coerceIn(0.0, 1.0) * baseWeight
+        }
+        if (effectiveWeight <= 0.0) return null
+
+        val score = parts.sumOf { (score, quality, baseWeight) ->
+            score * quality.coerceIn(0.0, 1.0) * baseWeight
+        } / effectiveWeight
+
+        val totalDesignedWeight =
+            config.hrvFrequencyStabilityWeight + config.hrvRmssdStabilityWeight
+        val quality = parts.sumOf { (_, q, baseWeight) ->
+            q.coerceIn(0.0, 1.0) * baseWeight
+        } / totalDesignedWeight.coerceAtLeast(1e-9)
+
+        return DomainStabilityScore(
+            score = score.coerceIn(0.0, 100.0),
+            quality = quality.coerceIn(0.0, 1.0)
+        )
+    }
+
+    private fun combineCardiacMetrics(
+        hr: MetricStabilityScore?,
+        hrv: DomainStabilityScore?
+    ): DomainStabilityScore? {
+        if (hr == null && hrv == null) return null
+        val weighted = listOfNotNull(
+            hr?.let { Triple(it.score, it.quality, config.hrMetricWeight) },
+            hrv?.let { Triple(it.score, it.quality, config.hrvMetricWeight) }
+        )
+        val denominator = weighted.sumOf { (_, quality, weight) -> quality * weight }
+        if (denominator <= 0.0) return null
+        val score = weighted.sumOf { (score, quality, weight) -> score * quality * weight } / denominator
+        val baseWeightSum = weighted.sumOf { it.third }
+        val quality = weighted.sumOf { (_, q, w) -> q * w } / baseWeightSum.coerceAtLeast(1e-9)
+        return DomainStabilityScore(score.coerceIn(0.0, 100.0), quality.coerceIn(0.0, 1.0))
+    }
+
     private fun calculateMovementDomain(state: ArousalState): DomainStabilityScore? {
         val rawMovementScore = state.microMovementScore ?: return null
         if (state.isMacroMovementLike) return null
@@ -850,6 +989,15 @@ class PotchStabilityCalculator(
             rrvSampleCount = samples.count { it.rrv != null },
             hrSampleCount = samples.count { it.hr != null },
             hrvSampleCount = samples.count { it.hrvRmssd != null },
+            hrvFrequencyUsableFrameCount = samples.count { it.hrvFrequencyUsable },
+            hrvFrequencyRejectedFrameCount = samples.count { !it.hrvFrequencyUsable },
+            hrvFrequencyRejectionSummary = summarizeFrequencyRejections(samples),
+            hrvLfHfMedian = medianOrNull(samples.mapNotNull { it.hrvLfHf }),
+            hrvLfHfMean = samples.mapNotNull { it.hrvLfHf }.averageOrNull(),
+            hrvRmssdQualityMedian = medianOrNull(samples.mapNotNull { it.hrvRmssdQuality }),
+            hrvFrequencyQualityMedian = medianOrNull(samples.mapNotNull { it.hrvFrequencyQuality }),
+            hrvRmssdStabilityMedian = medianOrNull(samples.mapNotNull { it.hrvRmssdStabilityScore }),
+            hrvLfHfStabilityMedian = medianOrNull(samples.mapNotNull { it.hrvLfHfStabilityScore }),
             temperatureSampleCount = samples.count { it.temperature != null },
             rrMean = samples.mapNotNull { it.rr }.averageOrNull(),
             rrvMean = samples.mapNotNull { it.rrv }.averageOrNull(),
@@ -857,6 +1005,23 @@ class PotchStabilityCalculator(
             hrvRmssdMean = samples.mapNotNull { it.hrvRmssd }.averageOrNull(),
             temperatureMean = samples.mapNotNull { it.temperature }.averageOrNull()
         )
+    }
+
+    private fun summarizeFrequencyRejections(
+        samples: List<StabilityFrameSample>
+    ): String? {
+        val counts = mutableMapOf<String, Int>()
+        samples.asSequence()
+            .filter { !it.hrvFrequencyUsable }
+            .mapNotNull { it.hrvFrequencyRejectionReasons }
+            .flatMap { it.substringBefore(';').split('|').asSequence() }
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .forEach { reason -> counts[reason] = (counts[reason] ?: 0) + 1 }
+        return counts.entries
+            .sortedByDescending { it.value }
+            .joinToString("|") { "${it.key}:${it.value}" }
+            .takeIf { it.isNotEmpty() }
     }
 
     /**
@@ -1173,10 +1338,22 @@ class PotchStabilityCalculator(
                 ).coerceIn(0.0, 1.0)
     }
 
-    private fun calculateHrvSignalConsistency(state: ArousalState): Double {
-        val countScore = (state.hrvIbiCount / 20.0).coerceIn(0.0, 1.0)
-        return (state.hrvQuality * 0.75 + countScore * 0.25)
+    private fun calculateHrvRmssdSignalConsistency(state: ArousalState): Double {
+        val countScore = (state.hrvRmssdIbiCount / 20.0).coerceIn(0.0, 1.0)
+        return (state.hrvRmssdQuality * 0.75 + countScore * 0.25)
             .coerceIn(0.0, 1.0)
+    }
+
+    private fun calculateHrvFrequencySignalConsistency(state: ArousalState): Double {
+        if (!state.hrvFrequencyUsable) return 0.0
+        val countScore = (state.hrvFrequencyIbiCount / 80.0).coerceIn(0.0, 1.0)
+        val durationScore = (state.hrvFrequencyObservedSeconds / 120.0).coerceIn(0.0, 1.0)
+        return (
+                state.hrvFrequencyQuality * 0.55 +
+                        countScore * 0.20 +
+                        durationScore * 0.15 +
+                        (state.hrvFrequencyPpgSignalQuality ?: 0.0) * 0.10
+                ).coerceIn(0.0, 1.0)
     }
 
     private fun calculateTemperatureSignalConsistency(state: ArousalState): Double {
@@ -1205,6 +1382,7 @@ class PotchStabilityCalculator(
         BaselineMetricType.RRV -> config.rrvConsistencyWindowMillis
         BaselineMetricType.HR -> config.hrConsistencyWindowMillis
         BaselineMetricType.HRV_RMSSD -> config.hrvConsistencyWindowMillis
+        BaselineMetricType.HRV_LF_HF -> config.hrvLfHfConsistencyWindowMillis
         BaselineMetricType.TEMPERATURE -> config.temperatureConsistencyWindowMillis
     }
 
@@ -1213,6 +1391,7 @@ class PotchStabilityCalculator(
         BaselineMetricType.RRV -> config.rrvSlopeWindowMillis
         BaselineMetricType.HR -> config.hrSlopeWindowMillis
         BaselineMetricType.HRV_RMSSD -> config.hrvSlopeWindowMillis
+        BaselineMetricType.HRV_LF_HF -> config.hrvLfHfSlopeWindowMillis
         BaselineMetricType.TEMPERATURE -> config.temperatureSlopeWindowMillis
     }
 
@@ -1221,6 +1400,7 @@ class PotchStabilityCalculator(
         BaselineMetricType.RRV -> config.rrvVariationScaleSec
         BaselineMetricType.HR -> config.hrVariationScaleBpm
         BaselineMetricType.HRV_RMSSD -> config.hrvVariationScaleSec
+        BaselineMetricType.HRV_LF_HF -> config.hrvLfHfVariationScale
         BaselineMetricType.TEMPERATURE -> config.temperatureVariationScaleCelsius
     }
 
@@ -1229,6 +1409,7 @@ class PotchStabilityCalculator(
         BaselineMetricType.RRV -> config.rrvSlopeScaleSecPerMinute
         BaselineMetricType.HR -> config.hrSlopeScalePerMinute
         BaselineMetricType.HRV_RMSSD -> config.hrvSlopeScaleSecPerMinute
+        BaselineMetricType.HRV_LF_HF -> config.hrvLfHfSlopeScalePerMinute
         BaselineMetricType.TEMPERATURE -> config.temperatureSlopeScalePerMinute
     }
 
@@ -1237,6 +1418,7 @@ class PotchStabilityCalculator(
         BaselineMetricType.RRV -> config.rrvMinimumBaselineScale
         BaselineMetricType.HR -> config.hrMinimumBaselineScale
         BaselineMetricType.HRV_RMSSD -> config.hrvMinimumBaselineScale
+        BaselineMetricType.HRV_LF_HF -> config.hrvLfHfMinimumBaselineScale
         BaselineMetricType.TEMPERATURE -> config.temperatureMinimumBaselineScale
     }
 
@@ -1248,6 +1430,7 @@ class PotchStabilityCalculator(
 
     private fun clearTransientState(clearSessionCandidates: Boolean) {
         histories.values.forEach { it.clear() }
+        hrvLfHfHistory.clear()
         resetEntryState()
         activeEpisode = null
         lastAnalysisSegmentId = null

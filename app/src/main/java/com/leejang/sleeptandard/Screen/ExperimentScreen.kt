@@ -46,11 +46,13 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.leejang.sleeptandard.Potch.ArousalState
 import com.leejang.sleeptandard.Potch.BaselineLifecycleState
 import com.leejang.sleeptandard.Potch.BaselineMetricType
+import com.leejang.sleeptandard.Potch.DomainEvidence
 import com.leejang.sleeptandard.Potch.HeartRateGraphData
 import com.leejang.sleeptandard.Potch.HeartRatePeakPolarity
 import com.leejang.sleeptandard.Potch.InternalPotchLogFile
 import com.leejang.sleeptandard.Potch.MetricCalculationState
 import com.leejang.sleeptandard.Potch.MetricCalculationStatus
+import com.leejang.sleeptandard.Potch.MetricEvidence
 import com.leejang.sleeptandard.Potch.PpgRespirationGraphData
 import com.leejang.sleeptandard.Potch.PotchBleState
 import com.leejang.sleeptandard.Potch.PotchBleViewModel
@@ -173,6 +175,8 @@ fun ExperimentScreen(
             details = buildString {
                 append("bpm=${processorState.heartRateBpm ?: "--"}")
                 append(" · quality=${formatNullable(processorState.heartRateQuality, 3)}")
+                append(" · window=${"%.1f".format(processorState.heartRateDiagnostics.windowSeconds)}/12.0 sec")
+                append(" (${processorState.heartRateDiagnostics.windowSampleCount} samples)")
                 append(" · age=${processorState.heartRateAgeMillis?.let { "$it ms" } ?: "--"}")
             }
         )
@@ -407,24 +411,221 @@ private fun RespirationGraphCard(data: PpgRespirationGraphData) {
 
 @Composable
 private fun ArousalSection(state: ArousalState) {
-    SectionCard("각성도 분석") {
+    SectionCard("각성도 분석 · Evidence Scoring") {
         ValueTile(
             title = "최종 Wake Score",
-            value = "%.1f / 100 · %s".format(
+            value = "%.1f / 100 · confidence %.1f%%".format(
                 state.finalWakeScore,
-                if (state.isWakeTimingCandidate) "기상 후보" else "대기"
+                state.finalWakeConfidence
             ),
             modifier = Modifier.fillMaxWidth()
         )
-        MetricStatusRow("Micro movement", state.microMovementScore, null)
-        MetricStatusRow("Respiratory rate", state.rrFinal, state.rrCalculationStatus, " bpm")
-        MetricStatusRow("Respiratory variability", state.rrvRmssdMs, state.rrvCalculationStatus, " ms")
-        MetricStatusRow("Heart rate", state.hrBpm?.toDouble(), state.hrCalculationStatus, " bpm")
-        MetricStatusRow("Heart rate variability", state.hrvRmssdMs, state.hrvCalculationStatus, " ms")
-        MetricStatusRow("Skin temperature", state.skinTemperatureCelsius, null, "°C")
-        StatusLine("RR source", "${state.rrFusionSource} · confidence=${"%.2f".format(state.rrFusionConfidence)}")
+        StatusLine(
+            "판정",
+            if (state.isWakeTimingCandidate) "기상 후보" else state.wakeDecisionReason,
+            if (state.isWakeTimingCandidate) Color(0xFFFF7777) else Color(0xFFA9B5C7)
+        )
+        StatusLine(
+            "증거 coverage",
+            "%.1f%% · 사용 영역 %d/4".format(
+                state.finalWakeCoverage,
+                state.usedArousalDomainCount
+            )
+        )
+        StatusLine(
+            "현재 게이트",
+            if (state.wakeCurrentConditionPassed) "통과" else "실패",
+            if (state.wakeCurrentConditionPassed) Color(0xFF7BE0A3) else Color(0xFFFFB66E)
+        )
+        StatusLine(
+            "Tolerant persistence",
+            "최근 ${state.wakePersistenceWindowSeconds}초 중 " +
+                    "${state.wakePersistencePassedSeconds}초 통과 / " +
+                    "필요 ${state.wakePersistenceRequiredPassSeconds}초"
+        )
+        StatusLine(
+            "Persistence 관측",
+            "${state.wakePersistenceObservedSeconds}/${state.wakePersistenceWindowSeconds}초 · " +
+                    "실패 ${state.wakePersistenceFailedSeconds}초 · " +
+                    "통과율 ${"%.1f".format(state.wakePersistencePassRatio)}%"
+        )
+
+        Text(
+            text = "영역별 결합 결과",
+            color = Color.White,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.SemiBold
+        )
+        DomainEvidenceRow("움직임", state.movementDomainEvidence)
+        DomainEvidenceRow("호흡", state.respiratoryDomainEvidence)
+        DomainEvidenceRow("심장", state.cardiacDomainEvidence)
+        DomainEvidenceRow("온도", state.temperatureDomainEvidence)
+
+        MetricStatusRow("현재 RR", state.rrFinal, state.rrCalculationStatus, " bpm")
+        MetricStatusRow("현재 RRV RMSSD", state.rrvRmssdMs, state.rrvCalculationStatus, " ms")
+        MetricStatusRow("현재 HR", state.hrBpm?.toDouble(), state.hrCalculationStatus, " bpm")
+        MetricStatusRow("현재 HRV LF/HF", state.hrvLfHf, state.hrvFrequencyStatus)
+        MetricStatusRow("현재 HRV RMSSD", state.hrvRmssdMs, null, " ms")
+        MetricStatusRow("현재 피부온도", state.skinTemperatureCelsius, null, "°C")
+
+        EvidenceDetailCard(
+            label = "1. Micro movement",
+            currentValue = state.microMovementScore?.let { "%.1f / 100".format(it) } ?: "--",
+            evidence = state.microEvidence
+        )
+        EvidenceDetailCard(
+            label = "2. Respiratory rate",
+            currentValue = state.rrFinal?.let { "%.2f bpm".format(it) } ?: "--",
+            evidence = state.rrEvidence,
+            baselineScale = 1.0,
+            baselineUnit = " bpm"
+        )
+        EvidenceDetailCard(
+            label = "3. Respiratory variability",
+            currentValue = state.rrvRmssdMs?.let { "%.2f ms".format(it) } ?: "--",
+            evidence = state.rrvEvidence,
+            baselineScale = 1000.0,
+            baselineUnit = " ms"
+        )
+        EvidenceDetailCard(
+            label = "4. Heart rate",
+            currentValue = state.hrBpm?.let { "$it bpm" } ?: "--",
+            evidence = state.hrEvidence,
+            baselineScale = 1.0,
+            baselineUnit = " bpm"
+        )
+        EvidenceDetailCard(
+            label = "5. HRV · LF/HF 70% + RMSSD 30%",
+            currentValue = "LF/HF=${formatNullable(state.hrvLfHf, 3)} · " +
+                    "RMSSD=${formatNullable(state.hrvRmssdMs, 1)} ms",
+            evidence = state.hrvEvidence,
+            baselineScale = 1.0,
+            baselineUnit = " ratio",
+            primaryComponentLabel = "LF/HF",
+            secondaryComponentLabel = "RMSSD"
+        )
+        StatusLine("HRV 구성", state.hrvScoreComposition)
+        StatusLine(
+            "LF/HF 사용 제한",
+            if (state.hrvFrequencyUsable) {
+                "통과 · q=${"%.2f".format(state.hrvFrequencyQuality)} · " +
+                        "${"%.1f".format(state.hrvFrequencyObservedSeconds)}초 · " +
+                        "IBI=${state.hrvFrequencyIbiCount}"
+            } else {
+                "제외 · ${state.hrvFrequencyRejectionReasons ?: state.hrvFrequencyStatus.message}"
+            },
+            if (state.hrvFrequencyUsable) Color(0xFF54E2A0) else Color(0xFFFFB35C)
+        )
+        StatusLine(
+            "HRV 구성요소 점수",
+            "LF/HF=${formatNullable(state.hrvFrequencyScore, 1)} · " +
+                    "RMSSD=${formatNullable(state.hrvRmssdScore, 1)}"
+        )
+
+        EvidenceDetailCard(
+            label = "6. Skin temperature",
+            currentValue = state.skinTemperatureCelsius?.let { "%.3f°C".format(it) } ?: "--",
+            evidence = state.temperatureEvidence,
+            baselineScale = 1.0,
+            baselineUnit = "°C"
+        )
+
+        StatusLine(
+            "RR 센서 결합",
+            "${state.rrFusionSource} · signal confidence=${"%.2f".format(state.rrFusionConfidence)}"
+        )
         StatusLine("RR detail", state.rrFusionLog ?: "--")
         StatusLine("마지막 분석", state.lastLog)
+    }
+}
+
+@Composable
+private fun DomainEvidenceRow(
+    label: String,
+    evidence: DomainEvidence
+) {
+    val value = if (evidence.usable && evidence.score != null) {
+        "score=${"%.1f".format(evidence.score)} · " +
+                "confidence=${"%.1f".format(evidence.confidence * 100.0)}% · " +
+                "coverage=${"%.1f".format(evidence.coverage * 100.0)}%"
+    } else {
+        "사용 불가 · confidence=${"%.1f".format(evidence.confidence * 100.0)}% · " +
+                "coverage=${"%.1f".format(evidence.coverage * 100.0)}%"
+    }
+    StatusLine(
+        label,
+        value,
+        if (evidence.usable) Color(0xFF54E2A0) else Color(0xFFFFB35C)
+    )
+    Text(
+        text = evidence.composition,
+        color = Color(0xFF7F8EA3),
+        fontSize = 10.sp
+    )
+}
+
+@Composable
+private fun EvidenceDetailCard(
+    label: String,
+    currentValue: String,
+    evidence: MetricEvidence,
+    baselineScale: Double = 1.0,
+    baselineUnit: String = "",
+    primaryComponentLabel: String = "baseline",
+    secondaryComponentLabel: String = "trend"
+) {
+    val scoreText = evidence.score?.let { "%.1f".format(it) } ?: "--"
+    val centerText = evidence.baselineCenter?.takeIf { it.isFinite() }?.let {
+        "%.3f%s".format(it * baselineScale, baselineUnit)
+    } ?: "--"
+    val spreadText = evidence.baselineSpread?.takeIf { it.isFinite() }?.let {
+        "%.3f%s".format(it * baselineScale, baselineUnit)
+    } ?: "--"
+    val normalizedText = evidence.normalizedDistance?.takeIf { it.isFinite() }?.let {
+        "%.3f z".format(it)
+    } ?: "--"
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color(0xFF141D2A), RoundedCornerShape(12.dp))
+            .border(1.dp, Color(0xFF27364B), RoundedCornerShape(12.dp))
+            .padding(12.dp)
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            Text(
+                text = label,
+                color = Color.White,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+            StatusLine("현재값", currentValue)
+            StatusLine(
+                "evidence",
+                "score=$scoreText · confidence=${"%.1f".format(evidence.confidence * 100.0)}% · " +
+                        "coverage=${"%.1f".format(evidence.coverage * 100.0)}%",
+                if (evidence.usable) Color(0xFF54E2A0) else Color(0xFFFF7777)
+            )
+            StatusLine("사용", if (evidence.usable) "YES" else "NO")
+            StatusLine("기준선", "${evidence.baselineSource} · center=$centerText · MAD=$spreadText")
+            StatusLine("기준선 거리", normalizedText)
+            StatusLine(
+                "구성 점수",
+                "$primaryComponentLabel=${formatNullable(evidence.baselineScore, 1)} · " +
+                        "$secondaryComponentLabel=${formatNullable(evidence.trendScore, 1)}"
+            )
+            StatusLine("signal quality", "%.3f".format(evidence.signalQuality))
+            evidence.reasons?.let {
+                StatusLine("제외/감점 사유", it, Color(0xFFFFB35C))
+            }
+            evidence.log?.let {
+                Text(
+                    text = it,
+                    color = Color(0xFF7F8EA3),
+                    fontSize = 10.sp
+                )
+            }
+        }
     }
 }
 
@@ -464,7 +665,14 @@ private fun StabilitySection(state: StabilityState) {
         MetricStatusRow("RR 안정점수", state.rrStabilityScore, null)
         MetricStatusRow("RRV 안정점수", state.rrvStabilityScore, null)
         MetricStatusRow("HR 안정점수", state.hrStabilityScore, null)
-        MetricStatusRow("HRV 안정점수", state.hrvStabilityScore, null)
+        MetricStatusRow("HRV 안정점수 (설계 7:3)", state.hrvStabilityScore, null)
+        MetricStatusRow("LF/HF 안정점수 (70%)", state.hrvLfHfStabilityScore, null)
+        MetricStatusRow("RMSSD 안정점수 (30%)", state.hrvRmssdStabilityScore, null)
+        StatusLine(
+            "안정지표 LF/HF",
+            if (state.hrvFrequencyUsable) "사용" else "제외 · ${state.hrvFrequencyRejectionReasons ?: "사유 없음"}",
+            if (state.hrvFrequencyUsable) Color(0xFF54E2A0) else Color(0xFFFFB35C)
+        )
 
         StatusLine("마지막 안정 분석", state.lastLog)
     }
@@ -506,6 +714,13 @@ private fun PersonalBaselineSection(state: StabilityState) {
             state = state,
             unit = " ms",
             displayScale = 1000.0
+        )
+        PersonalBaselineRow(
+            label = "HRV LF/HF",
+            metricType = BaselineMetricType.HRV_LF_HF,
+            state = state,
+            unit = " ratio",
+            displayScale = 1.0
         )
         PersonalBaselineRow(
             label = "피부온도",
