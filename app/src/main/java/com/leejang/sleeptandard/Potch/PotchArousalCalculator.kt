@@ -31,6 +31,9 @@ data class ArousalState(
     // 1. Micro Movement
     val microMovementVariance: Double? = null,
     val microMovementScore: Double? = null,
+    val microMovementRmsG: Double? = null,
+    val microMovementLevel: MicroMovementLevel? = null,
+    val isMacroMovementLike: Boolean = false,
 
     // 2. Respiratory Rate
     val rrFromPpg: Double? = null,
@@ -60,6 +63,7 @@ data class ArousalState(
     val rrvScore: Double? = null,
     val rrvSource: RrvSource = RrvSource.NONE,
     val rrvQuality: Double = 0.0,
+    val rrvIntervalCount: Int = 0,
 
     // PPG와 IMU RRV를 따로 기록하여 source별 정확도를 비교할 수 있게 한다.
     val rrvFromPpgRmssdSec: Double? = null,
@@ -84,6 +88,7 @@ data class ArousalState(
     val hrvLfHf: Double? = null,
     val hrvScore: Double? = null,
     val hrvQuality: Double = 0.0,
+    val hrvIbiCount: Int = 0,
     val hrvLog: String? = null,
     val hrvCalculationStatus: MetricCalculationStatus = MetricCalculationStatus(),
 
@@ -91,6 +96,8 @@ data class ArousalState(
     val skinTemperatureCelsius: Double? = null,
     val skinTemperatureGradient: Double? = null,
     val skinTemperatureScore: Double? = null,
+    val skinTemperatureQuality: Double = 0.0,
+    val skinTemperatureSampleCount: Int = 0,
 
     // Final
     val finalWakeScore: Double = 0.0, // 0~100
@@ -1050,6 +1057,9 @@ class PotchArousalCalculator(
         lastState = ArousalState(
             microMovementVariance = microMovement?.varianceG,
             microMovementScore = microMovement?.score?.times(100.0),
+            microMovementRmsG = microMovement?.rmsG,
+            microMovementLevel = microMovement?.level,
+            isMacroMovementLike = microMovement?.isMacroMovementLike ?: false,
 
             rrFromPpg = rrFromPpg,
             rrFromImu = rrFromImu,
@@ -1073,6 +1083,7 @@ class PotchArousalCalculator(
             rrvScore = rrvResult?.score?.times(100.0),
             rrvSource = rrvResult?.source ?: RrvSource.NONE,
             rrvQuality = rrvResult?.qualityScore ?: 0.0,
+            rrvIntervalCount = rrvResult?.intervalCount ?: 0,
             rrvFromPpgRmssdSec = rrvBundle.ppg?.rmssdSec,
             rrvFromImuRmssdSec = rrvBundle.imu?.rmssdSec,
             rrvPpgIntervalCount = rrvBundle.ppg?.intervalCount ?: ppgRrvIntervalBuffer.size,
@@ -1098,6 +1109,7 @@ class PotchArousalCalculator(
             hrvLfHf = hrvFrequencyResult?.lfHfRatio,
             hrvScore = (hrvFrequencyResult?.score ?: hrvResult?.score)?.times(100.0),
             hrvQuality = hrvFrequencyResult?.qualityScore ?: hrvResult?.qualityScore ?: 0.0,
+            hrvIbiCount = hrvFrequencyResult?.ibiCount ?: hrvResult?.ibiCount ?: 0,
             hrvLog = hrvFrequencyResult?.log ?: hrvResult?.log,
             hrvCalculationStatus = hrvCalculationStatus,
 
@@ -1108,6 +1120,8 @@ class PotchArousalCalculator(
             },
             skinTemperatureGradient = skinTempResult?.gradientCelsius,
             skinTemperatureScore = skinTempResult?.score?.times(100.0),
+            skinTemperatureQuality = skinTempResult?.qualityScore ?: 0.0,
+            skinTemperatureSampleCount = skinTempResult?.sampleCount ?: 0,
 
             finalWakeScore = finalScore * 100.0,
             isWakeTimingCandidate = finalScore * 100.0 >= config.wakeCandidateScore,

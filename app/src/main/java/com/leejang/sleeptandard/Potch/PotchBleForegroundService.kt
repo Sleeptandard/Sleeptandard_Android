@@ -24,6 +24,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import androidx.core.content.edit
+import java.util.UUID
 
 /**
  * Potch BLE 수신을 백그라운드에서도 유지하기 위한 ForegroundService.
@@ -123,6 +124,9 @@ class PotchBleForegroundService : Service() {
      * CRC-16 CCITT-FALSE / uint16 sequence / header 검사를 수행한다.
      */
     private var dataProcessor: PotchDataProcessor? = null
+
+    /** 안정점수, 안정 episode, 개인 기준선 생명주기를 관리한다. */
+    private var stabilityCalculator: PotchStabilityCalculator? = null
 
     /**
      * 실제 BLE 스캔, 연결, GATT, notify 구독, 재연결을 담당하는 객체.
@@ -293,7 +297,12 @@ class PotchBleForegroundService : Service() {
      * 이미 생성되어 있다면 중복 생성하지 않는다.
      */
     private fun initializePotchObjects() {
-        if (dataLogger != null && dataProcessor != null && bleManager != null) {
+        if (
+            dataLogger != null &&
+            dataProcessor != null &&
+            stabilityCalculator != null &&
+            bleManager != null
+        ) {
             Log.d(TAG, "initializePotchObjects() skipped - objects already initialized")
             dataLogger?.logDebug(TAG, "initializePotchObjects() skipped - objects already initialized")
             return
@@ -305,8 +314,20 @@ class PotchBleForegroundService : Service() {
         // CSV 로그 저장 담당
         val logger = PotchDataLogger(applicationContext)
 
-        // BLE raw byte를 SensorData로 파싱하는 담당
-        val processor = PotchDataProcessor(dataLogger = logger)
+        // 안정 episode 후보와 개인 기준선을 앱 내부 SQLite에 저장한다.
+        val stableCandidateTable = StableCandidateTable(applicationContext)
+        val personalBaselineTable = PersonalBaselineTable(applicationContext)
+        val stability = PotchStabilityCalculator(
+            stableCandidateTable = stableCandidateTable,
+            personalBaselineTable = personalBaselineTable,
+            dataLogger = logger
+        )
+
+        // BLE raw byte를 SensorData로 파싱하고 안정점수 계산기로 전달한다.
+        val processor = PotchDataProcessor(
+            dataLogger = logger,
+            stabilityCalculator = stability
+        )
 
         // BLE 스캔/연결/notify 수신 담당
         val manager = PotchBleManager(
@@ -317,6 +338,7 @@ class PotchBleForegroundService : Service() {
 
         dataLogger = logger
         dataProcessor = processor
+        stabilityCalculator = stability
         bleManager = manager
 
         Log.i(TAG, "Potch objects initialized")
@@ -346,6 +368,7 @@ class PotchBleForegroundService : Service() {
 
                 // Service 내부 상태를 UI에서 볼 수 있게 공용 StateHolder에 전달
                 PotchServiceStateHolder.updateBleState(state)
+                stabilityCalculator?.onBleConnectionState(state.isConnected)
 
                 // BLE 상태에 따라 foreground notification 문구 변경
                 val text = when {
@@ -444,6 +467,8 @@ class PotchBleForegroundService : Service() {
         Log.i(TAG, "Permissions OK. Starting BLE scan.")
         dataLogger?.logDebug(TAG, "Permissions OK. Starting BLE scan.", "I")
 
+        // 앱 프로세스가 START_STICKY로 재생성되어도 동일 수면 session id를 재사용한다.
+        stabilityCalculator?.startSession(getOrCreateStabilitySessionId())
         bleManager?.startScan()
     }
 
@@ -463,6 +488,8 @@ class PotchBleForegroundService : Service() {
         if (manager == null) {
             Log.w(TAG, "stopPotchReceivingAndSave() - manager is null. Stop service only.")
             dataLogger?.logDebug(TAG, "stopPotchReceivingAndSave() - manager is null. Stop service only.", "W")
+            stabilityCalculator?.endSession()
+            clearStabilitySessionId()
             stopForeground(STOP_FOREGROUND_REMOVE)
 
             val notificationManager =
@@ -489,6 +516,13 @@ class PotchBleForegroundService : Service() {
             dataLogger?.logDebug(TAG, "Saving log on Dispatchers.IO", "I")
 
             val savedPath = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                val stabilitySummary = stabilityCalculator?.endSession()
+                dataLogger?.logDebug(
+                    TAG,
+                    "Stability session summary=$stabilitySummary",
+                    "I"
+                )
+                clearStabilitySessionId()
                 manager.saveCurrentLog()
             }
 
@@ -529,6 +563,10 @@ class PotchBleForegroundService : Service() {
     override fun onDestroy() {
         Log.w(TAG, "onDestroy() - ForegroundService destroyed")
         dataLogger?.logDebug(TAG, "onDestroy() - ForegroundService destroyed", "W")
+        // 정상 종료 경로에서 이미 호출됐다면 endSession()은 no-op summary를 반환한다.
+        // 시스템 종료 경로에서는 현재까지 완성된 안정 episode를 가능한 범위에서 보존한다.
+        runCatching { stabilityCalculator?.endSession() }
+
         // BLE 스캔/연결/GATT 자원 정리
         bleManager?.close()
 
@@ -695,6 +733,21 @@ class PotchBleForegroundService : Service() {
         dataLogger?.logDebug(TAG, "Permission check: bluetooth=$hasBluetoothPermissions, notification=$hasNotificationPermission")
 
         return hasBluetoothPermissions && hasNotificationPermission
+    }
+
+    private fun getOrCreateStabilitySessionId(): String {
+        val preferences = getSharedPreferences("potch_service", MODE_PRIVATE)
+        val existing = preferences.getString("stability_session_id", null)
+        if (!existing.isNullOrBlank()) return existing
+
+        val created = UUID.randomUUID().toString()
+        preferences.edit { putString("stability_session_id", created) }
+        return created
+    }
+
+    private fun clearStabilitySessionId() {
+        getSharedPreferences("potch_service", MODE_PRIVATE)
+            .edit { remove("stability_session_id") }
     }
 
     /**

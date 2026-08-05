@@ -211,11 +211,13 @@ data class DataProcessorState(
     val lastContinuityBreakReason: String? = null,
     val lastGreenMax: Double = 0.0,
     val int2EventReceived: Boolean = false,
-    val arousalState: ArousalState = ArousalState()
+    val arousalState: ArousalState = ArousalState(),
+    val stabilityState: StabilityState = StabilityState()
 )
 class PotchDataProcessor(
     private val dataLogger: PotchDataLogger? = null,
-    private val arousalCalculator: PotchArousalCalculator = PotchArousalCalculator()
+    private val arousalCalculator: PotchArousalCalculator = PotchArousalCalculator(),
+    private val stabilityCalculator: PotchStabilityCalculator? = null
 ) {
     private data class ParsedPacket(
         val raw: ByteArray,
@@ -425,6 +427,10 @@ class PotchDataProcessor(
         analysisSegmentId += 1L
         resetPolaritySelection()
         arousalCalculator.reset()
+        stabilityCalculator?.onContinuityBreak(
+            reason = "processor reset",
+            newSegmentId = analysisSegmentId
+        )
 
         _state.value = DataProcessorState(
             analysisSegmentId = analysisSegmentId
@@ -669,6 +675,19 @@ class PotchDataProcessor(
 
         val arousalState =
             arousalCalculator.processBurst(sensorData, freshEstimate, status)
+        val stabilityState = stabilityCalculator?.processFrame(
+            StabilityFrameInput(
+                phoneTimeMillis = now,
+                sensorTimestamp = sensorData.timestamp,
+                arousalState = arousalState,
+                heartRateDiagnostics = diagnostics,
+                analysisSegmentId = analysisSegmentId,
+                continuityBreakCount = counters.continuityBreakCount,
+                crcErrorCount = counters.crcErrorCount,
+                sequenceLossCount = counters.missingSequenceErrors,
+                estimatedLostPacketCount = counters.estimatedLostPacketCount
+            )
+        ) ?: StabilityState()
         val greenMax = greenSamples.maxOrNull()?.toDouble() ?: 0.0
 
         dataLogger?.logSuperFrame(
@@ -711,6 +730,7 @@ class PotchDataProcessor(
                 analysisSegmentId = analysisSegmentId,
                 lastGreenMax = greenMax,
                 arousalState = arousalState,
+                stabilityState = stabilityState,
                 lastLog =
                     "Burst ${sensorData.sequenceStart}-${sensorData.sequenceEnd} 처리 완료"
             )
@@ -2764,6 +2784,10 @@ class PotchDataProcessor(
         analysisSegmentId += 1L
         resetPolaritySelection()
         arousalCalculator.reset()
+        stabilityCalculator?.onContinuityBreak(
+            reason = reason,
+            newSegmentId = analysisSegmentId
+        )
 
         _state.update {
             it.copy(

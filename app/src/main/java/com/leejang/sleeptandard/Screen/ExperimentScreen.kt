@@ -381,7 +381,13 @@ private fun RespirationGraphCard(data: PpgRespirationGraphData) {
                 .fillMaxWidth()
                 .height(220.dp)
         )
-        StatusLine("분석 구간", "%.1f / %.1f sec".format(data.windowSeconds, data.minimumWindowSeconds))
+        StatusLine(
+            "분석 구간",
+            "%.1f / %.1f sec".format(
+                data.windowSeconds,
+                data.minimumWindowSeconds.toDouble()
+            )
+        )
         StatusLine("호흡수", data.calculatedRrBpm?.let { "%.1f bpm".format(it) } ?: "--")
         StatusLine("품질", formatNullable(data.qualityScore, 3))
     }
