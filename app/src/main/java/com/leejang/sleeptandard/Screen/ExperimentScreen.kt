@@ -44,6 +44,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.leejang.sleeptandard.Potch.ArousalState
+import com.leejang.sleeptandard.Potch.BaselineLifecycleState
+import com.leejang.sleeptandard.Potch.BaselineMetricType
 import com.leejang.sleeptandard.Potch.HeartRateGraphData
 import com.leejang.sleeptandard.Potch.HeartRatePeakPolarity
 import com.leejang.sleeptandard.Potch.InternalPotchLogFile
@@ -53,6 +55,8 @@ import com.leejang.sleeptandard.Potch.PpgRespirationGraphData
 import com.leejang.sleeptandard.Potch.PotchBleState
 import com.leejang.sleeptandard.Potch.PotchBleViewModel
 import com.leejang.sleeptandard.Potch.SensorData
+import com.leejang.sleeptandard.Potch.StabilityEpisodePhase
+import com.leejang.sleeptandard.Potch.StabilityState
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -76,6 +80,7 @@ fun ExperimentScreen(
 
     val sensorData = processorState.lastParsedData
     val arousalState = processorState.arousalState
+    val stabilityState = processorState.stabilityState
 
     LaunchedEffect(microLowCutHz, microHighCutHz, bleState.isConnected) {
         if (!bleState.isConnected || microLowCutHz >= microHighCutHz) return@LaunchedEffect
@@ -173,6 +178,8 @@ fun ExperimentScreen(
         )
 
         ArousalSection(arousalState)
+        StabilitySection(stabilityState)
+        PersonalBaselineSection(stabilityState)
 
         BandPassControl(
             lowCutHz = microLowCutHz,
@@ -413,6 +420,130 @@ private fun ArousalSection(state: ArousalState) {
         StatusLine("RR source", "${state.rrFusionSource} · confidence=${"%.2f".format(state.rrFusionConfidence)}")
         StatusLine("RR detail", state.rrFusionLog ?: "--")
         StatusLine("마지막 분석", state.lastLog)
+    }
+}
+
+@Composable
+private fun StabilitySection(state: StabilityState) {
+    SectionCard("안정점수 분석") {
+        val phaseLabel = when (state.phase) {
+            StabilityEpisodePhase.IDLE -> "대기"
+            StabilityEpisodePhase.ENTERING -> "진입 판정 중"
+            StabilityEpisodePhase.STABLE -> "안정 episode 진행 중"
+        }
+
+        ValueTile(
+            title = "전체 안정점수",
+            value = state.overallStabilityScore
+                ?.let { "%.1f / 100".format(it) }
+                ?: "--",
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        StatusLine(
+            "Hard gate",
+            if (state.hardGatePassed) "통과" else state.hardGateReason,
+            if (state.hardGatePassed) Color(0xFF54E2A0) else Color(0xFFFF7777)
+        )
+        StatusLine("상태", phaseLabel)
+        StatusLine("사용 영역", "${state.usedDomainCount} / 4")
+        StatusLine("진입 지속", "${state.enteringDurationSec}초")
+        StatusLine("episode 지속", "${state.activeEpisodeDurationSec}초")
+        StatusLine("이번 세션 검출 episode", state.sessionCandidateCount.toString())
+
+        MetricStatusRow("움직임 안정점수", state.movementStabilityScore, null)
+        MetricStatusRow("호흡 영역 안정점수", state.respiratoryStabilityScore, null)
+        MetricStatusRow("심장 영역 안정점수", state.cardiacStabilityScore, null)
+        MetricStatusRow("온도 영역 안정점수", state.temperatureStabilityScore, null)
+
+        MetricStatusRow("RR 안정점수", state.rrStabilityScore, null)
+        MetricStatusRow("RRV 안정점수", state.rrvStabilityScore, null)
+        MetricStatusRow("HR 안정점수", state.hrStabilityScore, null)
+        MetricStatusRow("HRV 안정점수", state.hrvStabilityScore, null)
+
+        StatusLine("마지막 안정 분석", state.lastLog)
+    }
+}
+
+@Composable
+private fun PersonalBaselineSection(state: StabilityState) {
+    SectionCard("현재 사용 중인 개인 안정값") {
+        Text(
+            text = "수면 세션 시작 시 고정된 기준선입니다. 같은 세션 중 새 episode가 생겨도 종료 전에는 변경되지 않습니다.",
+            color = Color(0xFFA9B5C7),
+            fontSize = 11.sp
+        )
+
+        PersonalBaselineRow(
+            label = "RR",
+            metricType = BaselineMetricType.RR,
+            state = state,
+            unit = " bpm",
+            displayScale = 1.0
+        )
+        PersonalBaselineRow(
+            label = "RRV RMSSD",
+            metricType = BaselineMetricType.RRV,
+            state = state,
+            unit = " ms",
+            displayScale = 1000.0
+        )
+        PersonalBaselineRow(
+            label = "HR",
+            metricType = BaselineMetricType.HR,
+            state = state,
+            unit = " bpm",
+            displayScale = 1.0
+        )
+        PersonalBaselineRow(
+            label = "HRV RMSSD",
+            metricType = BaselineMetricType.HRV_RMSSD,
+            state = state,
+            unit = " ms",
+            displayScale = 1000.0
+        )
+        PersonalBaselineRow(
+            label = "피부온도",
+            metricType = BaselineMetricType.TEMPERATURE,
+            state = state,
+            unit = "°C",
+            displayScale = 1.0
+        )
+    }
+}
+
+@Composable
+private fun PersonalBaselineRow(
+    label: String,
+    metricType: BaselineMetricType,
+    state: StabilityState,
+    unit: String,
+    displayScale: Double
+) {
+    val baseline = state.activeBaselines[metricType]
+    val lifecycle = baseline?.lifecycleState
+        ?: state.baselineStates[metricType]
+        ?: BaselineLifecycleState.EMPTY
+
+    val center = baseline?.center
+    val spread = baseline?.spread
+    val centerText = center?.takeIf { it.isFinite() }?.let {
+        "%.3f%s".format(it * displayScale, unit)
+    } ?: "--"
+    val spreadText = spread?.takeIf { it.isFinite() }?.let {
+        "%.3f%s".format(it * displayScale, unit)
+    } ?: "--"
+    val count = baseline?.candidateCount ?: 0
+    val confidence = baseline?.confidence ?: 0.0
+    val version = baseline?.distributionVersion ?: 0
+
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        StatusLine(label, "$centerText · MAD $spreadText")
+        Text(
+            text = "${lifecycle.name} · 후보 ${count}개 · confidence=${"%.2f".format(confidence)} · 분포 v$version",
+            color = baselineStateColor(lifecycle),
+            fontSize = 11.sp
+        )
     }
 }
 
@@ -715,6 +846,13 @@ private fun com.leejang.sleeptandard.Potch.RespirationPeakPolarity.label(): Stri
     com.leejang.sleeptandard.Potch.RespirationPeakPolarity.POSITIVE -> "POSITIVE"
     com.leejang.sleeptandard.Potch.RespirationPeakPolarity.NEGATIVE -> "NEGATIVE"
     com.leejang.sleeptandard.Potch.RespirationPeakPolarity.NONE -> "NONE"
+}
+
+private fun baselineStateColor(state: BaselineLifecycleState): Color = when (state) {
+    BaselineLifecycleState.EMPTY -> Color(0xFF8995A8)
+    BaselineLifecycleState.COLLECTING -> Color(0xFFFFD166)
+    BaselineLifecycleState.PROVISIONAL -> Color(0xFF52A7FF)
+    BaselineLifecycleState.MATURE -> Color(0xFF54E2A0)
 }
 
 private fun statusColor(state: MetricCalculationState): Color = when (state) {

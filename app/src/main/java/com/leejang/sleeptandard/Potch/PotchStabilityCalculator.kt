@@ -119,6 +119,8 @@ data class StabilityState(
     val enteringDurationSec: Int = 0,
     val activeEpisodeDurationSec: Int = 0,
     val sessionCandidateCount: Int = 0,
+    /** 현재 수면 세션 시작 시 고정되어 실제 계산에 사용 중인 개인 기준선. */
+    val activeBaselines: Map<BaselineMetricType, PersonalBaselineRecord> = emptyMap(),
     val baselineStates: Map<BaselineMetricType, BaselineLifecycleState> = emptyMap(),
     val lastLog: String = "No stability data yet"
 )
@@ -185,6 +187,14 @@ private data class EpisodeAccumulator(
     val startContinuityBreakCount: Int,
     val startPacketLossCount: Int,
     val samples: MutableList<StabilityFrameSample>
+)
+
+private data class SessionCandidateDecision(
+    val candidate: StableCandidateRecord,
+    val detectedIndex: Int,
+    val selectedForCandidateTable: Boolean,
+    val selectionRank: Int?,
+    val selectionReason: String
 )
 
 /**
@@ -456,6 +466,7 @@ class PotchStabilityCalculator(
             enteringDurationSec = enteringDuration,
             activeEpisodeDurationSec = activeDuration,
             sessionCandidateCount = sessionCandidates.size,
+            activeBaselines = frozenBaselines,
             baselineStates = baselineStateMap(),
             lastLog = buildString {
                 append("stability=")
@@ -493,27 +504,64 @@ class PotchStabilityCalculator(
         finalizeActiveEpisode(nowMillis, "session end")
         resetEntryState()
 
-        val selectedCandidates = selectSessionCandidates(sessionCandidates)
-        val insertedIds = stableCandidateTable.insertAll(selectedCandidates)
+        val decisions = selectSessionCandidateDecisions(sessionCandidates)
+        val selectedCandidates = decisions
+            .filter { it.selectedForCandidateTable }
+            .map { it.candidate }
+
+        stableCandidateTable.insertAll(selectedCandidates)
         stableCandidateTable.prune(
             nowMillis = nowMillis,
             maxAgeDays = config.maxCandidateAgeDays,
             maxRecordCount = config.maxStoredCandidates
         )
+
+        // INSERT IGNORE, START_STICKY 동일 세션 재개, DB 수준 최대 5개 trim까지 반영한
+        // 최종 후보 테이블 잔존 여부를 다시 조회한다.
+        val currentSessionId = sessionId
+        val storedEpisodeIds = currentSessionId
+            ?.let(stableCandidateTable::loadEpisodeIds)
+            .orEmpty()
+
+        decisions.forEach { decision ->
+            val stored = decision.candidate.episodeId in storedEpisodeIds
+            val finalReason = when {
+                !decision.selectedForCandidateTable -> decision.selectionReason
+                stored -> decision.selectionReason
+                else -> "${decision.selectionReason}; DB_NOT_RETAINED_OR_INSERT_CONFLICT"
+            }
+            dataLogger?.logStabilityEpisode(
+                StabilityEpisodeLogRecord(
+                    candidate = decision.candidate,
+                    detectedIndex = decision.detectedIndex,
+                    detectedEpisodeCount = sessionCandidates.size,
+                    selectedForCandidateTable = decision.selectedForCandidateTable,
+                    storedInCandidateTable = stored,
+                    selectionRank = decision.selectionRank,
+                    selectionReason = finalReason,
+                    candidateAverageQuality = candidateAverageQuality(decision.candidate),
+                    activeBaselines = frozenBaselines
+                )
+            )
+        }
+
         val updatedBaselineCount = recalculatePersonalBaselines(nowMillis)
         val totalStored = stableCandidateTable.countAll()
+        val retainedCurrentSessionCount = decisions.count {
+            it.selectedForCandidateTable && it.candidate.episodeId in storedEpisodeIds
+        }
 
         val summary = StabilitySessionSummary(
             sessionId = sessionId,
             detectedEpisodeCount = sessionCandidates.size,
-            savedCandidateCount = insertedIds.size,
+            savedCandidateCount = retainedCurrentSessionCount,
             baselineUpdateCount = updatedBaselineCount,
             totalStoredCandidateCount = totalStored
         )
 
         log(
             "stability session ended: id=${sessionId}, detected=${sessionCandidates.size}, " +
-                    "saved=${insertedIds.size}, baselineUpdated=$updatedBaselineCount, total=$totalStored"
+                    "retained=$retainedCurrentSessionCount, baselineUpdated=$updatedBaselineCount, total=$totalStored"
         )
 
         sessionActive = false
@@ -552,6 +600,7 @@ class PotchStabilityCalculator(
             enteringDurationSec = 0,
             activeEpisodeDurationSec = 0,
             sessionCandidateCount = sessionCandidates.size,
+            activeBaselines = frozenBaselines,
             baselineStates = baselineStateMap(),
             lastLog = "Hard gate rejected: $reason"
         )
@@ -793,39 +842,102 @@ class PotchStabilityCalculator(
             packetLossCount =
                 (last.packetLossCount - episode.startPacketLossCount).coerceAtLeast(0),
             algorithmVersion = config.algorithmVersion,
-            createdAt = System.currentTimeMillis()
+            createdAt = System.currentTimeMillis(),
+
+            // 아래 값들은 episode CSV 감사(audit) 로그용이며 후보 DB 스키마에는 저장하지 않는다.
+            frameSampleCount = samples.size,
+            rrSampleCount = samples.count { it.rr != null },
+            rrvSampleCount = samples.count { it.rrv != null },
+            hrSampleCount = samples.count { it.hr != null },
+            hrvSampleCount = samples.count { it.hrvRmssd != null },
+            temperatureSampleCount = samples.count { it.temperature != null },
+            rrMean = samples.mapNotNull { it.rr }.averageOrNull(),
+            rrvMean = samples.mapNotNull { it.rrv }.averageOrNull(),
+            hrMean = samples.mapNotNull { it.hr }.averageOrNull(),
+            hrvRmssdMean = samples.mapNotNull { it.hrvRmssd }.averageOrNull(),
+            temperatureMean = samples.mapNotNull { it.temperature }.averageOrNull()
         )
     }
 
-    private fun selectSessionCandidates(
+    /**
+     * 검출된 모든 episode에 대해 후보 테이블 선택 여부와 사유를 반환한다.
+     *
+     * 5개를 넘는 경우:
+     * 1. quality / 영역 수 / 안정점수 / 지속시간 순으로 우선순위를 정한다.
+     * 2. 먼저 30분 이상 떨어진 episode를 선택한다.
+     * 3. 자리가 남으면 우선순위 순으로 채운다.
+     * 4. 선택되지 않은 episode도 CSV 로그에는 반드시 남긴다.
+     */
+    private fun selectSessionCandidateDecisions(
         candidates: List<StableCandidateRecord>
-    ): List<StableCandidateRecord> {
-        if (candidates.size <= config.maxCandidatesPerSession) return candidates
+    ): List<SessionCandidateDecision> {
+        if (candidates.isEmpty()) return emptyList()
+
+        val detectedIndexById = candidates
+            .sortedBy { it.startedAt }
+            .mapIndexed { index, candidate -> candidate.episodeId to (index + 1) }
+            .toMap()
 
         val sorted = candidates.sortedWith(
             compareByDescending<StableCandidateRecord> { candidateAverageQuality(it) }
                 .thenByDescending { it.usedDomainCount }
                 .thenByDescending { it.overallStabilityScore }
                 .thenByDescending { it.durationSec }
+                .thenBy { it.startedAt }
         )
 
         val selected = mutableListOf<StableCandidateRecord>()
-        sorted.forEach { candidate ->
-            if (selected.size >= config.maxCandidatesPerSession) return@forEach
-            val sufficientlySeparated = selected.all {
-                abs(it.startedAt - candidate.startedAt) >= config.episodeSeparationMillis
-            }
-            if (sufficientlySeparated) selected += candidate
-        }
+        val reasonByEpisodeId = mutableMapOf<String, String>()
 
-        if (selected.size < config.maxCandidatesPerSession) {
+        if (candidates.size <= config.maxCandidatesPerSession) {
+            sorted.forEach {
+                selected += it
+                reasonByEpisodeId[it.episodeId] = "SELECTED_WITHIN_SESSION_LIMIT"
+            }
+        } else {
             sorted.forEach { candidate ->
                 if (selected.size >= config.maxCandidatesPerSession) return@forEach
-                if (candidate !in selected) selected += candidate
+                val sufficientlySeparated = selected.all {
+                    abs(it.startedAt - candidate.startedAt) >= config.episodeSeparationMillis
+                }
+                if (sufficientlySeparated) {
+                    selected += candidate
+                    reasonByEpisodeId[candidate.episodeId] =
+                        "SELECTED_TIME_SEPARATED_PRIORITY"
+                }
+            }
+
+            if (selected.size < config.maxCandidatesPerSession) {
+                sorted.forEach { candidate ->
+                    if (selected.size >= config.maxCandidatesPerSession) return@forEach
+                    if (candidate !in selected) {
+                        selected += candidate
+                        reasonByEpisodeId[candidate.episodeId] =
+                            "SELECTED_PRIORITY_FILL"
+                    }
+                }
             }
         }
 
-        return selected.sortedBy { it.startedAt }
+        val rankById = selected
+            .mapIndexed { index, candidate -> candidate.episodeId to (index + 1) }
+            .toMap()
+
+        return candidates.sortedBy { it.startedAt }.map { candidate ->
+            val selectedForTable = candidate.episodeId in rankById
+            SessionCandidateDecision(
+                candidate = candidate,
+                detectedIndex = detectedIndexById.getValue(candidate.episodeId),
+                selectedForCandidateTable = selectedForTable,
+                selectionRank = rankById[candidate.episodeId],
+                selectionReason = if (selectedForTable) {
+                    reasonByEpisodeId[candidate.episodeId]
+                        ?: "SELECTED"
+                } else {
+                    "EXCLUDED_SESSION_MAX_${config.maxCandidatesPerSession}_LOWER_PRIORITY"
+                }
+            )
+        }
     }
 
     private fun candidateAverageQuality(candidate: StableCandidateRecord): Double {
@@ -1143,7 +1255,10 @@ class PotchStabilityCalculator(
         currentReconnectCount = 0
         hasEverConnected = false
         lastBleConnected = false
-        lastState = StabilityState(baselineStates = baselineStateMap())
+        lastState = StabilityState(
+            activeBaselines = frozenBaselines,
+            baselineStates = baselineStateMap()
+        )
         if (clearSessionCandidates) sessionCandidates.clear()
     }
 

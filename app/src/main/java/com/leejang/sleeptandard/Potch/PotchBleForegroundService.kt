@@ -469,6 +469,7 @@ class PotchBleForegroundService : Service() {
 
         // 앱 프로세스가 START_STICKY로 재생성되어도 동일 수면 session id를 재사용한다.
         stabilityCalculator?.startSession(getOrCreateStabilitySessionId())
+        dataProcessor?.refreshStabilityState()
         bleManager?.startScan()
     }
 

@@ -336,6 +336,17 @@ class PotchDataProcessor(
     fun updateMicroMovementBandPass(lowCutHz: Double, highCutHz: Double) {
         arousalCalculator.updateMicroMovementBandPass(lowCutHz, highCutHz)
     }
+
+    /** Service에서 세션 기준선을 고정한 직후 UI에 최신 안정 상태를 반영한다. */
+    @Synchronized
+    fun refreshStabilityState() {
+        _state.update {
+            it.copy(
+                stabilityState = stabilityCalculator?.currentState() ?: StabilityState()
+            )
+        }
+    }
+
     @Synchronized
     fun processIncomingData(data: ByteArray) {
         _state.update { it.copy(totalMiniPackets = it.totalMiniPackets + 1) }

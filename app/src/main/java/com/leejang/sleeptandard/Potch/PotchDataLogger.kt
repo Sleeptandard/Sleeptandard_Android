@@ -19,6 +19,23 @@ data class InternalPotchLogFile(
     val lastModifiedMillis: Long
 )
 
+/**
+ * 안정 episode 감사(audit) 로그 한 행.
+ *
+ * 검출된 모든 episode를 기록하며, 세션당 최대 5개 선별에서 제외된 episode도 남긴다.
+ */
+data class StabilityEpisodeLogRecord(
+    val candidate: StableCandidateRecord,
+    val detectedIndex: Int,
+    val detectedEpisodeCount: Int,
+    val selectedForCandidateTable: Boolean,
+    val storedInCandidateTable: Boolean,
+    val selectionRank: Int?,
+    val selectionReason: String,
+    val candidateAverageQuality: Double,
+    val activeBaselines: Map<BaselineMetricType, PersonalBaselineRecord>
+)
+
 /** Potch510 Green PPG/IMU 수신 및 분석 로그를 관리한다. */
 class PotchDataLogger(context: Context) {
     private val appContext = context.applicationContext
@@ -27,6 +44,7 @@ class PotchDataLogger(context: Context) {
     private var workingDebugFile: File? = null
     private var workingArousalFile: File? = null
     private var workingHeartRateFile: File? = null
+    private var workingStabilityEpisodeFile: File? = null
 
     var lastSavedFilePath: String? = null
         private set
@@ -40,6 +58,8 @@ class PotchDataLogger(context: Context) {
         workingDebugFile = File(directory, "potch_debug_log_$timestamp.txt")
         workingArousalFile = File(directory, "potch_arousal_state_log_$timestamp.csv")
         workingHeartRateFile = File(directory, "potch_hr_diagnostic_log_$timestamp.csv")
+        workingStabilityEpisodeFile =
+            File(directory, "potch_stability_episode_log_$timestamp.csv")
 
         workingBurstFile?.writeText(
             UTF8_BOM + listOf(
@@ -135,6 +155,101 @@ class PotchDataLogger(context: Context) {
                 "crc_error_count",
                 "sequence_loss_count",
                 "estimated_lost_packet_count"
+            ).joinToString(",") + "\n",
+            Charsets.UTF_8
+        )
+
+        workingStabilityEpisodeFile?.writeText(
+            UTF8_BOM + listOf(
+                "logged_at",
+                "sleep_session_id",
+                "episode_id",
+                "detected_index",
+                "detected_episode_count",
+                "started_at",
+                "ended_at",
+                "duration_sec",
+                "frame_sample_count",
+
+                "selected_for_candidate_table",
+                "stored_in_candidate_table",
+                "selection_rank",
+                "selection_reason",
+                "candidate_average_quality",
+
+                "rr_median_bpm",
+                "rr_mean_bpm",
+                "rr_sample_count",
+                "rrv_median_sec",
+                "rrv_mean_sec",
+                "rrv_sample_count",
+                "hr_median_bpm",
+                "hr_mean_bpm",
+                "hr_sample_count",
+                "hrv_rmssd_median_sec",
+                "hrv_rmssd_mean_sec",
+                "hrv_sample_count",
+                "hrv_lf_median",
+                "hrv_hf_median",
+                "temperature_median_c",
+                "temperature_mean_c",
+                "temperature_sample_count",
+                "temperature_slope_median",
+
+                "rr_quality",
+                "rrv_quality",
+                "hr_quality",
+                "hrv_quality",
+                "temperature_quality",
+
+                "movement_stability_score",
+                "respiratory_stability_score",
+                "cardiac_stability_score",
+                "temperature_stability_score",
+                "overall_stability_score",
+                "used_domain_count",
+
+                "analysis_segment_id",
+                "reconnect_count",
+                "continuity_break_count",
+                "packet_loss_count",
+                "algorithm_version",
+                "candidate_created_at",
+
+                "rr_baseline_center",
+                "rr_baseline_spread_mad",
+                "rr_baseline_state",
+                "rr_baseline_candidate_count",
+                "rr_baseline_confidence",
+                "rr_baseline_distribution_version",
+
+                "rrv_baseline_center",
+                "rrv_baseline_spread_mad",
+                "rrv_baseline_state",
+                "rrv_baseline_candidate_count",
+                "rrv_baseline_confidence",
+                "rrv_baseline_distribution_version",
+
+                "hr_baseline_center",
+                "hr_baseline_spread_mad",
+                "hr_baseline_state",
+                "hr_baseline_candidate_count",
+                "hr_baseline_confidence",
+                "hr_baseline_distribution_version",
+
+                "hrv_baseline_center",
+                "hrv_baseline_spread_mad",
+                "hrv_baseline_state",
+                "hrv_baseline_candidate_count",
+                "hrv_baseline_confidence",
+                "hrv_baseline_distribution_version",
+
+                "temperature_baseline_center",
+                "temperature_baseline_spread_mad",
+                "temperature_baseline_state",
+                "temperature_baseline_candidate_count",
+                "temperature_baseline_confidence",
+                "temperature_baseline_distribution_version"
             ).joinToString(",") + "\n",
             Charsets.UTF_8
         )
@@ -275,6 +390,117 @@ class PotchDataLogger(context: Context) {
         )
     }
 
+
+    /**
+     * 검출된 안정 episode의 대표값과 후보 선별 결과를 새 CSV에 기록한다.
+     *
+     * 이 함수는 세션 종료 시 호출되므로 5개 초과 episode의 최종 선별 여부까지 기록할 수 있다.
+     */
+    @Synchronized
+    fun logStabilityEpisode(record: StabilityEpisodeLogRecord) {
+        if (!isLogging) return
+
+        val candidate = record.candidate
+        val rrBaseline = record.activeBaselines[BaselineMetricType.RR]
+        val rrvBaseline = record.activeBaselines[BaselineMetricType.RRV]
+        val hrBaseline = record.activeBaselines[BaselineMetricType.HR]
+        val hrvBaseline = record.activeBaselines[BaselineMetricType.HRV_RMSSD]
+        val temperatureBaseline = record.activeBaselines[BaselineMetricType.TEMPERATURE]
+
+        appendCsv(
+            workingStabilityEpisodeFile,
+            phoneTime(System.currentTimeMillis()),
+            candidate.sleepSessionId,
+            candidate.episodeId,
+            record.detectedIndex,
+            record.detectedEpisodeCount,
+            phoneTime(candidate.startedAt),
+            phoneTime(candidate.endedAt),
+            candidate.durationSec,
+            candidate.frameSampleCount,
+
+            record.selectedForCandidateTable,
+            record.storedInCandidateTable,
+            record.selectionRank,
+            record.selectionReason,
+            record.candidateAverageQuality,
+
+            candidate.rrMedian,
+            candidate.rrMean,
+            candidate.rrSampleCount,
+            candidate.rrvMedian,
+            candidate.rrvMean,
+            candidate.rrvSampleCount,
+            candidate.hrMedian,
+            candidate.hrMean,
+            candidate.hrSampleCount,
+            candidate.hrvRmssdMedian,
+            candidate.hrvRmssdMean,
+            candidate.hrvSampleCount,
+            candidate.hrvLfMedian,
+            candidate.hrvHfMedian,
+            candidate.temperatureMedian,
+            candidate.temperatureMean,
+            candidate.temperatureSampleCount,
+            candidate.temperatureSlopeMedian,
+
+            candidate.rrQuality,
+            candidate.rrvQuality,
+            candidate.hrQuality,
+            candidate.hrvQuality,
+            candidate.temperatureQuality,
+
+            candidate.movementStabilityScore,
+            candidate.respiratoryStabilityScore,
+            candidate.cardiacStabilityScore,
+            candidate.temperatureStabilityScore,
+            candidate.overallStabilityScore,
+            candidate.usedDomainCount,
+
+            candidate.analysisSegmentId,
+            candidate.reconnectCount,
+            candidate.continuityBreakCount,
+            candidate.packetLossCount,
+            candidate.algorithmVersion,
+            phoneTime(candidate.createdAt),
+
+            rrBaseline?.center,
+            rrBaseline?.spread,
+            rrBaseline?.lifecycleState,
+            rrBaseline?.candidateCount,
+            rrBaseline?.confidence,
+            rrBaseline?.distributionVersion,
+
+            rrvBaseline?.center,
+            rrvBaseline?.spread,
+            rrvBaseline?.lifecycleState,
+            rrvBaseline?.candidateCount,
+            rrvBaseline?.confidence,
+            rrvBaseline?.distributionVersion,
+
+            hrBaseline?.center,
+            hrBaseline?.spread,
+            hrBaseline?.lifecycleState,
+            hrBaseline?.candidateCount,
+            hrBaseline?.confidence,
+            hrBaseline?.distributionVersion,
+
+            hrvBaseline?.center,
+            hrvBaseline?.spread,
+            hrvBaseline?.lifecycleState,
+            hrvBaseline?.candidateCount,
+            hrvBaseline?.confidence,
+            hrvBaseline?.distributionVersion,
+
+            temperatureBaseline?.center,
+            temperatureBaseline?.spread,
+            temperatureBaseline?.lifecycleState,
+            temperatureBaseline?.candidateCount,
+            temperatureBaseline?.confidence,
+            temperatureBaseline?.distributionVersion
+        )
+    }
+
     fun logConnectionEvent(event: String, message: String) {
         logDebug("PotchConnection", "event=$event, message=$message", "I")
     }
@@ -288,7 +514,8 @@ class PotchDataLogger(context: Context) {
             workingBurstFile,
             workingDebugFile,
             workingArousalFile,
-            workingHeartRateFile
+            workingHeartRateFile,
+            workingStabilityEpisodeFile
         ).filter { it.exists() }
 
         val exported = files.mapNotNull { exportFileToDownloads(appContext, it) }
@@ -301,12 +528,19 @@ class PotchDataLogger(context: Context) {
     fun getWorkingDebugLogPath(): String? = workingDebugFile?.absolutePath
     fun getWorkingArousalLogPath(): String? = workingArousalFile?.absolutePath
     fun getWorkingHeartRateDiagnosticLogPath(): String? = workingHeartRateFile?.absolutePath
+    fun getWorkingStabilityEpisodeLogPath(): String? =
+        workingStabilityEpisodeFile?.absolutePath
 
     @Synchronized
     fun clear() {
         isLogging = false
-        listOfNotNull(workingBurstFile, workingDebugFile, workingArousalFile, workingHeartRateFile)
-            .forEach { runCatching { it.delete() } }
+        listOfNotNull(
+            workingBurstFile,
+            workingDebugFile,
+            workingArousalFile,
+            workingHeartRateFile,
+            workingStabilityEpisodeFile
+        ).forEach { runCatching { it.delete() } }
         clearWorkingReferences()
         lastSavedFilePath = null
     }
@@ -316,6 +550,7 @@ class PotchDataLogger(context: Context) {
         workingDebugFile = null
         workingArousalFile = null
         workingHeartRateFile = null
+        workingStabilityEpisodeFile = null
     }
 
     private fun appendCsv(file: File?, vararg values: Any?) {

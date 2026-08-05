@@ -47,7 +47,20 @@ data class StableCandidateRecord(
     val continuityBreakCount: Int,
     val packetLossCount: Int,
     val algorithmVersion: Int,
-    val createdAt: Long
+    val createdAt: Long,
+
+    // 아래 값은 episode CSV 로그용이며 SQLite 후보 테이블에는 저장하지 않는다.
+    val frameSampleCount: Int = 0,
+    val rrSampleCount: Int = 0,
+    val rrvSampleCount: Int = 0,
+    val hrSampleCount: Int = 0,
+    val hrvSampleCount: Int = 0,
+    val temperatureSampleCount: Int = 0,
+    val rrMean: Double? = null,
+    val rrvMean: Double? = null,
+    val hrMean: Double? = null,
+    val hrvRmssdMean: Double? = null,
+    val temperatureMean: Double? = null
 )
 
 /**
@@ -295,6 +308,25 @@ class StableCandidateTable(context: Context) {
             null
         ).use { cursor ->
             return if (cursor.moveToFirst()) cursor.getInt(0) else 0
+        }
+    }
+
+    /** 해당 수면 세션에서 최종적으로 후보 테이블에 남아 있는 episode ID 집합. */
+    @Synchronized
+    fun loadEpisodeIds(sleepSessionId: String): Set<String> {
+        val cursor = helper.readableDatabase.query(
+            PotchStabilitySchema.STABLE_CANDIDATE_TABLE,
+            arrayOf("episode_id"),
+            "sleep_session_id = ?",
+            arrayOf(sleepSessionId),
+            null,
+            null,
+            null
+        )
+        return cursor.use {
+            val result = mutableSetOf<String>()
+            while (it.moveToNext()) result += it.getString(0)
+            result
         }
     }
 
