@@ -221,6 +221,6 @@ class PotchBleViewModel(
 
     private fun isSupportedInternalLogFile(file: File): Boolean {
         val ext = file.extension.lowercase()
-        return ext == "csv" || ext == "txt"
+        return ext == "bin" || ext == "csv" || ext == "txt"
     }
 }

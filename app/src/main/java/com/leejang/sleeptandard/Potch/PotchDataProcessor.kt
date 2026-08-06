@@ -584,12 +584,16 @@ class PotchDataProcessor(
         heartRateSampleMotionMaskedBuffer.addAll(motion)
     }
     private fun processBurst(packets: List<ParsedPacket>) {
+        val rawSuperFrame = ByteArray(packets.sumOf { it.raw.size })
         val imuBytes = ByteArray(packets.sumOf { it.imuData.size })
         val ppgBytes = ByteArray(packets.sumOf { it.ppgData.size })
+        var rawOffset = 0
         var imuOffset = 0
         var ppgOffset = 0
 
         packets.forEach { packet ->
+            packet.raw.copyInto(rawSuperFrame, rawOffset)
+            rawOffset += packet.raw.size
             packet.imuData.copyInto(imuBytes, imuOffset)
             imuOffset += packet.imuData.size
             packet.ppgData.copyInto(ppgBytes, ppgOffset)
@@ -705,17 +709,9 @@ class PotchDataProcessor(
         ) ?: StabilityState()
         val greenMax = greenSamples.maxOrNull()?.toDouble() ?: 0.0
 
-        dataLogger?.logSuperFrame(
-            phoneTimeMillis = now,
-            timestamp = sensorData.timestamp,
-            sequenceStart = sensorData.sequenceStart,
-            sequenceEnd = sensorData.sequenceEnd,
-            packetCount = sensorData.packetCount,
-            burstHex = packets.joinToString("") { it.raw.toHex() },
-            complete = "true",
-            missPacketNum = counters.estimatedLostPacketCount.toString(),
-            errorLog = ""
-        )
+        // processBurst()는 8개 slot이 모두 정상적으로 모인 경우에만 호출된다.
+        // 각 142-byte 원시 패킷을 순서대로 이어 붙인 1,136-byte superframe만 binary로 기록한다.
+        dataLogger?.logCompleteSuperFrame(rawSuperFrame)
         dataLogger?.logHeartRateDiagnostics(
             now,
             sensorData.timestamp,
@@ -2874,8 +2870,6 @@ class PotchDataProcessor(
         return crc
     }
 
-    private fun ByteArray.toHex(): String =
-        joinToString("") { "%02X".format(it.toInt() and 0xFF) }
     companion object {
         private const val TAG = "PotchDataProcessor"
 

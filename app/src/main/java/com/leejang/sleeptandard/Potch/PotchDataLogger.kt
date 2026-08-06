@@ -5,6 +5,7 @@ import android.content.Context
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -40,7 +41,8 @@ data class StabilityEpisodeLogRecord(
 class PotchDataLogger(context: Context) {
     private val appContext = context.applicationContext
     private var isLogging = false
-    private var workingBurstFile: File? = null
+    private var workingSuperFrameRawFile: File? = null
+    private var superFrameRawOutput: BufferedOutputStream? = null
     private var workingDebugFile: File? = null
     private var workingArousalFile: File? = null
     private var workingHeartRateFile: File? = null
@@ -54,27 +56,16 @@ class PotchDataLogger(context: Context) {
         val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
         val directory = File(appContext.filesDir, INTERNAL_LOG_DIR_NAME).apply { mkdirs() }
 
-        workingBurstFile = File(directory, "potch_burst_log_$timestamp.csv")
+        closeSuperFrameRawOutput()
+        workingSuperFrameRawFile =
+            File(directory, "potch_superframe_raw_data_$timestamp.bin")
+        superFrameRawOutput = FileOutputStream(workingSuperFrameRawFile, false).buffered()
+
         workingDebugFile = File(directory, "potch_debug_log_$timestamp.txt")
         workingArousalFile = File(directory, "potch_arousal_state_log_$timestamp.csv")
         workingHeartRateFile = File(directory, "potch_hr_diagnostic_log_$timestamp.csv")
         workingStabilityEpisodeFile =
             File(directory, "potch_stability_episode_log_$timestamp.csv")
-
-        workingBurstFile?.writeText(
-            UTF8_BOM + listOf(
-                "phone_time",
-                "timestamp",
-                "sequence_start",
-                "sequence_end",
-                "packet_count",
-                "burst_hex",
-                "complete",
-                "miss_packet_num",
-                "error_log"
-            ).joinToString(",") + "\n",
-            Charsets.UTF_8
-        )
 
         workingDebugFile?.writeText(
             "Potch debug log started at $timestamp\n",
@@ -409,7 +400,7 @@ class PotchDataLogger(context: Context) {
 
     @Synchronized
     fun startIfNeeded() {
-        if (!isLogging || workingBurstFile == null) start()
+        if (!isLogging || workingSuperFrameRawFile == null || superFrameRawOutput == null) start()
     }
 
     @Synchronized
@@ -419,31 +410,38 @@ class PotchDataLogger(context: Context) {
         workingDebugFile?.appendText("$time $level/$tag: $message\n", Charsets.UTF_8)
     }
 
+    /**
+     * CRC/sequence/burst-slot 검사를 모두 통과한 완성 superframe의 원시 패킷 바이트를
+     * 헤더나 구분자 없이 수신 순서 그대로 binary 파일에 이어 붙인다.
+     *
+     * Potch510의 현재 형식은 142 bytes x 8 packets = 1,136 bytes다.
+     */
     @Synchronized
-    fun logSuperFrame(
-        phoneTimeMillis: Long,
-        timestamp: Long,
-        sequenceStart: Int,
-        sequenceEnd: Int,
-        packetCount: Int,
-        burstHex: String,
-        complete: String,
-        missPacketNum: String,
-        errorLog: String
-    ) {
+    fun logCompleteSuperFrame(rawSuperFrame: ByteArray) {
         if (!isLogging) return
-        appendCsv(
-            workingBurstFile,
-            phoneTime(phoneTimeMillis),
-            timestamp,
-            sequenceStart,
-            sequenceEnd,
-            packetCount,
-            burstHex,
-            complete,
-            missPacketNum,
-            errorLog
-        )
+        if (rawSuperFrame.size != COMPLETE_SUPERFRAME_SIZE_BYTES) {
+            workingDebugFile?.appendText(
+                "${phoneTime(System.currentTimeMillis())} W/PotchDataLogger: " +
+                        "완성 superframe 크기 불일치: " +
+                        "expected=$COMPLETE_SUPERFRAME_SIZE_BYTES actual=${rawSuperFrame.size}\n",
+                Charsets.UTF_8
+            )
+            return
+        }
+
+        runCatching {
+            superFrameRawOutput?.apply {
+                write(rawSuperFrame)
+                // 1초 단위 기록이므로 최근 frame이 프로세스 종료로 유실되지 않도록 즉시 flush한다.
+                flush()
+            }
+        }.onFailure { error ->
+            workingDebugFile?.appendText(
+                "${phoneTime(System.currentTimeMillis())} E/PotchDataLogger: " +
+                        "superframe binary 기록 실패: ${error.message}\n",
+                Charsets.UTF_8
+            )
+        }
     }
 
     @Synchronized
@@ -718,9 +716,10 @@ class PotchDataLogger(context: Context) {
     fun stopAndSave(): String? {
         if (!isLogging) return lastSavedFilePath
         isLogging = false
+        closeSuperFrameRawOutput()
 
         val files = listOfNotNull(
-            workingBurstFile,
+            workingSuperFrameRawFile,
             workingDebugFile,
             workingArousalFile,
             workingHeartRateFile,
@@ -733,7 +732,7 @@ class PotchDataLogger(context: Context) {
         return lastSavedFilePath
     }
 
-    fun getWorkingLogPath(): String? = workingBurstFile?.absolutePath
+    fun getWorkingLogPath(): String? = workingSuperFrameRawFile?.absolutePath
     fun getWorkingDebugLogPath(): String? = workingDebugFile?.absolutePath
     fun getWorkingArousalLogPath(): String? = workingArousalFile?.absolutePath
     fun getWorkingHeartRateDiagnosticLogPath(): String? = workingHeartRateFile?.absolutePath
@@ -743,8 +742,9 @@ class PotchDataLogger(context: Context) {
     @Synchronized
     fun clear() {
         isLogging = false
+        closeSuperFrameRawOutput()
         listOfNotNull(
-            workingBurstFile,
+            workingSuperFrameRawFile,
             workingDebugFile,
             workingArousalFile,
             workingHeartRateFile,
@@ -755,11 +755,18 @@ class PotchDataLogger(context: Context) {
     }
 
     private fun clearWorkingReferences() {
-        workingBurstFile = null
+        closeSuperFrameRawOutput()
+        workingSuperFrameRawFile = null
         workingDebugFile = null
         workingArousalFile = null
         workingHeartRateFile = null
         workingStabilityEpisodeFile = null
+    }
+
+    private fun closeSuperFrameRawOutput() {
+        runCatching { superFrameRawOutput?.flush() }
+        runCatching { superFrameRawOutput?.close() }
+        superFrameRawOutput = null
     }
 
     private fun DomainEvidence.toCsvValues(): Array<Any?> = arrayOf(
@@ -804,6 +811,10 @@ class PotchDataLogger(context: Context) {
         private const val INTERNAL_LOG_DIR_NAME = "PotchLogs"
         private const val DOWNLOAD_SUBDIRECTORY = "PotchLogs"
         private const val UTF8_BOM = "\uFEFF"
+        private const val PACKET_SIZE_BYTES = 142
+        private const val PACKETS_PER_SUPERFRAME = 8
+        private const val COMPLETE_SUPERFRAME_SIZE_BYTES =
+            PACKET_SIZE_BYTES * PACKETS_PER_SUPERFRAME
 
         fun listInternalLogFiles(context: Context): List<InternalPotchLogFile> {
             val directory = File(context.applicationContext.filesDir, INTERNAL_LOG_DIR_NAME)
@@ -895,9 +906,12 @@ class PotchDataLogger(context: Context) {
         }
 
         private fun isSupported(file: File): Boolean =
-            file.extension.lowercase() in setOf("csv", "txt")
+            file.extension.lowercase() in setOf("bin", "csv", "txt")
 
-        private fun mimeType(file: File): String =
-            if (file.extension.equals("csv", true)) "text/csv" else "text/plain"
+        private fun mimeType(file: File): String = when (file.extension.lowercase()) {
+            "bin" -> "application/octet-stream"
+            "csv" -> "text/csv"
+            else -> "text/plain"
+        }
     }
 }
