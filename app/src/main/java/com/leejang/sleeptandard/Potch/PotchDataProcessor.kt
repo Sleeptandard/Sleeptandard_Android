@@ -2,7 +2,6 @@ package com.leejang.sleeptandard.Potch
 
 import android.util.Log
 import kotlinx.coroutines.flow.MutableStateFlow
-
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlin.math.PI
@@ -16,13 +15,6 @@ import kotlin.math.roundToLong
 import kotlin.math.sin
 import kotlin.math.sqrt
 
-/**
- * PotchDataProcessor가 현재까지 처리한 데이터 상태를 담는 데이터 클래스.
- *
- * BLE 통신으로 들어온 raw byte를 파싱한 결과와,
- * 패킷 오류 정보, 마지막 로그 등을 UI에서 볼 수 있게 저장한다.
- */
-
 data class PacketErrorLog(
     val type: String,
     val message: String,
@@ -30,13 +22,6 @@ data class PacketErrorLog(
     val timestampMs: Long = System.currentTimeMillis()
 )
 
-/**
- * 한 번의 HR 분석 시도가 어떤 상태로 끝났는지 구분한다.
- *
- * HELD_PREVIOUS는 새 HR 계산에는 실패했지만 화면에는 제한 시간 동안
- * 마지막 정상값을 유지하고 있음을 뜻한다. 실제 실패 원인은
- * [HeartRateDiagnostics.underlyingFailureReason]에 별도로 남긴다.
- */
 enum class HeartRateProcessingState {
     COLLECTING,
     NO_CONTACT,
@@ -61,94 +46,33 @@ enum class HeartRatePeakPolarity {
     NONE
 }
 
-/**
- * 최종 HR이 어느 PPG 채널 또는 융합 경로에서 선택됐는지 나타낸다.
- */
-enum class HeartRateFusionSource {
+enum class HeartRateSource {
     NONE,
-    IR,
-    RED,
-    FUSED_IR_RED,
-    COMBINED_FALLBACK
+    GREEN
 }
 
-/**
- * HR peak source를 매 frame마다 다시 경쟁시키지 않고 안정적으로 유지하기 위한 경로.
- *
- * 기본 경로는 IR 양의 peak다. RED 양의 peak는 검증 및 첫 번째 fallback으로만 사용하며,
- * 음의 peak 경로는 양의 peak 경로가 지속해서 실패했을 때만 활성화한다.
- */
-private enum class HeartRateDetectionPath(
-    val source: HeartRateFusionSource,
-    val polarity: HeartRatePeakPolarity,
-    val label: String
-) {
-    IR_POSITIVE(
-        source = HeartRateFusionSource.IR,
-        polarity = HeartRatePeakPolarity.POSITIVE,
-        label = "IR positive"
-    ),
-    RED_POSITIVE(
-        source = HeartRateFusionSource.RED,
-        polarity = HeartRatePeakPolarity.POSITIVE,
-        label = "RED positive"
-    ),
-    IR_NEGATIVE(
-        source = HeartRateFusionSource.IR,
-        polarity = HeartRatePeakPolarity.NEGATIVE,
-        label = "IR negative"
-    ),
-    RED_NEGATIVE(
-        source = HeartRateFusionSource.RED,
-        polarity = HeartRatePeakPolarity.NEGATIVE,
-        label = "RED negative"
-    );
-
-    val isNegative: Boolean
-        get() = polarity == HeartRatePeakPolarity.NEGATIVE
-}
-
-/**
- * 매 SuperFrame마다 HR 계산에 사용된 신호 특징과 성공/실패 사유를 저장한다.
- *
- * 이 객체는 UI 상태와 potch_hr_diagnostic_log CSV에 그대로 사용된다.
- */
 data class HeartRateDiagnostics(
     val processingState: HeartRateProcessingState = HeartRateProcessingState.COLLECTING,
     val underlyingFailureReason: HeartRateProcessingState? = null,
-    val message: String = "PPG 심박 신호 수집 중",
-
+    val message: String = "Green PPG 심박 신호 수집 중",
     val analysisSegmentId: Long = 0L,
     val windowSampleCount: Int = 0,
     val windowSeconds: Double = 0.0,
 
-    val irDcMean: Double? = null,
-    val irMin: Double? = null,
-    val irMax: Double? = null,
-
-    // band-pass 출력의 5~95 percentile 폭. 극단 spike 한두 개에 덜 민감하다.
+    val greenDcMean: Double? = null,
+    val greenMin: Double? = null,
+    val greenMax: Double? = null,
     val acRobustAmplitude: Double? = null,
 
-    // 최근 window를 1초 단위로 나눈 AC 진폭들의 변동계수.
-    // 자세/접촉 변화로 pulse amplitude가 크게 출렁이는지 확인한다.
     val amplitudeCoefficientOfVariation: Double? = null,
-
-    // HR 허용 주파수 대역에서 가장 강한 bin이 차지하는 power 비율과
-    // 정규화 spectral entropy. 집중도는 높을수록, entropy는 낮을수록 좋다.
     val spectralConcentration: Double? = null,
     val spectralEntropy: Double? = null,
-
-    // raw PPG 연속 sample 변화량의 99 percentile을 robust amplitude로 나눈 값.
-    // 최대값 하나에 과민하게 반응하지 않으면서 갑작스러운 변화 정도를 정규화한다.
     val abruptChangeRatio: Double? = null,
 
-    // 선택된 moving-average threshold의 실제 offset과 백분율.
     val selectedPeakThreshold: Double? = null,
     val selectedThresholdPercent: Double? = null,
     val selectedPolarity: HeartRatePeakPolarity = HeartRatePeakPolarity.NONE,
 
-    // 선택된 peak fitting 후보의 절대 sample 위치.
-    // UI에서 전체 검출 peak, 최종 채택 IBI, 탈락 IBI, 첫 기준 peak를 구분해 표시한다.
     val detectedPeakSamplePositions: List<Double> = emptyList(),
     val acceptedIbiEndSamplePositions: List<Double> = emptyList(),
     val rejectedIbiEndSamplePositions: List<Double> = emptyList(),
@@ -159,52 +83,27 @@ data class HeartRateDiagnostics(
     val validIbiCount: Int = 0,
     val acceptedIntervalRatio: Double? = null,
 
-    // 이상치 제거 전 raw IBI의 품질값.
     val rawSdsdMs: Double? = null,
     val rawIbiCv: Double? = null,
     val physiologicalIntervalRatio: Double? = null,
     val rawIntervalQualityScore: Double? = null,
-
-    // 이전 CSV 호환용. rawSdsdMs와 같은 값이다.
     val sdsdMs: Double? = null,
-
-    // 최종 HR estimate quality. raw interval 품질을 강하게 반영한다.
     val qualityScore: Double? = null,
 
-    // 이번 window에서 새로 계산한 BPM과 실제 화면 표시 BPM을 분리한다.
     val calculatedBpm: Int? = null,
     val displayedBpm: Int? = null,
     val heartRateFresh: Boolean = false,
     val heartRateAgeMillis: Long? = null,
+    val source: HeartRateSource = HeartRateSource.NONE,
+    val sourceLog: String? = null,
 
-    // IR/RED 독립 분석과 최종 채널 융합 결과.
-    val fusionSource: HeartRateFusionSource = HeartRateFusionSource.NONE,
-    val fusionLog: String? = null,
+    val meanPeakInterpolationOffsetMs: Double? = null,
+    val maxPeakInterpolationOffsetMs: Double? = null,
 
-    val irProcessingState: HeartRateProcessingState? = null,
-    val irCalculatedBpm: Int? = null,
-    val irQualityScore: Double? = null,
-    val irAcceptedIntervalRatio: Double? = null,
-    val irRawSdsdMs: Double? = null,
-
-    val redProcessingState: HeartRateProcessingState? = null,
-    val redCalculatedBpm: Int? = null,
-    val redQualityScore: Double? = null,
-    val redAcceptedIntervalRatio: Double? = null,
-    val redRawSdsdMs: Double? = null,
-
-    val combinedProcessingState: HeartRateProcessingState? = null,
-    val combinedCalculatedBpm: Int? = null,
-    val combinedQualityScore: Double? = null,
-    val combinedAcceptedIntervalRatio: Double? = null,
-    val combinedRawSdsdMs: Double? = null,
-
-    // 현재 1초 IMU frame의 g-magnitude 연속 변화 최대값과 robust 통계.
     val imuMaxDeltaG: Double? = null,
     val imuP95DeltaG: Double? = null,
     val imuMotionExceedanceRatio: Double? = null,
 
-    // gap-aware HR buffer와 spike 보정 상태.
     val retainedBufferSampleCount: Int = 0,
     val cleanSegmentSampleCount: Int = 0,
     val invalidMaskedSampleCount: Int = 0,
@@ -214,9 +113,7 @@ data class HeartRateDiagnostics(
     val longestInterpolatedRun: Int = 0,
     val motionTolerated: Boolean = false,
 
-    // HR rolling window의 raw PPG 연속 sample 변화 최대값.
     val maxRawSampleDelta: Double? = null,
-
     val crcErrorCount: Int = 0,
     val sequenceLossCount: Int = 0,
     val estimatedLostPacketCount: Int = 0
@@ -224,15 +121,8 @@ data class HeartRateDiagnostics(
 
 data class IbiInterval(
     val intervalSec: Double,
-
-    // 기존 정수 sample index는 로그/호환용으로 유지한다.
     val endSampleIndex: Long,
-
-    // 패킷 누락/CRC 오류 전후의 IBI가 서로 연결되지 않도록 하는 연속 구간 ID.
     val segmentId: Long = 0L,
-
-    // 포물선 보간으로 추정한 실제 peak 종료 위치.
-    // 100Hz에서도 1 sample(10ms) 단위가 아닌 sub-sample 위치를 보존한다.
     val endSamplePosition: Double = endSampleIndex.toDouble()
 )
 
@@ -243,29 +133,25 @@ data class HeartRateEstimate(
     val intervalCount: Int,
     val averageIntervalSec: Double,
     val qualityScore: Double,
+    val source: HeartRateSource = HeartRateSource.GREEN,
+    val sourceLog: String? = "Green PPG 단일 채널",
 
-    // 최종 선택/융합된 PPG source와 판단 근거.
-    val source: HeartRateFusionSource = HeartRateFusionSource.NONE,
-    val fusionLog: String? = null,
-
-    // HeartPy-style adaptive peak fitting debug values.
-    // 어떤 이동평균 상승률 후보가 선택됐는지와 해당 후보의 SDSD를 남긴다.
     val selectedThresholdPercent: Double? = null,
     val selectedPeakThreshold: Double? = null,
     val selectedPolarity: HeartRatePeakPolarity = HeartRatePeakPolarity.NONE,
     val peakFitSdsdMs: Double? = null,
+
     val rawIntervalCount: Int = intervalCount,
     val acceptedIntervalRatio: Double = 1.0,
     val rawIbiCv: Double = 0.0,
     val physiologicalIntervalRatio: Double = 1.0,
     val rawIntervalQualityScore: Double = 1.0,
+
     val spectralConcentration: Double? = null,
     val spectralEntropy: Double? = null,
     val amplitudeCoefficientOfVariation: Double? = null,
     val abruptChangeRatio: Double? = null,
 
-    // 최종 선택된 threshold/polarity 후보의 peak 디버그 정보.
-    // 위치는 rolling HR buffer 전체 기준의 절대 sample position이다.
     val detectedPeakSamplePositions: List<Double> = emptyList(),
     val acceptedIbiEndSamplePositions: List<Double> =
         ibiIntervals.map { it.endSamplePosition },
@@ -273,41 +159,18 @@ data class HeartRateEstimate(
     val referencePeakSamplePosition: Double? =
         detectedPeakSamplePositions.firstOrNull(),
 
-    // 정수 peak index에서 포물선 보간 위치까지 이동한 크기.
-    // 측정 정확도 자체를 뜻하지 않고 10ms grid 보정량을 디버깅하기 위한 값이다.
     val meanPeakInterpolationOffsetMs: Double = 0.0,
     val maxPeakInterpolationOffsetMs: Double = 0.0
 )
 
-
-/**
- * ExperimentScreen에서 HR 분석 파형을 그대로 시각화하기 위한 snapshot.
- *
- * 이 데이터는 raw IR/RED 평균이 아니라 PotchDataProcessor의 실제 HR 경로와 동일하게
- * latest clean tail -> 짧은 spike 보간 -> 0.75~3.5Hz band-pass를 적용한 결과다.
- *
- * FUSED_IR_RED는 sample을 합쳐서 HR을 계산하는 방식이 아니라 각 채널의 HR/IBI를
- * late fusion하는 방식이므로 primary/secondary에 전처리된 IR/RED 파형을 함께 제공한다.
- */
 data class HeartRateGraphData(
-    val source: HeartRateFusionSource = HeartRateFusionSource.NONE,
+    val source: HeartRateSource = HeartRateSource.NONE,
     val processingState: HeartRateProcessingState = HeartRateProcessingState.COLLECTING,
     val selectedPolarity: HeartRatePeakPolarity = HeartRatePeakPolarity.NONE,
+    val label: String = "GREEN",
+    val samples: List<Double> = emptyList(),
 
-    val primaryLabel: String = "IR",
-    val primarySamples: List<Double> = emptyList(),
-
-    val secondaryLabel: String? = null,
-    val secondarySamples: List<Double> = emptyList(),
-
-    // 이전 UI 호환용. 최종 채택 IBI 종료 peak와 동일하다.
     val peakSampleIndices: List<Int> = emptyList(),
-
-    // 현재 graph window 기준 marker index.
-    // detected: 선택된 threshold에서 검출된 전체 peak
-    // accepted: 최종 HR 계산에 남은 IBI의 종료 peak
-    // rejected: 생리 범위/median filter에서 탈락한 IBI의 종료 peak
-    // reference: 첫 번째 검출 peak이며 첫 IBI의 시작 기준점
     val detectedPeakSampleIndices: List<Int> = emptyList(),
     val acceptedPeakSampleIndices: List<Int> = emptyList(),
     val rejectedPeakSampleIndices: List<Int> = emptyList(),
@@ -320,196 +183,51 @@ data class HeartRateGraphData(
 
     val calculatedBpm: Int? = null,
     val qualityScore: Double? = null,
-    val description: String = "HR 분석용 PPG 수집 중"
+    val description: String = "Green PPG 심박 분석 데이터 수집 중"
 )
 
 data class DataProcessorState(
-    // 마지막으로 정상 파싱된 센서 데이터
-    // 아직 수신된 데이터가 없거나 파싱 전이면 null
     val lastParsedData: SensorData? = null,
-
-    // IR/RED를 독립 분석한 뒤 품질과 일치도를 기반으로 선택·융합한 심박수.
-    // 두 독립 채널이 모두 실패할 때만 IR/RED 평균 신호를 fallback으로 사용한다.
     val heartRateBpm: Int? = null,
-
-    // 현재 심박수 추정의 품질 점수. 0.0~1.0, 값이 클수록 peak 간격이 안정적이다.
     val heartRateQuality: Double? = null,
-
-    // 이번 SuperFrame에서 새 HR이 계산됐는지와 마지막 정상 HR의 나이.
     val heartRateFresh: Boolean = false,
     val heartRateAgeMillis: Long? = null,
-
-    // 매초 기록되는 상세 HR 분석 상태.
     val heartRateDiagnostics: HeartRateDiagnostics = HeartRateDiagnostics(),
-
-    // 현재 프레임에서 채널 융합 HR 추출이 가능한지와 실패 이유.
-    val heartRateCalculationStatus: MetricCalculationStatus = MetricCalculationStatus(
-        state = MetricCalculationState.COLLECTING,
-        message = "IR/RED PPG 심박 신호 수집 중"
-    ),
-
-    // ExperimentScreen에 노출하는 실제 HR 전처리/채널 선택 결과 파형.
+    val heartRateCalculationStatus: MetricCalculationStatus = MetricCalculationStatus(),
     val heartRateGraphData: HeartRateGraphData = HeartRateGraphData(),
-
-    // CRC 검증 실패 횟수
-    // 패킷 데이터가 손상되었을 가능성을 확인하기 위한 누적 카운트
     val crcErrorCount: Int = 0,
-
-    // Fragment 순서가 예상과 다르게 들어온 횟수
-    // BLE notification 누락 또는 순서 꼬임을 감지하기 위한 누적 카운트
     val missingSequenceErrors: Int = 0,
-
-    // 마지막 처리 상태를 사람이 읽을 수 있게 저장하는 로그 메시지
-    // 예: "CRC OK!", "Length Drop", "Seq Drop" 등
     val lastLog: String = "No data yet",
-
-    // 전체 수신된 BLE mini packet 수
     val totalMiniPackets: Int = 0,
-
-    // 정상 형식으로 처리된 mini packet 수
     val validMiniPackets: Int = 0,
-
-    // 손상된 mini packet 또는 super frame 수
     val damagedPacketCount: Int = 0,
-
-    // counter 차이로 추정한 손실 mini packet 수
     val estimatedLostPacketCount: Int = 0,
-
-    // 완성되어 파싱된 super frame 수
     val parsedSuperFrameCount: Int = 0,
-
-    // 최근 패킷 오류 내역
     val recentPacketErrors: List<PacketErrorLog> = emptyList(),
-
-    // 마지막으로 수신한 fragment counter
     val lastFragCounter: Int? = null,
-
-    // 다음에 기대하는 fragment counter
     val expectedFragCounter: Int? = null,
-
-    // 현재 분석 연속 구간 ID. 패킷 누락/CRC 오류마다 증가한다.
     val analysisSegmentId: Long = 0L,
-
-    // 분석 연속성이 끊긴 누적 횟수와 마지막 원인.
     val continuityBreakCount: Int = 0,
     val lastContinuityBreakReason: String? = null,
-
-    // 가장 최근 프레임의 IR 최댓값.
-    // 손가락/피부 접촉이 있으면 보통 10000 이상, 강하면 50000 이상.
-    // 0이면 PPG 데이터가 안 들어오거나 sleep mode에서 0으로 채워졌을 가능성이 큼.
-    val lastIrMax: Double = 0.0,
-
-    // INT2 비동기 이벤트 수신 여부
+    val lastGreenMax: Double = 0.0,
     val int2EventReceived: Boolean = false,
-
-    // 각성지표 state
     val arousalState: ArousalState = ArousalState(),
+    val stabilityState: StabilityState = StabilityState()
 )
-/**
- * Potch BLE 기기에서 들어오는 raw byte 데이터를 실제 센서 데이터로 변환하는 클래스.
- *
- * Potch 기기는 센서 데이터를 한 번에 1212 bytes짜리 Super Frame으로 구성하지만,
- * BLE notification으로는 204 bytes 단위 Fragment로 나눠서 보낸다.
- *
- * 이 클래스의 역할:
- * 1. 204 bytes Fragment를 수신한다.
- * 2. Fragment header를 검사한다.
- * 3. Fragment 순서를 확인한다.
- * 4. Payload를 buffer에 누적한다.
- * 5. 1212 bytes Super Frame이 완성되면 파싱한다.
- * 6. NTC, timestamp, battery, IMU, CRC 정보를 추출한다.
- */
 class PotchDataProcessor(
-    private val dataLogger: PotchDataLogger? = null
+    private val dataLogger: PotchDataLogger? = null,
+    private val arousalCalculator: PotchArousalCalculator = PotchArousalCalculator(),
+    private val stabilityCalculator: PotchStabilityCalculator? = null
 ) {
-    private val TAG = "PotchDataProcessor"
-
-    companion object {
-        private const val HEART_RATE_MIN_BPM = 40
-        private const val HEART_RATE_MAX_BPM = 180
-        private const val HEART_RATE_MOVING_AVERAGE_SECONDS = 1.5
-
-        // 후보 hard reject 기준.
-        // 정제 후 IBI 4개, 원본 대비 60% 유지, raw SDSD 200ms 이하를 모두 만족해야 한다.
-        // 8초 window에서는 IBI 한 개 탈락이 비율에 크게 영향을 주므로 0.60으로 완화한다.
-        private const val HEART_RATE_MIN_USED_INTERVAL_COUNT = 4
-        private const val HEART_RATE_MIN_ACCEPTED_INTERVAL_RATIO = 0.60
-        private const val HEART_RATE_MAX_RAW_SDSD_SEC = 0.200
-        private const val HEART_RATE_MIN_PHYSIOLOGICAL_INTERVAL_RATIO = 0.75
-
-        // raw interval quality 점수 기준.
-        private const val HEART_RATE_RAW_IBI_CV_ZERO_SCORE = 0.30
-        private const val HEART_RATE_PREFERRED_USED_INTERVAL_COUNT = 8
-
-        // BVP 주파수/안정성 gate의 초기 기준.
-        private const val HEART_RATE_MIN_SPECTRAL_CONCENTRATION = 0.12
-        private const val HEART_RATE_MAX_SPECTRAL_ENTROPY = 0.82
-        private const val HEART_RATE_MAX_AMPLITUDE_CV = 0.50
-
-        // raw PPG의 단 한 번의 최대 변화량이 아니라 연속 변화량의 99 percentile을 사용한다.
-        // 1.0 이상부터 quality를 감점하고, 1.5를 넘을 때만 hard reject한다.
-        private const val HEART_RATE_ABRUPT_CHANGE_PERCENTILE = 0.99
-        private const val HEART_RATE_ABRUPT_CHANGE_SCORE_ZERO_RATIO = 1.00
-        private const val HEART_RATE_MAX_ABRUPT_CHANGE_RATIO = 1.50
-
-        // Potch MAX3010x 계열 PPG는 18-bit 범위를 사용한다.
-        private const val HEART_RATE_PPG_ADC_MAX = 262143.0
-        private const val HEART_RATE_CONTACT_DC_MIN = 10000.0
-        private const val HEART_RATE_SATURATION_HIGH = 260000.0
-        private const val HEART_RATE_MIN_ROBUST_AC_AMPLITUDE = 80.0
-
-        // 단일 IMU spike 하나로 HR을 거부하지 않도록 max가 아니라
-        // p95와 기준 초과 비율을 함께 사용한다.
-        private const val HEART_RATE_MOTION_DELTA_THRESHOLD_G = 0.15
-        private const val HEART_RATE_MOTION_P95_THRESHOLD_G = 0.15
-        private const val HEART_RATE_MOTION_MIN_EXCEEDANCE_RATIO = 0.05
-        private const val HEART_RATE_MOTION_SINGLE_SPIKE_HARD_G = 0.40
-
-        // 움직임 중에도 IR/RED가 강하게 일치하면 낮은 confidence로 허용한다.
-        private const val HEART_RATE_MOTION_TOLERATE_MIN_CHANNEL_QUALITY = 0.55
-        private const val HEART_RATE_MOTION_QUALITY_PENALTY = 0.80
-
-        // 짧은 PPG spike는 필터 연속성을 위해 선형 보간하고,
-        // 보간 주변은 peak 후보에서 제외한다.
-        private const val HEART_RATE_SPIKE_INTERPOLATION_MAX_SAMPLES = 10
-        private const val HEART_RATE_SPIKE_PEAK_EXCLUSION_MARGIN_SAMPLES = 2
-        private const val HEART_RATE_MAX_EXCLUDED_SAMPLE_RATIO = 0.40
-
-        private const val HEART_RATE_IMU_LSB_PER_G = 1024.0
-
-        // candidate 비교에서 IBI 개수 부족과 reject 비율에 주는 작은 penalty.
-        private const val HEART_RATE_COUNT_PENALTY_SEC = 0.020
-        private const val HEART_RATE_REJECTION_PENALTY_SEC = 0.050
-
-        // IR/RED late fusion 기준.
-        private const val HEART_RATE_FUSION_AGREE_BPM = 3.0
-        private const val HEART_RATE_FUSION_AGREE_RATIO = 0.05
-        private const val HEART_RATE_FUSION_MODERATE_DISAGREE_BPM = 8.0
-        private const val HEART_RATE_FUSION_STRONG_QUALITY = 0.75
-        private const val HEART_RATE_FUSION_MIN_QUALITY_MARGIN = 0.15
-        private const val HEART_RATE_FUSION_SELECTION_SCORE_MARGIN = 0.10
-        private const val HEART_RATE_FUSION_CONTINUITY_SCALE_BPM = 25.0
-        private const val HEART_RATE_FUSION_INTERVAL_MATCH_TOLERANCE_SAMPLES = 25.0
-        private const val HEART_RATE_FUSION_MIN_MATCHED_INTERVALS = 4
-        private const val HEART_RATE_FUSION_HARMONIC_RATIO_TOLERANCE = 0.10
-
-        // Stable HR path selection.
-        // IR positive를 primary로 고정하고, 즉시 source/polarity가 교대되지 않도록 한다.
-        private const val HEART_RATE_PRIMARY_FAILURES_BEFORE_FALLBACK = 3
-        private const val HEART_RATE_FALLBACK_CONFIRM_FRAMES = 3
-        private const val HEART_RATE_PRIMARY_RECOVERY_CONFIRM_FRAMES = 3
-
-        // IR/RED positive가 충분히 오래 실패한 뒤에만 negative peak 탐색 결과를 사용한다.
-        // primary 3회 실패 + positive fallback 확인 실패 3회를 합친 값이다.
-        private const val HEART_RATE_NEGATIVE_ENABLE_FAILURE_COUNT = 6
-        private const val HEART_RATE_PENDING_BPM_TOLERANCE = 8
-
-        // HeartPy의 ma_perc 후보 범위를 참고한 moving-average 상승률 목록.
-        private val HEART_RATE_THRESHOLD_PERCENT_CANDIDATES = doubleArrayOf(
-            5.0, 10.0, 15.0, 20.0, 25.0, 30.0,
-            40.0, 50.0, 75.0, 100.0, 150.0, 200.0, 300.0
-        )
-    }
+    private data class ParsedPacket(
+        val raw: ByteArray,
+        val sequence: Int,
+        val timestamp: Long,
+        val batteryRaw: Int,
+        val ntcRaw: Int,
+        val imuData: ByteArray,
+        val ppgData: ByteArray
+    )
 
     private data class HeartRatePeakFitCandidate(
         val polarity: HeartRatePeakPolarity,
@@ -521,8 +239,6 @@ class PotchDataProcessor(
         val usedIntervals: List<IbiInterval>,
         val rawBpm: Double,
         val finalBpm: Double,
-
-        // 모두 이상치 제거 전 raw IBI에서 계산한다.
         val sdsdSec: Double,
         val rawIbiCv: Double,
         val physiologicalIntervalRatio: Double,
@@ -535,8 +251,6 @@ class PotchDataProcessor(
 
     private data class HeartRatePeakFitSearchResult(
         val bestCandidate: HeartRatePeakFitCandidate?,
-
-        // hard reject된 후보 중 가장 나았던 후보. 실패 CSV에도 raw 품질을 남기기 위해 보존한다.
         val bestRejectedCandidate: HeartRatePeakFitCandidate?,
         val maxDetectedPeakCount: Int,
         val maxRawIntervalCount: Int,
@@ -566,7 +280,6 @@ class PotchDataProcessor(
 
     private data class HeartRateSignalWindow(
         val signal: List<Double>,
-        val contactSignal: List<Double>,
         val startSamplePosition: Long,
         val retainedBufferSampleCount: Int,
         val cleanSegmentSampleCount: Int,
@@ -583,14 +296,12 @@ class PotchDataProcessor(
         val longArtifactSampleCount: Int
     )
 
-    private data class PreparedHeartRateGraphChannel(
-        val label: String,
-        val samples: List<Double>,
-        val startSamplePosition: Long,
-        val retainedBufferSampleCount: Int,
-        val cleanSegmentSampleCount: Int,
+    private data class PpgArtifactRepairStats(
+        val excludedPeakMask: BooleanArray,
         val interpolatedSampleCount: Int,
-        val excludedPeakSampleCount: Int
+        val excludedPeakSampleCount: Int,
+        val longestRun: Int,
+        val longArtifactSampleCount: Int
     )
 
     private data class HeartRateAnalysisResult(
@@ -598,822 +309,189 @@ class PotchDataProcessor(
         val diagnostics: HeartRateDiagnostics
     )
 
-    private data class HeartRateFusionDecision(
-        val estimate: HeartRateEstimate?,
-        val source: HeartRateFusionSource,
-        val log: String
-    )
-
-
-    private data class HeartRatePathDecision(
-        val estimate: HeartRateEstimate?,
-        val analysis: HeartRateAnalysisResult,
-        val path: HeartRateDetectionPath,
-        val log: String,
-        val waitingForConfirmation: Boolean = false
-    )
-
-    // 각성지표 연산기
-    private val arousalCalculator = PotchArousalCalculator()
-
-    private val currentFrameErrors = mutableListOf<String>()
-    private val currentFrameMissPacketNums = mutableListOf<Int>()
-
-    /**
-     * 내부에서 수정 가능한 상태 값.
-     *
-     * UI에서는 직접 수정하면 안 되기 때문에 private으로 숨기고,
-     * 외부에는 아래 state만 공개한다.
-     */
     private val _state = MutableStateFlow(DataProcessorState())
-
-    /**
-     * 외부에서 관찰할 수 있는 읽기 전용 상태.
-     *
-     * Compose 화면이나 ViewModel에서 collectAsState()로 받아서
-     * 센서값, 오류 횟수, 로그를 표시할 수 있다.
-     */
     val state: StateFlow<DataProcessorState> = _state
 
-    /**
-     * Fragment payload를 임시로 쌓아두는 버퍼.
-     *
-     * BLE로 들어오는 데이터는 204 bytes 단위이고,
-     * 앞의 2 bytes는 mini header이므로 실제 payload는 202 bytes다.
-     *
-     * payload를 계속 모아서 1212 bytes가 되면 하나의 Super Frame으로 파싱한다.
-     */
-    private val buffer = ArrayDeque<Byte>()
-
-    /**
-     * 다음에 들어와야 할 Fragment counter 값.
-     *
-     * Fragment mini header 안에는 12-bit counter가 들어있다.
-     * 이 값을 이용해서 패킷 누락 또는 순서 꼬임을 감지한다.
-     *
-     * null이면 아직 기준 counter가 없는 초기 상태다.
-     */
-    private var expectedFragCounter: Int? = null
-
-    /**
-     * 현재 분석 연속 구간 ID.
-     *
-     * Fragment 누락, CRC 오류, Super Header 오류가 발생하면 증가한다.
-     * 이후 생성되는 IBI에 이 값을 기록해 서로 다른 구간의 RR을 연결하지 않는다.
-     */
-    private var currentAnalysisSegmentId: Long = 0L
-
-    /**
-     * 심박수 추정을 위한 PPG 합산 샘플 누적 버퍼.
-     *
-     * 한 Super Frame에는 1초(100 샘플)치 PPG 데이터만 들어있어서
-     * 그 안에서 피크 검출을 하면 비트 수가 너무 적어 (60bpm 기준 1개) 불안정하다.
-     * 그래서 최근 몇 초 분량을 rolling buffer로 누적한 뒤 그 위에서 피크를 검출한다.
-     *
-     * IR, RED, 두 채널 평균 신호를 같은 sample index로 나란히 보관한다.
-     * CRC가 정상인 프레임의 샘플만 누적한다 (손상된 프레임은 HR 추정에 사용하지 않음).
-     */
-    private val heartRateIrBuffer = ArrayDeque<Int>()
-    private val heartRateRedBuffer = ArrayDeque<Int>()
-    private val heartRateCombinedBuffer = ArrayDeque<Int>()
-
-    // 각 PPG sample의 절대 위치, packet segment, HR 사용 가능 여부를 나란히 보관한다.
-    // packet gap이 생겨도 과거 raw를 즉시 삭제하지 않고, 최신 연속 clean tail만 HR에 사용한다.
+    private val burstPackets = ArrayList<ParsedPacket>(PACKETS_PER_BURST)
+    private val greenPpgBuffer = ArrayDeque<Int>()
     private val heartRateSamplePositionBuffer = ArrayDeque<Long>()
     private val heartRateSampleSegmentBuffer = ArrayDeque<Long>()
     private val heartRateSampleUsableBuffer = ArrayDeque<Boolean>()
     private val heartRateSampleMotionMaskedBuffer = ArrayDeque<Boolean>()
 
-    private var totalHeartRateSampleCount: Long = 0L
+    private var expectedSequence: Int? = null
+    private var analysisSegmentId = 0L
+    private var totalHeartRateSamples = 0L
+    private var lastValidHeartRate: HeartRateEstimate? = null
+    private var lastValidHeartRateAt: Long? = null
 
-    /** HR 버퍼에 보관할 최대 샘플 수. 100Hz 기준 8초 = 800 샘플. */
-    private val heartRateBufferMaxSamples = 800
+    private var activePolarity = HeartRatePeakPolarity.POSITIVE
+    private var positiveFailureStreak = 0
+    private var positiveRecoveryStreak = 0
+    private var activePolarityFailureStreak = 0
+    private var pendingPolarity: HeartRatePeakPolarity? = null
+    private var pendingPolaritySuccessStreak = 0
+    private var pendingPolarityLastBpm: Int? = null
 
-    /** HR 계산을 시도하기 위한 최소 누적 샘플 수. 100Hz 기준 3초 = 300 샘플. */
-    private val heartRateMinSamples = 300
+    fun updateMicroMovementBandPass(lowCutHz: Double, highCutHz: Double) {
+        arousalCalculator.updateMicroMovementBandPass(lowCutHz, highCutHz)
+    }
 
-    /**
-     * adaptive peak fitting이 실패해도 초기 수집 중으로 표시할 권장 길이.
-     * SDSD에는 최소 4개 peak가 필요하므로 저심박까지 고려해 6초를 확보한다.
-     */
-    private val heartRateAdaptiveFitPreferredSamples = 600
+    /** Service에서 세션 기준선을 고정한 직후 UI에 최신 안정 상태를 반영한다. */
+    @Synchronized
+    fun refreshStabilityState() {
+        _state.update {
+            it.copy(
+                stabilityState = stabilityCalculator?.currentState() ?: StabilityState()
+            )
+        }
+    }
 
-    // CRC 정상 PPG 입력과 유효 HR 결과의 마지막 휴대폰 시각.
-    private var lastValidHeartRateInputTimestampMillis: Long? = null
-    private var lastValidHeartRateEstimateTimestampMillis: Long? = null
-    private var lastValidHeartRateEstimate: HeartRateEstimate? = null
-
-    // HR source/polarity hysteresis state.
-    private var activeHeartRatePath = HeartRateDetectionPath.IR_POSITIVE
-    private var primaryPositiveFailureStreak = 0
-    private var primaryPositiveRecoveryStreak = 0
-    private var activePathFailureStreak = 0
-    private var positiveFallbackUnavailableStreak = 0
-    private var pendingHeartRatePath: HeartRateDetectionPath? = null
-    private var pendingHeartRatePathSuccessStreak = 0
-    private var pendingHeartRatePathLastBpm: Int? = null
-
-    // CRC 정상 PPG가 끊긴 채 과거 raw buffer를 반복 계산하지 않도록 하는 제한.
-    private val heartRateInputStaleTimeoutMillis = 3 * 1000L
-
-    // 화면에서 마지막 정상 BPM을 잠깐 유지할 수 있는 최대 시간. 이후에는 null로 내린다.
-    private val heartRateDisplayStaleTimeoutMillis = 10 * 1000L
-
-    /**
-     * Potch 기기에서 한 번에 보내는 BLE Fragment 크기.
-     *
-     * 구조:
-     * - 2 bytes: mini header
-     * - 202 bytes: payload
-     *
-     * 총 204 bytes
-     */
-    private val fragmentSize = 204
-
-    /**
-     * 하나의 완성된 센서 데이터 프레임 크기.
-     *
-     * Fragment payload 202 bytes × 6개 = 1212 bytes
-     *
-     * 이 크기만큼 buffer에 모이면 parseSuperFrame()을 호출한다.
-     */
-    private val superFrameSize = 1212
-
-    /**
-     * BLE notification으로 들어온 raw byte 배열을 처리하는 함수.
-     *
-     * PotchBleManager의 onCharacteristicChanged()에서 호출된다.
-     *
-     * 처리 흐름:
-     * 1. 수신 길이 확인
-     * 2. mini header 파싱
-     * 3. header prefix 확인
-     * 4. fragment counter 순서 확인
-     * 5. payload 추출
-     * 6. frame 시작점 0xAA 0xAA 확인
-     * 7. buffer에 payload 누적
-     * 8. 1212 bytes가 모이면 Super Frame 파싱
-     */
     @Synchronized
     fun processIncomingData(data: ByteArray) {
-        Log.d(TAG, "Rcv length=${data.size}")
-        updateLog("Rcv length: ${data.size}")
+        _state.update { it.copy(totalMiniPackets = it.totalMiniPackets + 1) }
 
-        _state.update {
-            it.copy(totalMiniPackets = it.totalMiniPackets + 1)
-        }
-
-        if (data.size != fragmentSize) {
-            val msg = "Length Drop: expected $fragmentSize, got ${data.size}"
-
-            _state.update {
-                it.copy(damagedPacketCount = it.damagedPacketCount + 1)
-            }
-
-            addPacketError(
-                type = "LENGTH",
-                message = msg
-            )
-
-            logMissFrameAndClear(
-                reason = msg,
-                missPacketNum = currentMiniPacketIndexInFrame()
-            )
-
+        if (data.size != PACKET_SIZE) {
+            val message = "Length Drop: expected $PACKET_SIZE, got ${data.size}"
+            registerPacketError("LENGTH", message)
+            breakContinuity(message)
             return
         }
 
-        val miniHeader =
-            ((data[0].toInt() and 0xFF) shl 8) or
-                    (data[1].toInt() and 0xFF)
-
-        val headerPrefix = (miniHeader shr 12) and 0xF
-
-        // 비동기 INT2 이벤트 처리.
-        // 펌웨어 ble_send_int2_signal()은 prefix 0xE, eventType 0x001로 보냄.
-        if (headerPrefix == 0xE) {
-            val eventType = miniHeader and 0x0FFF
-
-            if (eventType == 0x001) {
-                val msg = "Asynchronous INT2 Event Received!"
-
-                Log.i(TAG, msg)
-                dataLogger?.logDebug(TAG, msg, "I")
-
-                _state.update {
-                    it.copy(
-                        int2EventReceived = true,
-                        lastLog = msg
-                    )
-                }
-            }
-
+        if (data[0] != HEADER_0 || data[1] != HEADER_1) {
+            val message = "Header Drop: %02X %02X".format(
+                data[0].toInt() and 0xFF,
+                data[1].toInt() and 0xFF
+            )
+            registerPacketError("HEADER", message)
+            breakContinuity(message)
             return
         }
 
-        if (headerPrefix != 0x5) {
-            val msg = "Header Prefix Drop: expected 0x5, got 0x${headerPrefix.toString(16)}"
+        val sequence = readUInt16(data, 2)
+        val receivedCrc = readUInt16(data, CRC_OFFSET)
+        val calculatedCrc = crc16CcittFalse(data, 0, CRC_OFFSET)
 
-            _state.update {
-                it.copy(damagedPacketCount = it.damagedPacketCount + 1)
-            }
-
-            addPacketError(
-                type = "MINI_HEADER",
-                message = msg
-            )
-
-            logMissFrameAndClear(
-                reason = msg,
-                missPacketNum = currentMiniPacketIndexInFrame()
-            )
-
+        if (receivedCrc != calculatedCrc) {
+            val message = "CRC Drop seq=$sequence: received=%04X calculated=%04X"
+                .format(receivedCrc, calculatedCrc)
+            registerPacketError("CRC", message, sequence, crc = true)
+            breakContinuity(message)
             return
         }
 
-        val fragCounter = miniHeader and 0x0FFF
-
-        expectedFragCounter?.let { expected ->
-            if (fragCounter != expected) {
-                val distance = counterDistance(expected, fragCounter)
-                val lostCount = if (distance in 1..4095) distance else 1
-
-                val startMissIndex = currentMiniPacketIndexInFrame()
-                val missNums = (startMissIndex until startMissIndex + lostCount)
-                    .map { ((it - 1) % 6) + 1 }
-
-                val msg = "Seq Drop. Exp: $expected, Got: $fragCounter, Lost≈$lostCount"
+        expectedSequence?.let { expected ->
+            if (sequence != expected) {
+                val distance = (sequence - expected) and 0xFFFF
+                val lost = if (distance in 1..0x7FFF) distance else 1
 
                 _state.update {
                     it.copy(
                         missingSequenceErrors = it.missingSequenceErrors + 1,
-                        estimatedLostPacketCount = it.estimatedLostPacketCount + lostCount
+                        estimatedLostPacketCount = it.estimatedLostPacketCount + lost
                     )
                 }
 
-                addPacketError(
-                    type = "SEQUENCE",
-                    message = msg,
-                    fragCounter = fragCounter
-                )
-
-                currentFrameErrors.add(msg)
-                currentFrameMissPacketNums.addAll(missNums)
-
-                logMissFrameAndClear(
-                    reason = msg,
-                    missPacketNum = startMissIndex
-                )
+                val message =
+                    "Seq Drop: expected=$expected actual=$sequence lost=$lost"
+                registerPacketError("SEQUENCE", message, sequence)
+                breakContinuity(message)
             }
         }
+        expectedSequence = (sequence + 1) and 0xFFFF
 
-        expectedFragCounter = (fragCounter + 1) and 0x0FFF
+        val packet = ParsedPacket(
+            raw = data.copyOf(),
+            sequence = sequence,
+            timestamp = readUInt32(data, 4),
+            batteryRaw = readUInt16(data, 8),
+            ntcRaw = readUInt16(data, 10),
+            imuData = data.copyOfRange(IMU_OFFSET, PPG_OFFSET),
+            ppgData = data.copyOfRange(PPG_OFFSET, CRC_OFFSET)
+        )
 
         _state.update {
             it.copy(
                 validMiniPackets = it.validMiniPackets + 1,
-                lastFragCounter = fragCounter,
-                expectedFragCounter = expectedFragCounter
+                lastFragCounter = sequence,
+                expectedFragCounter = expectedSequence,
+                lastLog = "Valid Potch packet seq=$sequence"
             )
         }
 
-        val payload = data.copyOfRange(2, data.size)
-
-        if (buffer.isEmpty()) {
-            if (
-                payload.size < 2 ||
-                (payload[0].toInt() and 0xFF) != 0xAA ||
-                (payload[1].toInt() and 0xFF) != 0xAA
-            ) {
-                val msg = "Syncing... waiting for Super Header 0xAAAA"
-
-                addPacketError(
-                    type = "SYNC",
-                    message = msg,
-                    fragCounter = fragCounter
-                )
-
-                return
-            }
-        }
-
-        payload.forEach { buffer.addLast(it) }
-
-        if (buffer.size >= superFrameSize) {
-            val superFrame = ByteArray(superFrameSize) {
-                buffer.removeFirst()
-            }
-
-            parseSuperFrame(superFrame)
-        }
+        appendToBurst(packet)
     }
 
-    /**
-     * 데이터 파서 상태를 초기화한다.
-     *
-     * 사용 예:
-     * - 개발자 화면에서 "수신 데이터 초기화" 버튼을 누를 때
-     * - 연결이 완전히 새로 시작될 때
-     */
     @Synchronized
     fun reset() {
-        buffer.clear()
-        expectedFragCounter = null
-        currentFrameErrors.clear()
-        currentFrameMissPacketNums.clear()
-
-        currentAnalysisSegmentId = 0L
-
-        heartRateIrBuffer.clear()
-        heartRateRedBuffer.clear()
-        heartRateCombinedBuffer.clear()
+        burstPackets.clear()
+        greenPpgBuffer.clear()
         heartRateSamplePositionBuffer.clear()
         heartRateSampleSegmentBuffer.clear()
         heartRateSampleUsableBuffer.clear()
         heartRateSampleMotionMaskedBuffer.clear()
-        totalHeartRateSampleCount = 0L
-        lastValidHeartRateInputTimestampMillis = null
-        lastValidHeartRateEstimateTimestampMillis = null
-        lastValidHeartRateEstimate = null
-        resetHeartRatePathSelection()
 
-        arousalCalculator.reset(initialSegmentId = currentAnalysisSegmentId)
+        expectedSequence = null
+        totalHeartRateSamples = 0L
+        lastValidHeartRate = null
+        lastValidHeartRateAt = null
+        analysisSegmentId += 1L
+        resetPolaritySelection()
+        arousalCalculator.reset()
+        stabilityCalculator?.onContinuityBreak(
+            reason = "processor reset",
+            newSegmentId = analysisSegmentId
+        )
 
         _state.value = DataProcessorState(
-            analysisSegmentId = currentAnalysisSegmentId
+            analysisSegmentId = analysisSegmentId
         )
     }
 
-    /**
-     * 1212 bytes짜리 Super Frame을 실제 센서 데이터로 파싱한다.
-     *
-     * Super Frame 구조 (firmware main.c의 struct super_frame과 동일):
-     * - [0..1]    : Super Header, 0xAA 0xAA
-     * - [2..3]    : NTC raw
-     * - [4..7]    : Timestamp, little endian
-     * - [8..9]    : Battery raw
-     * - [10..11]  : CRC
-     * - [12..611] : PPG data, 600 bytes (RED/IR, 6 bytes/sample x 100 sample)
-     * - [612..1211]: IMU data, 600 bytes
-     */
-    private fun parseSuperFrame(data: ByteArray) {
-        var frameComplete = true
-        val frameErrors = mutableListOf<String>()
-        val missNums = mutableListOf<Int>()
+    private fun appendToBurst(packet: ParsedPacket) {
+        val slot = packet.sequence % PACKETS_PER_BURST
 
-        if (
-            (data[0].toInt() and 0xFF) != 0xAA ||
-            (data[1].toInt() and 0xFF) != 0xAA
-        ) {
-            val msg = "Super Header Drop: 0x%02X%02X".format(
-                data[0].toInt() and 0xFF,
-                data[1].toInt() and 0xFF
-            )
-
-            frameComplete = false
-            frameErrors.add(msg)
-            missNums.add(1)
-
+        if (slot == 0) {
+            burstPackets.clear()
+        } else if (burstPackets.isEmpty()) {
             _state.update {
-                it.copy(damagedPacketCount = it.damagedPacketCount + 1)
+                it.copy(lastLog = "Burst boundary 대기 중: seq=${packet.sequence}")
             }
-
-            addPacketError(
-                type = "SUPER_HEADER",
-                message = msg
-            )
+            return
         }
 
-        val ntcRaw =
-            ((data[2].toInt() and 0x0F) shl 8) or
-                    (data[3].toInt() and 0xFF)
-
-        val timestamp =
-            ((data[4].toLong() and 0xFFL)) or
-                    ((data[5].toLong() and 0xFFL) shl 8) or
-                    ((data[6].toLong() and 0xFFL) shl 16) or
-                    ((data[7].toLong() and 0xFFL) shl 24)
-
-        val batteryRaw =
-            ((data[8].toInt() and 0x0F) shl 8) or
-                    (data[9].toInt() and 0xFF)
-
-        val receivedCrc =
-            ((data[10].toInt() and 0xFF) shl 8) or
-                    (data[11].toInt() and 0xFF)
-
-        val crcData = data.copyOf()
-        crcData[10] = 0x00
-        crcData[11] = 0x00
-
-        val calculatedCrc = zephyrCrc16(crcData)
-
-        if (receivedCrc != calculatedCrc) {
-            val logMsg = "CRC! Rcv:%04X Calc:%04X".format(receivedCrc, calculatedCrc)
-
-            frameComplete = false
-            frameErrors.add(logMsg)
-
-            // CRC는 특정 미니 패킷 번호를 단정하기 어려우므로 all로 표시
-            currentFrameMissPacketNums.addAll(listOf(1, 2, 3, 4, 5, 6))
-
-            _state.update {
-                it.copy(
-                    crcErrorCount = it.crcErrorCount + 1,
-                    damagedPacketCount = it.damagedPacketCount + 1,
-                    lastLog = logMsg
-                )
-            }
-
-            addPacketError(
-                type = "CRC",
-                message = logMsg
+        val expectedSlot = burstPackets.size
+        if (slot != expectedSlot) {
+            breakContinuity(
+                "Burst slot 불일치 expected=$expectedSlot actual=$slot"
             )
-        } else {
-            updateLog("CRC OK!")
+            return
         }
 
-        val ppgData = data.copyOfRange(12, 612)
-        val imuData = data.copyOfRange(612, 1212)
+        burstPackets += packet
 
-        val irSamples = extractIrSamples(ppgData)
-        val redSamples = extractRedSamples(ppgData)
-        val avgSamples = buildAveragePpgSamples(
-            irSamples = irSamples,
-            redSamples = redSamples
-        )
-
-        val frameIrMax = irSamples.maxOrNull()?.toDouble() ?: 0.0
-        val frameImuMotion = calculateImuMotionSummary(imuData)
-
-        val phoneTimeMillis = System.currentTimeMillis()
-        val isCrcValid = receivedCrc == calculatedCrc
-
-        // CRC뿐 아니라 Super Header까지 정상인 프레임만 모든 분석에 사용한다.
-        // 손상 프레임은 PPG/IMU/체온/HR/HRV 어느 buffer에도 넣지 않는다.
-        val isFrameUsableForAnalysis =
-            frameComplete && isCrcValid
-
-        if (!isFrameUsableForAnalysis) {
-            val discontinuityReasons = buildList {
-                if (!frameComplete) add("invalid super header")
-                if (!isCrcValid) add("CRC mismatch")
+        if (slot == PACKETS_PER_BURST - 1) {
+            if (burstPackets.size == PACKETS_PER_BURST) {
+                processBurst(burstPackets.toList())
             }
-
-            advanceAnalysisSegment(
-                "SuperFrame excluded from analysis: " +
-                        discontinuityReasons.joinToString(", ")
-            )
-        } else {
-            appendPpgSamplesToHrBuffers(
-                irSamples = irSamples,
-                redSamples = redSamples,
-                combinedSamples = avgSamples
-            )
-            lastValidHeartRateInputTimestampMillis = phoneTimeMillis
+            burstPackets.clear()
         }
-
-        val rawHeartRateAnalysis =
-            if (isFrameUsableForAnalysis) {
-                estimateHeartRate(
-                    imuMotion = frameImuMotion
-                )
-            } else {
-                HeartRateAnalysisResult(
-                    estimate = null,
-                    diagnostics = HeartRateDiagnostics(
-                        processingState = HeartRateProcessingState.PACKET_LOSS,
-                        message = "현재 SuperFrame이 CRC 또는 header 오류로 HR 분석에서 제외됨",
-                        analysisSegmentId = currentAnalysisSegmentId,
-                        windowSampleCount = 0,
-                        windowSeconds = 0.0,
-                        retainedBufferSampleCount = heartRateCombinedBuffer.size,
-                        cleanSegmentSampleCount = 0,
-                        imuMaxDeltaG = frameImuMotion?.maxDeltaG,
-                        imuP95DeltaG = frameImuMotion?.p95DeltaG,
-                        imuMotionExceedanceRatio = frameImuMotion?.exceedanceRatio
-                    )
-                )
-            }
-
-        val heartRateEstimate = rawHeartRateAnalysis.estimate
-
-        if (heartRateEstimate != null) {
-            lastValidHeartRateEstimateTimestampMillis = phoneTimeMillis
-            lastValidHeartRateEstimate = heartRateEstimate
-        }
-
-        val heartRateAgeMillis =
-            lastValidHeartRateEstimateTimestampMillis?.let { timestampMillis ->
-                (phoneTimeMillis - timestampMillis).coerceAtLeast(0L)
-            }
-
-        val canHoldPrevious =
-            heartRateEstimate == null &&
-                    lastValidHeartRateEstimate != null &&
-                    heartRateAgeMillis != null &&
-                    heartRateAgeMillis <= heartRateDisplayStaleTimeoutMillis
-
-        val displayedHeartRateEstimate =
-            heartRateEstimate ?: if (canHoldPrevious) lastValidHeartRateEstimate else null
-
-        val packetCounters = _state.value
-
-        val heartRateDiagnostics =
-            if (heartRateEstimate != null) {
-                rawHeartRateAnalysis.diagnostics.copy(
-                    processingState = HeartRateProcessingState.VALID,
-                    underlyingFailureReason = null,
-                    calculatedBpm = heartRateEstimate.bpm,
-                    displayedBpm = heartRateEstimate.bpm,
-                    heartRateFresh = true,
-                    heartRateAgeMillis = 0L,
-                    crcErrorCount = packetCounters.crcErrorCount,
-                    sequenceLossCount = packetCounters.missingSequenceErrors,
-                    estimatedLostPacketCount = packetCounters.estimatedLostPacketCount
-                )
-            } else if (canHoldPrevious) {
-                rawHeartRateAnalysis.diagnostics.copy(
-                    processingState = HeartRateProcessingState.HELD_PREVIOUS,
-                    underlyingFailureReason = rawHeartRateAnalysis.diagnostics.processingState,
-                    message = "새 HR 계산 실패(${rawHeartRateAnalysis.diagnostics.processingState.name}); " +
-                            "마지막 정상값을 ${heartRateAgeMillis}ms 동안 유지",
-                    calculatedBpm = null,
-                    displayedBpm = displayedHeartRateEstimate?.bpm,
-                    heartRateFresh = false,
-                    heartRateAgeMillis = heartRateAgeMillis,
-                    crcErrorCount = packetCounters.crcErrorCount,
-                    sequenceLossCount = packetCounters.missingSequenceErrors,
-                    estimatedLostPacketCount = packetCounters.estimatedLostPacketCount
-                )
-            } else {
-                rawHeartRateAnalysis.diagnostics.copy(
-                    displayedBpm = null,
-                    heartRateFresh = false,
-                    heartRateAgeMillis = heartRateAgeMillis,
-                    crcErrorCount = packetCounters.crcErrorCount,
-                    sequenceLossCount = packetCounters.missingSequenceErrors,
-                    estimatedLostPacketCount = packetCounters.estimatedLostPacketCount
-                )
-            }
-
-        val estimatedHeartRate = displayedHeartRateEstimate?.bpm
-
-        val heartRateCalculationStatus =
-            buildHeartRateCalculationStatus(heartRateDiagnostics)
-
-        val heartRateGraphData = buildHeartRateGraphData(
-            estimate = heartRateEstimate,
-            diagnostics = heartRateDiagnostics
-        )
-
-        Log.d(
-            TAG,
-            "SuperFrame parsed timestamp=$timestamp, segment=$currentAnalysisSegmentId, " +
-                    "analysisValid=$isFrameUsableForAnalysis, irMax=$frameIrMax, " +
-                    "bpm=${heartRateEstimate?.bpm}, " +
-                    "source=${heartRateEstimate?.source}, " +
-                    "displayBpm=${displayedHeartRateEstimate?.bpm}, " +
-                    "hrState=${heartRateDiagnostics.processingState}, " +
-                    "ir=${heartRateDiagnostics.irCalculatedBpm}/${heartRateDiagnostics.irQualityScore}, " +
-                    "red=${heartRateDiagnostics.redCalculatedBpm}/${heartRateDiagnostics.redQualityScore}, " +
-                    "combined=${heartRateDiagnostics.combinedCalculatedBpm}/" +
-                    "${heartRateDiagnostics.combinedQualityScore}, " +
-                    "ibi=${heartRateEstimate?.intervalCount}, " +
-                    "quality=${heartRateEstimate?.qualityScore}, " +
-                    "polarity=${heartRateEstimate?.selectedPolarity}, " +
-                    "maPerc=${heartRateEstimate?.selectedThresholdPercent}, " +
-                    "sdsdMs=${heartRateEstimate?.peakFitSdsdMs}, " +
-                    "rawIbiCv=${heartRateEstimate?.rawIbiCv}, " +
-                    "ibiAccept=${heartRateEstimate?.acceptedIntervalRatio}, " +
-                    "physRatio=${heartRateEstimate?.physiologicalIntervalRatio}, " +
-                    "rawIbiQ=${heartRateEstimate?.rawIntervalQualityScore}, " +
-                    "spectralConcentration=${heartRateEstimate?.spectralConcentration}, " +
-                    "spectralEntropy=${heartRateEstimate?.spectralEntropy}, " +
-                    "amplitudeCv=${heartRateEstimate?.amplitudeCoefficientOfVariation}, " +
-                    "abruptRatio=${heartRateEstimate?.abruptChangeRatio}, " +
-                    "peakOffsetMeanMs=${heartRateEstimate?.meanPeakInterpolationOffsetMs}, " +
-                    "peakOffsetMaxMs=${heartRateEstimate?.maxPeakInterpolationOffsetMs}"
-        )
-
-        val parsed = SensorData(
-            timestamp = timestamp,
-            ntcRaw = ntcRaw,
-            batteryRaw = batteryRaw,
-            ppgData = ppgData,
-            imuData = imuData
-        )
-
-
-
-        val arousalBufferSnapshot = arousalCalculator.getBufferSnapshot()
-
-        Log.d(
-            TAG,
-            "ArousalBuffer: ppg=${arousalBufferSnapshot.ppgIrSampleCount}, " +
-                    "imu=${arousalBufferSnapshot.imuGSampleCount}, " +
-                    "temp=${arousalBufferSnapshot.temperatureSampleCount}, " +
-                    "hr=${arousalBufferSnapshot.heartRateSampleCount}"
-        )
-
-        dataLogger?.logDebug(
-            TAG,
-            "ArousalBuffer: ppg=${arousalBufferSnapshot.ppgIrSampleCount}, " +
-                    "imu=${arousalBufferSnapshot.imuGSampleCount}, " +
-                    "temp=${arousalBufferSnapshot.temperatureSampleCount}, " +
-                    "hr=${arousalBufferSnapshot.heartRateSampleCount}"
-        )
-
-        val arousalState =
-            if (isFrameUsableForAnalysis) {
-                arousalCalculator.process(
-                    sensorData = parsed,
-                    heartRateEstimate = heartRateEstimate,
-                    heartRateSignalStatus = heartRateCalculationStatus,
-                    analysisSegmentId = currentAnalysisSegmentId
-                )
-            } else {
-                // advanceAnalysisSegment()가 만든 불연속 상태를 사용한다.
-                // 손상된 parsed 값은 어떤 분석 buffer에도 append하지 않는다.
-                arousalCalculator.getLastState()
-            }
-
-        val allErrors = currentFrameErrors + frameErrors
-        val allMissNums = (currentFrameMissPacketNums + missNums)
-            .distinct()
-            .sorted()
-
-        val completeText =
-            if (frameComplete && allErrors.isEmpty()) "complete" else "miss"
-
-        val missPacketNumText = allMissNums.joinToString("|")
-        val errorLogText = allErrors.joinToString(" / ")
-
-        dataLogger?.logSuperFrame(
-            phoneTimeMillis = phoneTimeMillis,
-            timestamp = timestamp,
-            superFrame = data,
-            complete = completeText,
-            missPacketNum = missPacketNumText,
-            errorLog = errorLogText
-        )
-
-        dataLogger?.logHeartRateDiagnostics(
-            phoneTimeMillis = phoneTimeMillis,
-            timestamp = timestamp,
-            diagnostics = heartRateDiagnostics
-        )
-
-        dataLogger?.logArousalState(
-            phoneTimeMillis = phoneTimeMillis,
-            timestamp = timestamp,
-            arousalState = arousalState,
-            complete = completeText,
-            missPacketNum = missPacketNumText,
-            errorLog = errorLogText
-        )
-
-        currentFrameErrors.clear()
-        currentFrameMissPacketNums.clear()
-
-        _state.update { current ->
-            current.copy(
-                // CRC/Super Header가 정상인 마지막 프레임만 노출한다.
-                lastParsedData =
-                    if (isFrameUsableForAnalysis) parsed else current.lastParsedData,
-
-                // 새 결과와 화면 표시값을 분리한다.
-                // 새 계산에 실패해도 최대 10초 동안 마지막 정상값을 표시하되,
-                // heartRateFresh=false와 age를 통해 stale/held 상태를 명시한다.
-                heartRateBpm = estimatedHeartRate,
-                heartRateQuality = displayedHeartRateEstimate?.qualityScore,
-                heartRateFresh = heartRateEstimate != null,
-                heartRateAgeMillis = heartRateDiagnostics.heartRateAgeMillis,
-                heartRateDiagnostics = heartRateDiagnostics,
-                heartRateCalculationStatus = heartRateCalculationStatus,
-                heartRateGraphData = heartRateGraphData,
-
-                arousalState = arousalState,
-                lastIrMax =
-                    if (isFrameUsableForAnalysis) frameIrMax else current.lastIrMax,
-                analysisSegmentId = currentAnalysisSegmentId,
-                parsedSuperFrameCount = current.parsedSuperFrameCount + 1
-            )
-        }
-
-        /********************* Micro Movement ********************/
-
-        val microMovement = arousalCalculator.calculateMicroMovement()
-
-        if (microMovement != null) {
-            Log.d(
-                "MicroMovement",
-                "MicroMovement: " +
-                        "rms=${"%.6f".format(microMovement.rmsG)}g, " +
-                        "var=${"%.8f".format(microMovement.varianceG)}, " +
-                        "score=${"%.2f".format(microMovement.score)}, " +
-                        "level=${microMovement.level}"
-            )
-
-            dataLogger?.logDebug(
-                "MicroMovement",
-                "MicroMovement: " +
-                        "rms=${"%.6f".format(microMovement.rmsG)}g, " +
-                        "var=${"%.8f".format(microMovement.varianceG)}, " +
-                        "score=${"%.2f".format(microMovement.score)}, " +
-                        "level=${microMovement.level}"
-            )
-        }
-        /********************* //Micro Movement ********************/
     }
-
-    /**
-     * PPG payload(600 bytes, 100Hz x 100 sample, [Red 3B + IR 3B] 구조, Data Packet.md 참조)에서
-     * IR 채널 값만 18-bit로 복원한다.
-     *
-     * firmware ppg.c의 FIFO 저장 형식과 동일:
-     *   byte[3] = IR[17:16] (하위 2bit만 유효), byte[4] = IR[15:8], byte[5] = IR[7:0]
-     */
-    private fun extractIrSamples(ppgData: ByteArray): IntArray {
-        val sampleCount = ppgData.size / 6
-        return IntArray(sampleCount) { i ->
-            val base = i * 6
-            ((ppgData[base + 3].toInt() and 0x03) shl 16) or
-                    ((ppgData[base + 4].toInt() and 0xFF) shl 8) or
-                    (ppgData[base + 5].toInt() and 0xFF)
+    private fun appendGreenSamples(samples: IntArray) {
+        for (sample in samples) {
+            greenPpgBuffer.add(sample)
+            heartRateSamplePositionBuffer.add(totalHeartRateSamples)
+            heartRateSampleSegmentBuffer.add(analysisSegmentId)
+            heartRateSampleUsableBuffer.add(true)
+            heartRateSampleMotionMaskedBuffer.add(false)
+            totalHeartRateSamples += 1L
+            trimHeartRateBuffers()
         }
     }
 
-    /**
-     * PPG payload(600 bytes, 100Hz x 100 sample, [Red 3B + IR 3B] 구조)에서
-     * RED 채널 값만 18-bit로 복원한다.
-     */
-    private fun extractRedSamples(ppgData: ByteArray): IntArray {
-        val sampleCount = ppgData.size / 6
-        return IntArray(sampleCount) { i ->
-            val base = i * 6
-            ((ppgData[base].toInt() and 0x03) shl 16) or
-                    ((ppgData[base + 1].toInt() and 0xFF) shl 8) or
-                    (ppgData[base + 2].toInt() and 0xFF)
-        }
-    }
-
-    /**
-     * IR과 RED raw sample을 sample index 기준으로 평균낸 fallback PPG 신호를 만든다.
-     *
-     * 기본 HR은 IR/RED 독립 분석 후 late fusion으로 결정한다.
-     * 두 채널 결과만으로 결론을 내릴 수 없을 때 이 평균 신호를 보조 후보로 사용한다.
-     */
-    private fun buildAveragePpgSamples(
-        irSamples: IntArray,
-        redSamples: IntArray
-    ): IntArray {
-        val sampleCount = minOf(irSamples.size, redSamples.size)
-
-        return IntArray(sampleCount) { i ->
-            ((irSamples[i].toLong() + redSamples[i].toLong()) / 2L).toInt()
-        }
-    }
-
-    /**
-     * 새로 들어온 PPG IR/RED/합산 sample을 동일한 위치로 rolling buffer에 누적한다.
-     *
-     * HR은 IR과 RED를 독립 분석한 뒤 결과를 late fusion한다.
-     * 두 채널이 모두 실패한 경우에만 합산 신호를 fallback으로 사용한다.
-     * 세 buffer는 항상 같은 sample 수를 유지한다.
-     */
-    private fun appendPpgSamplesToHrBuffers(
-        irSamples: IntArray,
-        redSamples: IntArray,
-        combinedSamples: IntArray
-    ) {
-        val sampleCount = minOf(
-            irSamples.size,
-            redSamples.size,
-            combinedSamples.size
-        )
-
-        for (i in 0 until sampleCount) {
-            val samplePosition = totalHeartRateSampleCount
-
-            heartRateIrBuffer.addLast(irSamples[i])
-            heartRateRedBuffer.addLast(redSamples[i])
-            heartRateCombinedBuffer.addLast(combinedSamples[i])
-            heartRateSamplePositionBuffer.addLast(samplePosition)
-            heartRateSampleSegmentBuffer.addLast(currentAnalysisSegmentId)
-            heartRateSampleUsableBuffer.addLast(true)
-            heartRateSampleMotionMaskedBuffer.addLast(false)
-
-            totalHeartRateSampleCount += 1L
-            trimHeartRateBuffersToMaxSize()
-        }
-    }
-
-    private fun trimHeartRateBuffersToMaxSize() {
-        while (heartRateIrBuffer.size > heartRateBufferMaxSamples) {
-            heartRateIrBuffer.removeFirst()
-            heartRateRedBuffer.removeFirst()
-            heartRateCombinedBuffer.removeFirst()
+    private fun trimHeartRateBuffers() {
+        while (greenPpgBuffer.size > MAX_HR_BUFFER_SAMPLES) {
+            greenPpgBuffer.removeFirst()
             heartRateSamplePositionBuffer.removeFirst()
             heartRateSampleSegmentBuffer.removeFirst()
             heartRateSampleUsableBuffer.removeFirst()
@@ -1421,24 +499,15 @@ class PotchDataProcessor(
         }
     }
 
-    /**
-     * packet gap이나 움직임 mask 뒤의 최신 연속 clean tail만 HR 분석 window로 반환한다.
-     * 과거 segment 데이터는 ring buffer에 남아도 분석에는 섞이지 않는다.
-     */
-    private fun buildLatestCleanHeartRateWindow(
-        signalBuffer: ArrayDeque<Int>,
-        contactBuffer: ArrayDeque<Int>
-    ): HeartRateSignalWindow {
-        val signalValues = signalBuffer.toList()
-        val contactValues = contactBuffer.toList()
+    private fun buildLatestCleanHeartRateWindow(): HeartRateSignalWindow {
+        val signal = greenPpgBuffer.toList()
         val positions = heartRateSamplePositionBuffer.toList()
         val segments = heartRateSampleSegmentBuffer.toList()
         val usable = heartRateSampleUsableBuffer.toList()
         val motionMasked = heartRateSampleMotionMaskedBuffer.toList()
 
         val commonSize = minOf(
-            signalValues.size,
-            contactValues.size,
+            signal.size,
             positions.size,
             segments.size,
             usable.size,
@@ -1448,8 +517,7 @@ class PotchDataProcessor(
         if (commonSize <= 0) {
             return HeartRateSignalWindow(
                 signal = emptyList(),
-                contactSignal = emptyList(),
-                startSamplePosition = totalHeartRateSampleCount,
+                startSamplePosition = totalHeartRateSamples,
                 retainedBufferSampleCount = 0,
                 cleanSegmentSampleCount = 0,
                 invalidMaskedSampleCount = 0,
@@ -1457,58 +525,54 @@ class PotchDataProcessor(
             )
         }
 
-        val offset = signalValues.size - commonSize
+        val signalOffset = signal.size - commonSize
         var startIndex = commonSize
 
         for (i in commonSize - 1 downTo 0) {
-            if (
-                segments[i] != currentAnalysisSegmentId ||
-                !usable[i]
-            ) {
-                break
-            }
+            if (segments[i] != analysisSegmentId || !usable[i]) break
             startIndex = i
         }
 
         val invalidCount = usable.take(commonSize).count { !it }
-        val motionMaskedCount = motionMasked.take(commonSize).count { it }
+        val motionCount = motionMasked.take(commonSize).count { it }
 
         if (startIndex >= commonSize) {
             return HeartRateSignalWindow(
                 signal = emptyList(),
-                contactSignal = emptyList(),
-                startSamplePosition = totalHeartRateSampleCount,
+                startSamplePosition = totalHeartRateSamples,
                 retainedBufferSampleCount = commonSize,
                 cleanSegmentSampleCount = 0,
                 invalidMaskedSampleCount = invalidCount,
-                motionMaskedSampleCount = motionMaskedCount
+                motionMaskedSampleCount = motionCount
             )
         }
 
+        val available = commonSize - startIndex
+        val takeCount = minOf(available, HR_WINDOW_SAMPLES)
+        val windowStart = commonSize - takeCount
+        val absoluteStart = positions[windowStart]
+
         return HeartRateSignalWindow(
-            signal = (startIndex until commonSize).map { signalValues[offset + it].toDouble() },
-            contactSignal = (startIndex until commonSize).map { contactValues[offset + it].toDouble() },
-            startSamplePosition = positions[startIndex],
+            signal = (windowStart until commonSize)
+                .map { signal[signalOffset + it].toDouble() },
+            startSamplePosition = absoluteStart,
             retainedBufferSampleCount = commonSize,
-            cleanSegmentSampleCount = commonSize - startIndex,
+            cleanSegmentSampleCount = available,
             invalidMaskedSampleCount = invalidCount,
-            motionMaskedSampleCount = motionMaskedCount
+            motionMaskedSampleCount = motionCount
         )
     }
 
-    /**
-     * 현재 SuperFrame의 PPG를 향후 HR peak 분석에서 제외한다.
-     * 해당 sample은 buffer에 남지만 latest clean tail의 경계로 작동한다.
-     */
     private fun maskRecentHeartRateSamplesForMotion(sampleCount: Int) {
         if (sampleCount <= 0 || heartRateSampleUsableBuffer.isEmpty()) return
 
         val usable = heartRateSampleUsableBuffer.toMutableList()
         val motion = heartRateSampleMotionMaskedBuffer.toMutableList()
+        val segments = heartRateSampleSegmentBuffer.toList()
         val count = minOf(sampleCount, usable.size)
 
         for (i in usable.lastIndex downTo usable.size - count) {
-            if (heartRateSampleSegmentBuffer.elementAt(i) == currentAnalysisSegmentId) {
+            if (segments[i] == analysisSegmentId) {
                 usable[i] = false
                 motion[i] = true
             }
@@ -1519,1372 +583,459 @@ class PotchDataProcessor(
         heartRateSampleMotionMaskedBuffer.clear()
         heartRateSampleMotionMaskedBuffer.addAll(motion)
     }
+    private fun processBurst(packets: List<ParsedPacket>) {
+        val rawSuperFrame = ByteArray(packets.sumOf { it.raw.size })
+        val imuBytes = ByteArray(packets.sumOf { it.imuData.size })
+        val ppgBytes = ByteArray(packets.sumOf { it.ppgData.size })
+        var rawOffset = 0
+        var imuOffset = 0
+        var ppgOffset = 0
 
+        packets.forEach { packet ->
+            packet.raw.copyInto(rawSuperFrame, rawOffset)
+            rawOffset += packet.raw.size
+            packet.imuData.copyInto(imuBytes, imuOffset)
+            imuOffset += packet.imuData.size
+            packet.ppgData.copyInto(ppgBytes, ppgOffset)
+            ppgOffset += packet.ppgData.size
+        }
 
-    /**
-     * HR 분석 함수와 동일한 clean window 및 preprocessPpgForHeartRate()를 사용해
-     * ExperimentScreen용 파형 snapshot을 만든다.
-     */
-    private fun buildHeartRateGraphData(
-        estimate: HeartRateEstimate?,
-        diagnostics: HeartRateDiagnostics
-    ): HeartRateGraphData {
-        fun prepare(
-            label: String,
-            signalBuffer: ArrayDeque<Int>,
-            contactBuffer: ArrayDeque<Int>
-        ): PreparedHeartRateGraphChannel {
-            val cleanWindow = buildLatestCleanHeartRateWindow(
-                signalBuffer = signalBuffer,
-                contactBuffer = contactBuffer
+        val sensorData = SensorData(
+            timestamp = packets.last().timestamp,
+            sequenceStart = packets.first().sequence,
+            sequenceEnd = packets.last().sequence,
+            packetCount = packets.size,
+            ntcRaw = packets.asReversed()
+                .firstOrNull { it.ntcRaw != 0 }?.ntcRaw ?: 0,
+            batteryRaw = packets.asReversed()
+                .firstOrNull { it.batteryRaw != 0 }?.batteryRaw ?: 0,
+            ppgData = ppgBytes,
+            imuData = imuBytes
+        )
+
+        val greenSamples = decodeGreenPpg(ppgBytes)
+        appendGreenSamples(greenSamples)
+
+        val now = System.currentTimeMillis()
+        val motion = calculateImuMotionSummary(imuBytes)
+        val rawAnalysis = analyzeStableGreenHeartRate(
+            motion = motion,
+            currentFrameSampleCount = greenSamples.size
+        )
+        val freshEstimate = rawAnalysis.estimate
+
+        if (freshEstimate != null) {
+            lastValidHeartRate = freshEstimate
+            lastValidHeartRateAt = now
+        }
+
+        val heldAge = lastValidHeartRateAt?.let { now - it }
+        val displayed = freshEstimate ?: lastValidHeartRate?.takeIf {
+            heldAge != null && heldAge <= HEART_RATE_HOLD_MILLIS
+        }
+
+        val processingState = when {
+            freshEstimate != null -> HeartRateProcessingState.VALID
+            displayed != null -> HeartRateProcessingState.HELD_PREVIOUS
+            else -> rawAnalysis.diagnostics.processingState
+        }
+
+        val status = MetricCalculationStatus(
+            state = when (processingState) {
+                HeartRateProcessingState.VALID ->
+                    MetricCalculationState.VALID
+                HeartRateProcessingState.COLLECTING ->
+                    MetricCalculationState.COLLECTING
+                HeartRateProcessingState.HELD_PREVIOUS ->
+                    MetricCalculationState.REJECTED
+                else ->
+                    MetricCalculationState.REJECTED
+            },
+            message = if (processingState == HeartRateProcessingState.HELD_PREVIOUS) {
+                "새 심박 계산 실패 · 이전 정상값 유지"
+            } else {
+                rawAnalysis.diagnostics.message
+            }
+        )
+
+        val counters = _state.value
+        val diagnostics = rawAnalysis.diagnostics.copy(
+            processingState = processingState,
+            underlyingFailureReason =
+                if (processingState == HeartRateProcessingState.HELD_PREVIOUS) {
+                    rawAnalysis.diagnostics.processingState
+                } else {
+                    null
+                },
+            message = status.message,
+            calculatedBpm = freshEstimate?.bpm,
+            displayedBpm = displayed?.bpm,
+            heartRateFresh = freshEstimate != null,
+            heartRateAgeMillis = heldAge,
+            source = if (displayed != null) {
+                HeartRateSource.GREEN
+            } else {
+                HeartRateSource.NONE
+            },
+            sourceLog = displayed?.sourceLog,
+            crcErrorCount = counters.crcErrorCount,
+            sequenceLossCount = counters.missingSequenceErrors,
+            estimatedLostPacketCount = counters.estimatedLostPacketCount
+        )
+
+        val graphData = buildHeartRateGraphData(
+            estimate = freshEstimate,
+            diagnostics = diagnostics
+        )
+
+        stabilityCalculator?.activeBaselinesSnapshot()?.let { baselines ->
+            arousalCalculator.updatePersonalBaselines(baselines)
+        }
+
+        val arousalState =
+            arousalCalculator.processBurst(sensorData, freshEstimate, status)
+        val stabilityState = stabilityCalculator?.processFrame(
+            StabilityFrameInput(
+                phoneTimeMillis = now,
+                sensorTimestamp = sensorData.timestamp,
+                arousalState = arousalState,
+                heartRateDiagnostics = diagnostics,
+                analysisSegmentId = analysisSegmentId,
+                continuityBreakCount = counters.continuityBreakCount,
+                crcErrorCount = counters.crcErrorCount,
+                sequenceLossCount = counters.missingSequenceErrors,
+                estimatedLostPacketCount = counters.estimatedLostPacketCount
             )
+        ) ?: StabilityState()
+        val greenMax = greenSamples.maxOrNull()?.toDouble() ?: 0.0
 
-            if (cleanWindow.signal.isEmpty()) {
-                return PreparedHeartRateGraphChannel(
-                    label = label,
-                    samples = emptyList(),
-                    startSamplePosition = cleanWindow.startSamplePosition,
-                    retainedBufferSampleCount = cleanWindow.retainedBufferSampleCount,
-                    cleanSegmentSampleCount = cleanWindow.cleanSegmentSampleCount,
-                    interpolatedSampleCount = 0,
-                    excludedPeakSampleCount = 0
-                )
-            }
+        // processBurst()는 8개 slot이 모두 정상적으로 모인 경우에만 호출된다.
+        // 각 142-byte 원시 패킷을 순서대로 이어 붙인 1,136-byte superframe만 binary로 기록한다.
+        dataLogger?.logCompleteSuperFrame(rawSuperFrame)
+        dataLogger?.logHeartRateDiagnostics(
+            now,
+            sensorData.timestamp,
+            diagnostics
+        )
+        dataLogger?.logArousalState(
+            phoneTimeMillis = now,
+            timestamp = sensorData.timestamp,
+            arousalState = arousalState,
+            complete = "true",
+            missPacketNum = counters.estimatedLostPacketCount.toString(),
+            errorLog = ""
+        )
 
-            val preprocess = preprocessPpgForHeartRate(cleanWindow.signal)
-
-            return PreparedHeartRateGraphChannel(
-                label = label,
-                samples = preprocess.bandPassed.toList(),
-                startSamplePosition = cleanWindow.startSamplePosition,
-                retainedBufferSampleCount = cleanWindow.retainedBufferSampleCount,
-                cleanSegmentSampleCount = cleanWindow.cleanSegmentSampleCount,
-                interpolatedSampleCount = preprocess.interpolatedSampleCount,
-                excludedPeakSampleCount = preprocess.excludedPeakSampleCount
+        _state.update { current ->
+            current.copy(
+                lastParsedData = sensorData,
+                heartRateBpm = displayed?.bpm,
+                heartRateQuality = displayed?.qualityScore,
+                heartRateFresh = freshEstimate != null,
+                heartRateAgeMillis = heldAge,
+                heartRateDiagnostics = diagnostics,
+                heartRateCalculationStatus = status,
+                heartRateGraphData = graphData,
+                parsedSuperFrameCount =
+                    current.parsedSuperFrameCount + 1,
+                analysisSegmentId = analysisSegmentId,
+                lastGreenMax = greenMax,
+                arousalState = arousalState,
+                stabilityState = stabilityState,
+                lastLog =
+                    "Burst ${sensorData.sequenceStart}-${sensorData.sequenceEnd} 처리 완료"
             )
         }
-
-        val ir = prepare(
-            label = "IR processed",
-            signalBuffer = heartRateIrBuffer,
-            contactBuffer = heartRateIrBuffer
-        )
-        val red = prepare(
-            label = "RED processed",
-            signalBuffer = heartRateRedBuffer,
-            contactBuffer = heartRateRedBuffer
-        )
-        val combined = prepare(
-            label = "IR/RED average fallback",
-            signalBuffer = heartRateCombinedBuffer,
-            contactBuffer = heartRateIrBuffer
-        )
-
-        val source =
-            estimate?.source
-                ?: diagnostics.fusionSource
-
-        val primary: PreparedHeartRateGraphChannel
-        val secondary: PreparedHeartRateGraphChannel?
-        val description: String
-
-        when (source) {
-            HeartRateFusionSource.IR -> {
-                primary = ir
-                secondary = null
-                description =
-                    "IR positive를 primary로 고정한 HR 경로. " +
-                            "RED positive는 검증용이며 source를 매 frame 교대시키지 않음. " +
-                            "현재 polarity=${estimate?.selectedPolarity ?: diagnostics.selectedPolarity}"
-            }
-
-            HeartRateFusionSource.RED -> {
-                primary = red
-                secondary = null
-                description =
-                    "IR positive가 연속 실패하고 RED fallback이 3회 확인된 뒤 선택된 경로. " +
-                            "현재 polarity=${estimate?.selectedPolarity ?: diagnostics.selectedPolarity}"
-            }
-
-            HeartRateFusionSource.FUSED_IR_RED -> {
-                primary = ir
-                secondary = red
-                description =
-                    "IR/RED를 각각 전처리·peak fitting한 뒤 HR/IBI를 late fusion함. " +
-                            "단일 sample 합성 파형이 아니므로 두 처리 파형을 함께 표시"
-            }
-
-            HeartRateFusionSource.COMBINED_FALLBACK -> {
-                primary = combined
-                secondary = null
-                description =
-                    "IR/RED 독립 분석으로 결론을 내리지 못해 (IR+RED)/2 fallback 신호에 " +
-                            "동일한 spike 보간·0.75~3.5Hz BPF를 적용한 결과"
-            }
-
-            HeartRateFusionSource.NONE -> {
-                primary = ir
-                secondary = null
-                description =
-                    "유효한 새 HR이 없지만 primary 정책에 따라 IR 처리 파형만 표시. " +
-                            "fallback/negative 경로는 연속 실패 및 3회 확인 후에만 전환"
-            }
-        }
-
-        val graphLength = primary.samples.size
-
-        fun toGraphIndices(
-            absolutePositions: List<Double>
-        ): List<Int> {
-            return absolutePositions
-                .mapNotNull { absolutePosition ->
-                    val relative =
-                        (absolutePosition - primary.startSamplePosition)
-                            .roundToInt()
-
-                    relative.takeIf { it in 0 until graphLength }
-                }
-                .distinct()
-                .sorted()
-        }
-
-        val detectedPeakSamplePositions =
-            estimate
-                ?.detectedPeakSamplePositions
-                ?.takeIf { it.isNotEmpty() }
-                ?: diagnostics.detectedPeakSamplePositions
-
-        val acceptedIbiEndSamplePositions =
-            estimate
-                ?.acceptedIbiEndSamplePositions
-                ?.takeIf { it.isNotEmpty() }
-                ?: diagnostics.acceptedIbiEndSamplePositions
-
-        val rejectedIbiEndSamplePositions =
-            estimate
-                ?.rejectedIbiEndSamplePositions
-                ?.takeIf { it.isNotEmpty() }
-                ?: diagnostics.rejectedIbiEndSamplePositions
-
-        val referencePeakSamplePosition =
-            estimate?.referencePeakSamplePosition
-                ?: diagnostics.referencePeakSamplePosition
-
-        val detectedPeakSampleIndices =
-            toGraphIndices(detectedPeakSamplePositions)
-
-        val acceptedPeakSampleIndices =
-            toGraphIndices(acceptedIbiEndSamplePositions)
-
-        val rejectedPeakSampleIndices =
-            toGraphIndices(rejectedIbiEndSamplePositions)
-
-        val referencePeakSampleIndex =
-            referencePeakSamplePosition
-                ?.let { absolutePosition ->
-                    (absolutePosition - primary.startSamplePosition)
-                        .roundToInt()
-                }
-                ?.takeIf { it in 0 until graphLength }
-
-        return HeartRateGraphData(
-            source = source,
-            processingState = diagnostics.processingState,
-            selectedPolarity = estimate?.selectedPolarity ?: diagnostics.selectedPolarity,
-            primaryLabel = primary.label,
-            primarySamples = primary.samples,
-            secondaryLabel = secondary?.label,
-            secondarySamples = secondary?.samples ?: emptyList(),
-            peakSampleIndices = acceptedPeakSampleIndices,
-            detectedPeakSampleIndices = detectedPeakSampleIndices,
-            acceptedPeakSampleIndices = acceptedPeakSampleIndices,
-            rejectedPeakSampleIndices = rejectedPeakSampleIndices,
-            referencePeakSampleIndex = referencePeakSampleIndex,
-            retainedBufferSampleCount =
-                maxOf(
-                    primary.retainedBufferSampleCount,
-                    secondary?.retainedBufferSampleCount ?: 0
-                ),
-            cleanSegmentSampleCount =
-                maxOf(
-                    primary.cleanSegmentSampleCount,
-                    secondary?.cleanSegmentSampleCount ?: 0
-                ),
-            interpolatedSampleCount =
-                primary.interpolatedSampleCount +
-                        (secondary?.interpolatedSampleCount ?: 0),
-            excludedPeakSampleCount =
-                primary.excludedPeakSampleCount +
-                        (secondary?.excludedPeakSampleCount ?: 0),
-            calculatedBpm = estimate?.bpm ?: diagnostics.calculatedBpm,
-            qualityScore = estimate?.qualityScore ?: diagnostics.qualityScore,
-            description = description
-        )
     }
-
-    private fun buildHeartRateCalculationStatus(
-        diagnostics: HeartRateDiagnostics
-    ): MetricCalculationStatus {
-        val metricState = when (diagnostics.processingState) {
-            HeartRateProcessingState.VALID ->
-                MetricCalculationState.VALID
-
-            HeartRateProcessingState.COLLECTING ->
-                MetricCalculationState.COLLECTING
-
-            HeartRateProcessingState.HELD_PREVIOUS,
-            HeartRateProcessingState.NO_CONTACT,
-            HeartRateProcessingState.SIGNAL_TOO_WEAK,
-            HeartRateProcessingState.SIGNAL_SATURATED,
-            HeartRateProcessingState.MOTION_ARTIFACT,
-            HeartRateProcessingState.LOW_SPECTRAL_CONCENTRATION,
-            HeartRateProcessingState.HIGH_SPECTRAL_ENTROPY,
-            HeartRateProcessingState.AMPLITUDE_UNSTABLE,
-            HeartRateProcessingState.ABRUPT_SIGNAL_CHANGE,
-            HeartRateProcessingState.INSUFFICIENT_PEAKS,
-            HeartRateProcessingState.INVALID_IBI,
-            HeartRateProcessingState.BPM_OUT_OF_RANGE,
-            HeartRateProcessingState.PACKET_LOSS ->
-                MetricCalculationState.REJECTED
-        }
-
-        return MetricCalculationStatus(
-            state = metricState,
-            message = diagnostics.message
-        )
-    }
-
-    private fun isTimestampFresh(
-        lastTimestampMillis: Long?,
-        nowMillis: Long,
-        timeoutMillis: Long
-    ): Boolean {
-        if (lastTimestampMillis == null) return false
-        return nowMillis - lastTimestampMillis <= timeoutMillis
-    }
-
-    private fun hasTimestampExpired(
-        lastTimestampMillis: Long?,
-        nowMillis: Long,
-        timeoutMillis: Long
-    ): Boolean {
-        if (lastTimestampMillis == null) return false
-        return nowMillis - lastTimestampMillis > timeoutMillis
-    }
-
-    private fun estimateHeartRate(
-        imuMotion: ImuMotionSummary?
+    private fun analyzeStableGreenHeartRate(
+        motion: ImuMotionSummary?,
+        currentFrameSampleCount: Int
     ): HeartRateAnalysisResult {
-        // Primary와 검증 채널은 항상 positive peak만 분석한다.
-        val irPositiveAnalysis = estimateHeartRateFromBuffer(
-            signalBuffer = heartRateIrBuffer,
-            contactBuffer = heartRateIrBuffer,
-            imuMotion = imuMotion,
-            source = HeartRateFusionSource.IR,
-            channelLabel = "IR positive",
-            requiredPolarity = HeartRatePeakPolarity.POSITIVE
-        )
+        if (motion?.isStrongMotion == true) {
+            maskRecentHeartRateSamplesForMotion(currentFrameSampleCount)
 
-        val redPositiveAnalysis = estimateHeartRateFromBuffer(
-            signalBuffer = heartRateRedBuffer,
-            contactBuffer = heartRateRedBuffer,
-            imuMotion = imuMotion,
-            source = HeartRateFusionSource.RED,
-            channelLabel = "RED positive",
-            requiredPolarity = HeartRatePeakPolarity.POSITIVE
-        )
-
-        // Negative peak는 positive 경로가 지속적으로 실패한 시점에만 계산·사용한다.
-        // 현재 frame이 임계 횟수에 도달하는 경우를 고려해 -1부터 미리 계산한다.
-        val shouldAnalyzeNegative =
-            activeHeartRatePath.isNegative ||
-                    primaryPositiveFailureStreak >=
-                    HEART_RATE_NEGATIVE_ENABLE_FAILURE_COUNT - 1 ||
-                    positiveFallbackUnavailableStreak >=
-                    HEART_RATE_FALLBACK_CONFIRM_FRAMES - 1 ||
-                    (
-                            activeHeartRatePath == HeartRateDetectionPath.RED_POSITIVE &&
-                                    activePathFailureStreak >=
-                                    HEART_RATE_PRIMARY_FAILURES_BEFORE_FALLBACK - 1
-                            )
-
-        val irNegativeAnalysis =
-            if (shouldAnalyzeNegative) {
-                estimateHeartRateFromBuffer(
-                    signalBuffer = heartRateIrBuffer,
-                    contactBuffer = heartRateIrBuffer,
-                    imuMotion = imuMotion,
-                    source = HeartRateFusionSource.IR,
-                    channelLabel = "IR negative",
-                    requiredPolarity = HeartRatePeakPolarity.NEGATIVE
-                )
-            } else {
-                null
-            }
-
-        val redNegativeAnalysis =
-            if (shouldAnalyzeNegative) {
-                estimateHeartRateFromBuffer(
-                    signalBuffer = heartRateRedBuffer,
-                    contactBuffer = heartRateRedBuffer,
-                    imuMotion = imuMotion,
-                    source = HeartRateFusionSource.RED,
-                    channelLabel = "RED negative",
-                    requiredPolarity = HeartRatePeakPolarity.NEGATIVE
-                )
-            } else {
-                null
-            }
-
-        val pathDecision = selectStableHeartRatePath(
-            irPositive = irPositiveAnalysis,
-            redPositive = redPositiveAnalysis,
-            irNegative = irNegativeAnalysis,
-            redNegative = redNegativeAnalysis
-        )
-
-        val rawFinalEstimate = pathDecision.estimate
-        val selectedAnalysis = pathDecision.analysis
-        val strongMotion = imuMotion?.isStrongMotion == true
-
-        // 움직임 중 예외 허용은 primary IR positive와 검증 RED positive가 일치할 때만 한다.
-        val motionTolerated =
-            strongMotion &&
-                    canTolerateMotionWithChannelAgreement(
-                        ir = irPositiveAnalysis.estimate,
-                        red = redPositiveAnalysis.estimate
-                    )
-
-        if (strongMotion && !motionTolerated) {
-            maskRecentHeartRateSamplesForMotion(sampleCount = 100)
-            arousalCalculator.onHeartRateDiscontinuity(
-                reason = "strong motion PPG mask"
-            )
-
-            val message =
-                "지속 움직임으로 현재 1초 PPG를 HR buffer에서 mask: " +
-                        "max=${"%.4f".format(imuMotion?.maxDeltaG ?: 0.0)}g, " +
-                        "p95=${"%.4f".format(imuMotion?.p95DeltaG ?: 0.0)}g, " +
-                        "over=${"%.3f".format(imuMotion?.exceedanceRatio ?: 0.0)}"
-
+            val clean = buildLatestCleanHeartRateWindow()
             return HeartRateAnalysisResult(
                 estimate = null,
-                diagnostics = decorateFusionDiagnostics(
-                    base = selectedAnalysis.diagnostics.copy(
-                        processingState = HeartRateProcessingState.MOTION_ARTIFACT,
-                        message = message,
-                        calculatedBpm = rawFinalEstimate?.bpm,
-                        qualityScore = rawFinalEstimate?.qualityScore,
-                        imuMaxDeltaG = imuMotion?.maxDeltaG,
-                        imuP95DeltaG = imuMotion?.p95DeltaG,
-                        imuMotionExceedanceRatio = imuMotion?.exceedanceRatio,
-                        motionTolerated = false
-                    ),
-                    ir = irPositiveAnalysis,
-                    red = redPositiveAnalysis,
-                    combined = null,
-                    source = pathDecision.path.source,
-                    fusionLog = "$message; ${pathDecision.log}"
+                diagnostics = HeartRateDiagnostics(
+                    processingState = HeartRateProcessingState.MOTION_ARTIFACT,
+                    message = "지속 움직임으로 현재 1초 Green PPG를 HR 분석에서 제외",
+                    analysisSegmentId = analysisSegmentId,
+                    windowSampleCount = clean.signal.size,
+                    windowSeconds =
+                        clean.signal.size / POTCH_PPG_SAMPLE_RATE_HZ,
+                    greenDcMean =
+                        clean.signal.takeIf { it.isNotEmpty() }?.average(),
+                    greenMin = clean.signal.minOrNull(),
+                    greenMax = clean.signal.maxOrNull(),
+                    imuMaxDeltaG = motion.maxDeltaG,
+                    imuP95DeltaG = motion.p95DeltaG,
+                    imuMotionExceedanceRatio = motion.exceedanceRatio,
+                    retainedBufferSampleCount =
+                        clean.retainedBufferSampleCount,
+                    cleanSegmentSampleCount =
+                        clean.cleanSegmentSampleCount,
+                    invalidMaskedSampleCount =
+                        clean.invalidMaskedSampleCount,
+                    motionMaskedSampleCount =
+                        clean.motionMaskedSampleCount,
+                    source = HeartRateSource.GREEN,
+                    sourceLog = "Green PPG · motion mask"
                 )
             )
         }
 
-        val finalEstimate =
-            if (rawFinalEstimate != null && motionTolerated) {
-                val log =
-                    "${pathDecision.log}; 움직임 중 IR/RED positive 일치로 낮은 confidence 허용"
+        val positive = analyzeGreenHeartRate(
+            requiredPolarity = HeartRatePeakPolarity.POSITIVE,
+            imuMotion = motion
+        )
 
-                rawFinalEstimate.copy(
-                    qualityScore =
-                        (rawFinalEstimate.qualityScore *
-                                HEART_RATE_MOTION_QUALITY_PENALTY)
-                            .coerceIn(0.0, 1.0),
-                    fusionLog = log
-                )
-            } else {
-                rawFinalEstimate
-            }
+        if (activePolarity == HeartRatePeakPolarity.POSITIVE) {
+            val positiveEstimate = positive.estimate
 
-        if (finalEstimate != null) {
-            val finalLog = finalEstimate.fusionLog ?: pathDecision.log
-
-            return HeartRateAnalysisResult(
-                estimate = finalEstimate,
-                diagnostics = decorateFusionDiagnostics(
-                    base = selectedAnalysis.diagnostics.copy(
-                        processingState = HeartRateProcessingState.VALID,
-                        message = finalLog,
-                        calculatedBpm = finalEstimate.bpm,
-                        qualityScore = finalEstimate.qualityScore,
-                        selectedPeakThreshold = finalEstimate.selectedPeakThreshold,
-                        selectedThresholdPercent = finalEstimate.selectedThresholdPercent,
-                        selectedPolarity = finalEstimate.selectedPolarity,
-                        detectedPeakCount = finalEstimate.peakCount,
-                        rawIbiCount = finalEstimate.rawIntervalCount,
-                        validIbiCount = finalEstimate.intervalCount,
-                        acceptedIntervalRatio = finalEstimate.acceptedIntervalRatio,
-                        rawSdsdMs = finalEstimate.peakFitSdsdMs,
-                        rawIbiCv = finalEstimate.rawIbiCv,
-                        physiologicalIntervalRatio = finalEstimate.physiologicalIntervalRatio,
-                        rawIntervalQualityScore = finalEstimate.rawIntervalQualityScore,
-                        sdsdMs = finalEstimate.peakFitSdsdMs,
-                        spectralConcentration = finalEstimate.spectralConcentration,
-                        spectralEntropy = finalEstimate.spectralEntropy,
-                        amplitudeCoefficientOfVariation =
-                            finalEstimate.amplitudeCoefficientOfVariation,
-                        abruptChangeRatio = finalEstimate.abruptChangeRatio,
-                        imuMaxDeltaG = imuMotion?.maxDeltaG,
-                        imuP95DeltaG = imuMotion?.p95DeltaG,
-                        imuMotionExceedanceRatio = imuMotion?.exceedanceRatio,
-                        motionTolerated = motionTolerated
-                    ),
-                    ir = irPositiveAnalysis,
-                    red = redPositiveAnalysis,
-                    combined = null,
-                    source = pathDecision.path.source,
-                    fusionLog = finalLog
-                )
-            )
-        }
-
-        val failureState =
-            if (pathDecision.waitingForConfirmation) {
+            if (
+                positiveEstimate == null &&
+                positive.diagnostics.processingState ==
                 HeartRateProcessingState.COLLECTING
-            } else {
-                selectedAnalysis.diagnostics.processingState
+            ) {
+                return positive
             }
 
+            if (positiveEstimate != null) {
+                positiveFailureStreak = 0
+                activePolarityFailureStreak = 0
+                positiveRecoveryStreak = 0
+                clearPendingPolarity()
+                return withPathLog(
+                    positive,
+                    "Green positive 경로 유지"
+                )
+            }
+
+            positiveFailureStreak += 1
+
+            if (positiveFailureStreak < POLARITY_FAILURES_BEFORE_FALLBACK) {
+                return waitForPolarity(
+                    positive,
+                    "Green positive 실패 $positiveFailureStreak/" +
+                            "$POLARITY_FAILURES_BEFORE_FALLBACK; " +
+                            "즉시 polarity를 바꾸지 않음"
+                )
+            }
+
+            val negative = analyzeGreenHeartRate(
+                requiredPolarity = HeartRatePeakPolarity.NEGATIVE,
+                imuMotion = motion
+            )
+
+            val negativeEstimate = negative.estimate
+            if (negativeEstimate != null) {
+                val confirmed = confirmPendingPolarity(
+                    HeartRatePeakPolarity.NEGATIVE,
+                    negativeEstimate.bpm
+                )
+
+                if (confirmed) {
+                    activePolarity = HeartRatePeakPolarity.NEGATIVE
+                    activePolarityFailureStreak = 0
+                    positiveRecoveryStreak = 0
+                    return withPathLog(
+                        negative,
+                        "Green positive 연속 실패 후 negative " +
+                                "$POLARITY_CONFIRM_FRAMES 회 확인, 전환"
+                    )
+                }
+
+                return waitForPolarity(
+                    negative,
+                    "Green negative 전환 확인 중 " +
+                            "$pendingPolaritySuccessStreak/" +
+                            "$POLARITY_CONFIRM_FRAMES"
+                )
+            }
+
+            clearPendingPolarity()
+            return selectMoreInformativeFailure(positive, negative)
+        }
+
+        val negative = analyzeGreenHeartRate(
+            requiredPolarity = HeartRatePeakPolarity.NEGATIVE,
+            imuMotion = motion
+        )
+
+        if (
+            negative.estimate == null &&
+            negative.diagnostics.processingState ==
+            HeartRateProcessingState.COLLECTING &&
+            positive.estimate == null
+        ) {
+            return negative
+        }
+
+        if (positive.estimate != null) {
+            positiveRecoveryStreak += 1
+            if (positiveRecoveryStreak >= POLARITY_RECOVERY_CONFIRM_FRAMES) {
+                activePolarity = HeartRatePeakPolarity.POSITIVE
+                positiveFailureStreak = 0
+                activePolarityFailureStreak = 0
+                positiveRecoveryStreak = 0
+                clearPendingPolarity()
+                return withPathLog(
+                    positive,
+                    "Green positive $POLARITY_RECOVERY_CONFIRM_FRAMES 회 확인, 기본 경로 복귀"
+                )
+            }
+        } else {
+            positiveRecoveryStreak = 0
+        }
+
+        if (negative.estimate != null) {
+            activePolarityFailureStreak = 0
+            return withPathLog(
+                negative,
+                if (positiveRecoveryStreak > 0) {
+                    "Green negative 유지 · positive 복귀 확인 중 " +
+                            "$positiveRecoveryStreak/" +
+                            "$POLARITY_RECOVERY_CONFIRM_FRAMES"
+                } else {
+                    "Green negative fallback 유지"
+                }
+            )
+        }
+
+        activePolarityFailureStreak += 1
+        return if (
+            positive.estimate != null ||
+            activePolarityFailureStreak < POLARITY_FAILURES_BEFORE_FALLBACK
+        ) {
+            waitForPolarity(
+                negative,
+                "Green negative 실패 $activePolarityFailureStreak/" +
+                        "$POLARITY_FAILURES_BEFORE_FALLBACK; " +
+                        "positive 복귀를 확인 중"
+            )
+        } else {
+            selectMoreInformativeFailure(positive, negative)
+        }
+    }
+
+    private fun withPathLog(
+        analysis: HeartRateAnalysisResult,
+        log: String
+    ): HeartRateAnalysisResult {
+        val estimate = analysis.estimate?.copy(sourceLog = log)
+        return analysis.copy(
+            estimate = estimate,
+            diagnostics = analysis.diagnostics.copy(
+                message = log,
+                source = HeartRateSource.GREEN,
+                sourceLog = log
+            )
+        )
+    }
+
+    private fun waitForPolarity(
+        analysis: HeartRateAnalysisResult,
+        log: String
+    ): HeartRateAnalysisResult {
         return HeartRateAnalysisResult(
             estimate = null,
-            diagnostics = decorateFusionDiagnostics(
-                base = selectedAnalysis.diagnostics.copy(
-                    processingState = failureState,
-                    message = pathDecision.log,
-                    calculatedBpm = null,
-                    imuMaxDeltaG = imuMotion?.maxDeltaG,
-                    imuP95DeltaG = imuMotion?.p95DeltaG,
-                    imuMotionExceedanceRatio = imuMotion?.exceedanceRatio
-                ),
-                ir = irPositiveAnalysis,
-                red = redPositiveAnalysis,
-                combined = null,
-                source = pathDecision.path.source,
-                fusionLog = pathDecision.log
+            diagnostics = analysis.diagnostics.copy(
+                processingState = HeartRateProcessingState.COLLECTING,
+                message = log,
+                calculatedBpm = null,
+                source = HeartRateSource.GREEN,
+                sourceLog = log
             )
         )
     }
 
-
-    private fun selectStableHeartRatePath(
-        irPositive: HeartRateAnalysisResult,
-        redPositive: HeartRateAnalysisResult,
-        irNegative: HeartRateAnalysisResult?,
-        redNegative: HeartRateAnalysisResult?
-    ): HeartRatePathDecision {
-        fun analysisFor(path: HeartRateDetectionPath): HeartRateAnalysisResult? {
-            return when (path) {
-                HeartRateDetectionPath.IR_POSITIVE -> irPositive
-                HeartRateDetectionPath.RED_POSITIVE -> redPositive
-                HeartRateDetectionPath.IR_NEGATIVE -> irNegative
-                HeartRateDetectionPath.RED_NEGATIVE -> redNegative
-            }
-        }
-
-        fun usePath(
-            path: HeartRateDetectionPath,
-            analysis: HeartRateAnalysisResult,
-            log: String
-        ): HeartRatePathDecision {
-            val estimate = requireNotNull(analysis.estimate)
-            return HeartRatePathDecision(
-                estimate = estimate.copy(
-                    source = path.source,
-                    fusionLog = log
-                ),
-                analysis = analysis,
-                path = path,
-                log = log
-            )
-        }
-
-        fun waitForPath(
-            path: HeartRateDetectionPath,
-            analysis: HeartRateAnalysisResult,
-            log: String
-        ): HeartRatePathDecision {
-            return HeartRatePathDecision(
-                estimate = null,
-                analysis = analysis,
-                path = path,
-                log = log,
-                waitingForConfirmation = true
-            )
-        }
-
-        val irEstimate = irPositive.estimate
-        val redEstimate = redPositive.estimate
-
-        if (irEstimate != null) {
-            primaryPositiveFailureStreak = 0
-            positiveFallbackUnavailableStreak = 0
-
-            if (activeHeartRatePath == HeartRateDetectionPath.IR_POSITIVE) {
-                primaryPositiveRecoveryStreak = 0
-                activePathFailureStreak = 0
-                clearPendingHeartRatePath()
-
-                val validationLog = buildRedPositiveValidationLog(
-                    ir = irEstimate,
-                    red = redEstimate
-                )
-                return usePath(
-                    path = HeartRateDetectionPath.IR_POSITIVE,
-                    analysis = irPositive,
-                    log = validationLog
-                )
-            }
-
-            primaryPositiveRecoveryStreak += 1
-            val activeAnalysis = analysisFor(activeHeartRatePath)
-
-            if (
-                primaryPositiveRecoveryStreak >=
-                HEART_RATE_PRIMARY_RECOVERY_CONFIRM_FRAMES ||
-                activeAnalysis?.estimate == null
-            ) {
-                val previousPath = activeHeartRatePath
-                activeHeartRatePath = HeartRateDetectionPath.IR_POSITIVE
-                primaryPositiveRecoveryStreak = 0
-                activePathFailureStreak = 0
-                clearPendingHeartRatePath()
-
-                val validationLog = buildRedPositiveValidationLog(
-                    ir = irEstimate,
-                    red = redEstimate
-                )
-                return usePath(
-                    path = HeartRateDetectionPath.IR_POSITIVE,
-                    analysis = irPositive,
-                    log = "IR positive primary 복귀: ${previousPath.label} → IR positive; " +
-                            validationLog
-                )
-            }
-
-            activePathFailureStreak = 0
-            return usePath(
-                path = activeHeartRatePath,
-                analysis = requireNotNull(activeAnalysis),
-                log = "IR positive 복귀 확인 중 " +
-                        "$primaryPositiveRecoveryStreak/" +
-                        "$HEART_RATE_PRIMARY_RECOVERY_CONFIRM_FRAMES; " +
-                        "현재 ${activeHeartRatePath.label} 유지"
-            )
-        } else {
-            primaryPositiveRecoveryStreak = 0
-            primaryPositiveFailureStreak += 1
-        }
-
-        // Primary가 아직 3회 연속 실패하지 않았으면 다른 source를 즉시 선택하지 않는다.
-        if (
-            activeHeartRatePath == HeartRateDetectionPath.IR_POSITIVE &&
-            primaryPositiveFailureStreak <
-            HEART_RATE_PRIMARY_FAILURES_BEFORE_FALLBACK
-        ) {
-            clearPendingHeartRatePath()
-            return waitForPath(
-                path = HeartRateDetectionPath.IR_POSITIVE,
-                analysis = irPositive,
-                log = "IR positive primary 실패 " +
-                        "$primaryPositiveFailureStreak/" +
-                        "$HEART_RATE_PRIMARY_FAILURES_BEFORE_FALLBACK; " +
-                        "source 전환 없이 마지막 정상 HR 유지"
-            )
-        }
-
-        // 이미 확정된 fallback 경로가 유효하면 frame마다 다시 경쟁시키지 않고 그대로 유지한다.
-        if (activeHeartRatePath != HeartRateDetectionPath.IR_POSITIVE) {
-            val activeAnalysis = analysisFor(activeHeartRatePath)
-            if (activeAnalysis?.estimate != null) {
-                activePathFailureStreak = 0
-                clearPendingHeartRatePath()
-                return usePath(
-                    path = activeHeartRatePath,
-                    analysis = activeAnalysis,
-                    log = "확정된 fallback ${activeHeartRatePath.label} 유지; " +
-                            "IR positive failure=$primaryPositiveFailureStreak"
-                )
-            }
-
-            activePathFailureStreak += 1
-            if (
-                activePathFailureStreak <
-                HEART_RATE_PRIMARY_FAILURES_BEFORE_FALLBACK
-            ) {
-                return waitForPath(
-                    path = activeHeartRatePath,
-                    analysis = activeAnalysis ?: irPositive,
-                    log = "현재 fallback ${activeHeartRatePath.label} 실패 " +
-                            "$activePathFailureStreak/" +
-                            "$HEART_RATE_PRIMARY_FAILURES_BEFORE_FALLBACK; " +
-                            "즉시 다른 경로로 교대하지 않음"
-                )
-            }
-        }
-
-        // 첫 번째 fallback은 RED positive다. 유효하더라도 3회 연속 확인 전에는 전환하지 않는다.
-        if (
-            activeHeartRatePath != HeartRateDetectionPath.RED_POSITIVE &&
-            redEstimate != null
-        ) {
-            positiveFallbackUnavailableStreak = 0
-            val confirmed = confirmPendingHeartRatePath(
-                path = HeartRateDetectionPath.RED_POSITIVE,
-                bpm = redEstimate.bpm
-            )
-
-            if (confirmed) {
-                activeHeartRatePath = HeartRateDetectionPath.RED_POSITIVE
-                activePathFailureStreak = 0
-                return usePath(
-                    path = HeartRateDetectionPath.RED_POSITIVE,
-                    analysis = redPositive,
-                    log = "IR positive ${primaryPositiveFailureStreak}회 연속 실패 후 " +
-                            "RED positive ${HEART_RATE_FALLBACK_CONFIRM_FRAMES}회 확인, fallback 전환"
-                )
-            }
-
-            return waitForPath(
-                path = HeartRateDetectionPath.RED_POSITIVE,
-                analysis = redPositive,
-                log = "RED positive fallback 확인 중 " +
-                        "$pendingHeartRatePathSuccessStreak/" +
-                        "$HEART_RATE_FALLBACK_CONFIRM_FRAMES; " +
-                        "IR positive failure=$primaryPositiveFailureStreak"
-            )
-        }
-
-        if (redEstimate == null) {
-            positiveFallbackUnavailableStreak += 1
-        }
-
-        val negativeAllowed =
-            primaryPositiveFailureStreak >=
-                    HEART_RATE_NEGATIVE_ENABLE_FAILURE_COUNT &&
-                    positiveFallbackUnavailableStreak >=
-                    HEART_RATE_FALLBACK_CONFIRM_FRAMES
-
-        if (!negativeAllowed) {
-            clearPendingHeartRatePath()
-            return waitForPath(
-                path = HeartRateDetectionPath.IR_POSITIVE,
-                analysis = irPositive,
-                log = "positive 경로 지속성 확인 중: " +
-                        "IR failure=$primaryPositiveFailureStreak/" +
-                        "$HEART_RATE_NEGATIVE_ENABLE_FAILURE_COUNT, " +
-                        "RED unavailable=$positiveFallbackUnavailableStreak/" +
-                        "$HEART_RATE_FALLBACK_CONFIRM_FRAMES; " +
-                        "negative peak는 아직 사용하지 않음"
-            )
-        }
-
-        // Positive 경로가 충분히 오래 실패한 뒤에만 negative 후보를 확인한다.
-        val negativeCandidate = when {
-            irNegative?.estimate != null ->
-                HeartRateDetectionPath.IR_NEGATIVE to irNegative
-
-            redNegative?.estimate != null ->
-                HeartRateDetectionPath.RED_NEGATIVE to redNegative
-
-            else -> null
-        }
-
-        if (negativeCandidate != null) {
-            val (path, analysis) = negativeCandidate
-            val estimate = requireNotNull(analysis.estimate)
-            val confirmed = confirmPendingHeartRatePath(
-                path = path,
-                bpm = estimate.bpm
-            )
-
-            if (confirmed) {
-                activeHeartRatePath = path
-                activePathFailureStreak = 0
-                return usePath(
-                    path = path,
-                    analysis = analysis,
-                    log = "IR/RED positive 지속 실패 후 ${path.label} " +
-                            "${HEART_RATE_FALLBACK_CONFIRM_FRAMES}회 확인, negative fallback 전환"
-                )
-            }
-
-            return waitForPath(
-                path = path,
-                analysis = analysis,
-                log = "${path.label} fallback 확인 중 " +
-                        "$pendingHeartRatePathSuccessStreak/" +
-                        "$HEART_RATE_FALLBACK_CONFIRM_FRAMES; " +
-                        "positive 경로가 지속 실패한 경우에만 negative 사용"
-            )
-        }
-
-        clearPendingHeartRatePath()
-        val informativeFailure =
-            listOfNotNull(irNegative, redNegative, redPositive, irPositive)
-                .maxWithOrNull(
-                    compareBy<HeartRateAnalysisResult> {
-                        failureInformationRank(it.diagnostics.processingState)
-                    }.thenBy { it.diagnostics.validIbiCount }
-                ) ?: irPositive
-
-        return HeartRatePathDecision(
-            estimate = null,
-            analysis = informativeFailure,
-            path = activeHeartRatePath,
-            log = "IR/RED positive와 허용된 negative fallback 모두 유효 후보 없음; " +
-                    "active=${activeHeartRatePath.label}",
-            waitingForConfirmation = false
-        )
-    }
-
-    private fun buildRedPositiveValidationLog(
-        ir: HeartRateEstimate,
-        red: HeartRateEstimate?
-    ): String {
-        if (red == null) {
-            return "IR positive primary 사용: ${ir.bpm} bpm; RED positive 검증 후보 없음"
-        }
-
-        val difference = abs(ir.bpm - red.bpm)
-        val reference = maxOf(ir.bpm, red.bpm).toDouble().coerceAtLeast(1.0)
-        val agree =
-            difference <= HEART_RATE_FUSION_AGREE_BPM ||
-                    difference / reference <= HEART_RATE_FUSION_AGREE_RATIO
-
-        return if (agree) {
-            "IR positive primary 사용: ${ir.bpm} bpm; " +
-                    "RED positive=${red.bpm} bpm 일치, 검증 통과(융합하지 않음)"
-        } else {
-            "IR positive primary 사용: ${ir.bpm} bpm; " +
-                    "RED positive=${red.bpm} bpm 불일치는 source 전환에 사용하지 않음"
-        }
-    }
-
-    private fun confirmPendingHeartRatePath(
-        path: HeartRateDetectionPath,
+    private fun confirmPendingPolarity(
+        polarity: HeartRatePeakPolarity,
         bpm: Int
     ): Boolean {
-        val samePath = pendingHeartRatePath == path
-        val bpmConsistent =
-            pendingHeartRatePathLastBpm?.let { previous ->
-                abs(previous - bpm) <= HEART_RATE_PENDING_BPM_TOLERANCE
-            } ?: true
+        val samePolarity = pendingPolarity == polarity
+        val bpmConsistent = pendingPolarityLastBpm?.let {
+            abs(it - bpm) <= POLARITY_PENDING_BPM_TOLERANCE
+        } ?: true
 
-        if (samePath && bpmConsistent) {
-            pendingHeartRatePathSuccessStreak += 1
+        if (samePolarity && bpmConsistent) {
+            pendingPolaritySuccessStreak += 1
         } else {
-            pendingHeartRatePath = path
-            pendingHeartRatePathSuccessStreak = 1
+            pendingPolarity = polarity
+            pendingPolaritySuccessStreak = 1
         }
 
-        pendingHeartRatePathLastBpm = bpm
+        pendingPolarityLastBpm = bpm
 
-        if (
-            pendingHeartRatePathSuccessStreak >=
-            HEART_RATE_FALLBACK_CONFIRM_FRAMES
-        ) {
-            clearPendingHeartRatePath()
+        if (pendingPolaritySuccessStreak >= POLARITY_CONFIRM_FRAMES) {
+            clearPendingPolarity()
             return true
         }
 
         return false
     }
 
-    private fun clearPendingHeartRatePath() {
-        pendingHeartRatePath = null
-        pendingHeartRatePathSuccessStreak = 0
-        pendingHeartRatePathLastBpm = null
+    private fun clearPendingPolarity() {
+        pendingPolarity = null
+        pendingPolaritySuccessStreak = 0
+        pendingPolarityLastBpm = null
     }
 
-    private fun resetHeartRatePathSelection() {
-        activeHeartRatePath = HeartRateDetectionPath.IR_POSITIVE
-        primaryPositiveFailureStreak = 0
-        primaryPositiveRecoveryStreak = 0
-        activePathFailureStreak = 0
-        positiveFallbackUnavailableStreak = 0
-        clearPendingHeartRatePath()
+    private fun resetPolaritySelection() {
+        activePolarity = HeartRatePeakPolarity.POSITIVE
+        positiveFailureStreak = 0
+        positiveRecoveryStreak = 0
+        activePolarityFailureStreak = 0
+        clearPendingPolarity()
     }
 
-    private fun canTolerateMotionWithChannelAgreement(
-        ir: HeartRateEstimate?,
-        red: HeartRateEstimate?
-    ): Boolean {
-        if (ir == null || red == null) return false
-
-        val difference = abs(ir.bpm - red.bpm).toDouble()
-        val reference = maxOf(ir.bpm, red.bpm).toDouble().coerceAtLeast(1.0)
-        val agree =
-            difference <= HEART_RATE_FUSION_AGREE_BPM ||
-                    difference / reference <= HEART_RATE_FUSION_AGREE_RATIO
-
-        return agree &&
-                ir.qualityScore >= HEART_RATE_MOTION_TOLERATE_MIN_CHANNEL_QUALITY &&
-                red.qualityScore >= HEART_RATE_MOTION_TOLERATE_MIN_CHANNEL_QUALITY
-    }
-
-    /**
-     * IR과 RED의 독립 HR 결과를 비교해 최종 source를 결정한다.
-     *
-     * - 두 채널이 일치하면 IBI를 sample 위치 기준으로 매칭해 품질 가중 융합한다.
-     * - 한 채널만 유효하면 해당 채널을 사용한다.
-     * - 불일치하면 품질과 직전 HR 연속성을 함께 평가한다.
-     * - 결론이 불명확하면 null을 반환하고 평균 PPG fallback 분석으로 넘긴다.
-     */
-    private fun fuseIrAndRedHeartRates(
-        ir: HeartRateEstimate?,
-        red: HeartRateEstimate?,
-        previousBpm: Double?
-    ): HeartRateFusionDecision {
-        if (ir == null && red == null) {
-            return HeartRateFusionDecision(
-                estimate = null,
-                source = HeartRateFusionSource.NONE,
-                log = "IR과 RED 모두 유효 HR 후보 없음"
-            )
-        }
-
-        if (ir != null && red == null) {
-            val log = "RED 실패, IR 단일 채널 선택: ${ir.bpm} bpm"
-            return HeartRateFusionDecision(
-                estimate = ir.copy(
-                    source = HeartRateFusionSource.IR,
-                    fusionLog = log
-                ),
-                source = HeartRateFusionSource.IR,
-                log = log
-            )
-        }
-
-        if (ir == null && red != null) {
-            val log = "IR 실패, RED 단일 채널 선택: ${red.bpm} bpm"
-            return HeartRateFusionDecision(
-                estimate = red.copy(
-                    source = HeartRateFusionSource.RED,
-                    fusionLog = log
-                ),
-                source = HeartRateFusionSource.RED,
-                log = log
-            )
-        }
-
-        val irEstimate = requireNotNull(ir)
-        val redEstimate = requireNotNull(red)
-
-        val bpmDifference = abs(irEstimate.bpm - redEstimate.bpm).toDouble()
-        val relativeDifference =
-            bpmDifference / maxOf(irEstimate.bpm, redEstimate.bpm).toDouble()
-
-        val channelsAgree =
-            bpmDifference <= HEART_RATE_FUSION_AGREE_BPM ||
-                    relativeDifference <= HEART_RATE_FUSION_AGREE_RATIO
-
-        if (channelsAgree) {
-            val fused = buildFusedHeartRateEstimate(
-                ir = irEstimate,
-                red = redEstimate
-            )
-
-            if (fused != null) {
-                val log =
-                    "IR/RED 일치 후 IBI 융합: IR=${irEstimate.bpm}, RED=${redEstimate.bpm}, " +
-                            "fused=${fused.bpm} bpm, matched=${fused.intervalCount}"
-                return HeartRateFusionDecision(
-                    estimate = fused.copy(fusionLog = log),
-                    source = HeartRateFusionSource.FUSED_IR_RED,
-                    log = log
-                )
-            }
-
-            val selected = selectHigherScoreChannel(
-                ir = irEstimate,
-                red = redEstimate,
-                previousBpm = previousBpm
-            )
-            val log =
-                "IR/RED BPM은 일치하지만 매칭 IBI 부족으로 ${selected.source.name} 선택: " +
-                        "IR=${irEstimate.bpm}, RED=${redEstimate.bpm}"
-            return HeartRateFusionDecision(
-                estimate = selected.copy(fusionLog = log),
-                source = selected.source,
-                log = log
-            )
-        }
-
-        val irScore = calculateChannelSelectionScore(irEstimate, previousBpm)
-        val redScore = calculateChannelSelectionScore(redEstimate, previousBpm)
-        val scoreDifference = abs(irScore - redScore)
-        val qualityDifference =
-            abs(irEstimate.qualityScore - redEstimate.qualityScore)
-
-        val preferred =
-            if (irScore >= redScore) irEstimate else redEstimate
-        val other =
-            if (preferred === irEstimate) redEstimate else irEstimate
-
-        if (bpmDifference <= HEART_RATE_FUSION_MODERATE_DISAGREE_BPM) {
-            val log =
-                "IR/RED 중간 불일치(${bpmDifference.roundToInt()} bpm): " +
-                        "${preferred.source.name} 선택, " +
-                        "score=${"%.3f".format(maxOf(irScore, redScore))}/" +
-                        "${"%.3f".format(minOf(irScore, redScore))}"
-            return HeartRateFusionDecision(
-                estimate = preferred.copy(fusionLog = log),
-                source = preferred.source,
-                log = log
-            )
-        }
-
-        val harmonicPair = isTwoToOneHarmonicPair(
-            firstBpm = irEstimate.bpm.toDouble(),
-            secondBpm = redEstimate.bpm.toDouble()
-        )
-
-        if (harmonicPair && previousBpm != null) {
-            val preferredDistance = abs(preferred.bpm - previousBpm)
-            val otherDistance = abs(other.bpm - previousBpm)
-
-            if (
-                otherDistance - preferredDistance >= HEART_RATE_FUSION_AGREE_BPM &&
-                preferred.qualityScore >= 0.35
-            ) {
-                val log =
-                    "IR/RED 2배 harmonic 후보에서 직전 HR 연속성으로 " +
-                            "${preferred.source.name} 선택: previous=${previousBpm.roundToInt()}, " +
-                            "IR=${irEstimate.bpm}, RED=${redEstimate.bpm}"
-                return HeartRateFusionDecision(
-                    estimate = preferred.copy(fusionLog = log),
-                    source = preferred.source,
-                    log = log
-                )
-            }
-        }
-
-        if (
-            preferred.qualityScore >= HEART_RATE_FUSION_STRONG_QUALITY &&
-            qualityDifference >= HEART_RATE_FUSION_MIN_QUALITY_MARGIN
-        ) {
-            val log =
-                "IR/RED 큰 불일치지만 품질 우세로 ${preferred.source.name} 선택: " +
-                        "IR=${irEstimate.bpm}(q=${"%.3f".format(irEstimate.qualityScore)}), " +
-                        "RED=${redEstimate.bpm}(q=${"%.3f".format(redEstimate.qualityScore)})"
-            return HeartRateFusionDecision(
-                estimate = preferred.copy(fusionLog = log),
-                source = preferred.source,
-                log = log
-            )
-        }
-
-        if (
-            previousBpm != null &&
-            scoreDifference >= HEART_RATE_FUSION_SELECTION_SCORE_MARGIN &&
-            preferred.qualityScore >= 0.45
-        ) {
-            val log =
-                "IR/RED 큰 불일치에서 품질+연속성 점수로 ${preferred.source.name} 선택: " +
-                        "previous=${previousBpm.roundToInt()}, IR=${irEstimate.bpm}, RED=${redEstimate.bpm}"
-            return HeartRateFusionDecision(
-                estimate = preferred.copy(fusionLog = log),
-                source = preferred.source,
-                log = log
-            )
-        }
-
-        return HeartRateFusionDecision(
-            estimate = null,
-            source = HeartRateFusionSource.NONE,
-            log = "IR/RED 결과 불일치로 독립 채널 선택 보류: " +
-                    "IR=${irEstimate.bpm}(q=${"%.3f".format(irEstimate.qualityScore)}), " +
-                    "RED=${redEstimate.bpm}(q=${"%.3f".format(redEstimate.qualityScore)})"
-        )
-    }
-
-    /**
-     * 같은 심박을 검출한 IR/RED interval을 end sample 위치로 매칭해 융합한다.
-     * 매칭되지 않은 interval은 버려 HRV buffer에 가짜 중복 IBI가 들어가지 않게 한다.
-     */
-    private fun buildFusedHeartRateEstimate(
-        ir: HeartRateEstimate,
-        red: HeartRateEstimate
-    ): HeartRateEstimate? {
-        val irWeight = ir.qualityScore.coerceAtLeast(0.05)
-        val redWeight = red.qualityScore.coerceAtLeast(0.05)
-        val totalWeight = irWeight + redWeight
-
-        val fusedIntervals = matchAndFuseHeartRateIntervals(
-            irIntervals = ir.ibiIntervals,
-            redIntervals = red.ibiIntervals,
-            irWeight = irWeight,
-            redWeight = redWeight
-        )
-
-        if (fusedIntervals.size < HEART_RATE_FUSION_MIN_MATCHED_INTERVALS) {
-            return null
-        }
-
-        val averageIntervalSec =
-            fusedIntervals.map { it.intervalSec }.average()
-
-        if (!averageIntervalSec.isFinite() || averageIntervalSec <= 0.0) {
-            return null
-        }
-
-        val bpm = (60.0 / averageIntervalSec).roundToInt()
-        if (bpm !in HEART_RATE_MIN_BPM..HEART_RATE_MAX_BPM) {
-            return null
-        }
-
-        val primary =
-            if (ir.qualityScore >= red.qualityScore) ir else red
-
-        val bpmDifference = abs(ir.bpm - red.bpm).toDouble()
-        val agreementScore =
-            (1.0 - bpmDifference / HEART_RATE_FUSION_AGREE_BPM)
-                .coerceIn(0.0, 1.0)
-
-        val weightedChannelQuality =
-            (ir.qualityScore * irWeight + red.qualityScore * redWeight) /
-                    totalWeight
-
-        val fusedQuality =
-            (weightedChannelQuality * 0.85 + agreementScore * 0.15)
-                .coerceIn(0.0, 1.0)
-
-        return primary.copy(
-            bpm = bpm,
-            ibiIntervals = fusedIntervals,
-            peakCount = fusedIntervals.size + 1,
-            intervalCount = fusedIntervals.size,
-            averageIntervalSec = averageIntervalSec,
-            qualityScore = fusedQuality,
-            source = HeartRateFusionSource.FUSED_IR_RED,
-            fusionLog = null,
-            acceptedIbiEndSamplePositions =
-                fusedIntervals.map { it.endSamplePosition },
-            peakFitSdsdMs =
-                calculateSdsd(fusedIntervals.map { it.intervalSec })
-                    ?.times(1000.0),
-            rawIntervalCount = maxOf(ir.rawIntervalCount, red.rawIntervalCount),
-            acceptedIntervalRatio = weightedAverage(
-                first = ir.acceptedIntervalRatio,
-                second = red.acceptedIntervalRatio,
-                firstWeight = irWeight,
-                secondWeight = redWeight
-            ),
-            rawIbiCv = weightedAverage(
-                first = ir.rawIbiCv,
-                second = red.rawIbiCv,
-                firstWeight = irWeight,
-                secondWeight = redWeight
-            ),
-            physiologicalIntervalRatio = weightedAverage(
-                first = ir.physiologicalIntervalRatio,
-                second = red.physiologicalIntervalRatio,
-                firstWeight = irWeight,
-                secondWeight = redWeight
-            ),
-            rawIntervalQualityScore = weightedAverage(
-                first = ir.rawIntervalQualityScore,
-                second = red.rawIntervalQualityScore,
-                firstWeight = irWeight,
-                secondWeight = redWeight
-            ),
-            spectralConcentration = weightedAverageNullable(
-                first = ir.spectralConcentration,
-                second = red.spectralConcentration,
-                firstWeight = irWeight,
-                secondWeight = redWeight
-            ),
-            spectralEntropy = weightedAverageNullable(
-                first = ir.spectralEntropy,
-                second = red.spectralEntropy,
-                firstWeight = irWeight,
-                secondWeight = redWeight
-            ),
-            amplitudeCoefficientOfVariation = weightedAverageNullable(
-                first = ir.amplitudeCoefficientOfVariation,
-                second = red.amplitudeCoefficientOfVariation,
-                firstWeight = irWeight,
-                secondWeight = redWeight
-            ),
-            abruptChangeRatio = weightedAverageNullable(
-                first = ir.abruptChangeRatio,
-                second = red.abruptChangeRatio,
-                firstWeight = irWeight,
-                secondWeight = redWeight
-            )
-        )
-    }
-
-    private fun matchAndFuseHeartRateIntervals(
-        irIntervals: List<IbiInterval>,
-        redIntervals: List<IbiInterval>,
-        irWeight: Double,
-        redWeight: Double
-    ): List<IbiInterval> {
-        if (irIntervals.isEmpty() || redIntervals.isEmpty()) {
-            return emptyList()
-        }
-
-        val redUsed = BooleanArray(redIntervals.size)
-        val fused = mutableListOf<IbiInterval>()
-        val totalWeight = irWeight + redWeight
-
-        for (irInterval in irIntervals) {
-            var bestIndex = -1
-            var bestDistance = Double.POSITIVE_INFINITY
-
-            for (index in redIntervals.indices) {
-                if (redUsed[index]) continue
-
-                val redInterval = redIntervals[index]
-                if (redInterval.segmentId != irInterval.segmentId) continue
-
-                val distance =
-                    abs(redInterval.endSamplePosition - irInterval.endSamplePosition)
-
-                if (
-                    distance <= HEART_RATE_FUSION_INTERVAL_MATCH_TOLERANCE_SAMPLES &&
-                    distance < bestDistance
-                ) {
-                    bestIndex = index
-                    bestDistance = distance
-                }
-            }
-
-            if (bestIndex < 0) continue
-
-            redUsed[bestIndex] = true
-            val redInterval = redIntervals[bestIndex]
-
-            val fusedIntervalSec =
-                (irInterval.intervalSec * irWeight +
-                        redInterval.intervalSec * redWeight) / totalWeight
-
-            val fusedEndPosition =
-                (irInterval.endSamplePosition * irWeight +
-                        redInterval.endSamplePosition * redWeight) / totalWeight
-
-            fused += IbiInterval(
-                intervalSec = fusedIntervalSec,
-                endSampleIndex = fusedEndPosition.roundToLong(),
-                segmentId = irInterval.segmentId,
-                endSamplePosition = fusedEndPosition
-            )
-        }
-
-        return fused.sortedBy { it.endSamplePosition }
-    }
-
-    private fun selectHigherScoreChannel(
-        ir: HeartRateEstimate,
-        red: HeartRateEstimate,
-        previousBpm: Double?
-    ): HeartRateEstimate {
-        val irScore = calculateChannelSelectionScore(ir, previousBpm)
-        val redScore = calculateChannelSelectionScore(red, previousBpm)
-        return if (irScore >= redScore) ir else red
-    }
-
-    private fun calculateChannelSelectionScore(
-        estimate: HeartRateEstimate,
-        previousBpm: Double?
-    ): Double {
-        val continuity = calculateHeartRateContinuityScore(
-            bpm = estimate.bpm.toDouble(),
-            previousBpm = previousBpm
-        )
-
-        return (estimate.qualityScore * 0.75 + continuity * 0.25)
-            .coerceIn(0.0, 1.0)
-    }
-
-    private fun calculateHeartRateContinuityScore(
-        bpm: Double,
-        previousBpm: Double?
-    ): Double {
-        if (previousBpm == null) return 1.0
-
-        return (1.0 -
-                abs(bpm - previousBpm) /
-                HEART_RATE_FUSION_CONTINUITY_SCALE_BPM)
-            .coerceIn(0.0, 1.0)
-    }
-
-    private fun isTwoToOneHarmonicPair(
-        firstBpm: Double,
-        secondBpm: Double
-    ): Boolean {
-        val larger = maxOf(firstBpm, secondBpm)
-        val smaller = minOf(firstBpm, secondBpm)
-        if (smaller <= 0.0) return false
-
-        return abs(larger / smaller - 2.0) <=
-                HEART_RATE_FUSION_HARMONIC_RATIO_TOLERANCE
-    }
-
-    private fun weightedAverage(
-        first: Double,
-        second: Double,
-        firstWeight: Double,
-        secondWeight: Double
-    ): Double {
-        val totalWeight = firstWeight + secondWeight
-        if (totalWeight <= 0.0) return (first + second) / 2.0
-        return (first * firstWeight + second * secondWeight) / totalWeight
-    }
-
-    private fun weightedAverageNullable(
-        first: Double?,
-        second: Double?,
-        firstWeight: Double,
-        secondWeight: Double
-    ): Double? {
-        return when {
-            first != null && second != null ->
-                weightedAverage(
-                    first = first,
-                    second = second,
-                    firstWeight = firstWeight,
-                    secondWeight = secondWeight
-                )
-
-            first != null -> first
-            second != null -> second
-            else -> null
-        }
-    }
-
-    private fun decorateFusionDiagnostics(
-        base: HeartRateDiagnostics,
-        ir: HeartRateAnalysisResult,
-        red: HeartRateAnalysisResult,
-        combined: HeartRateAnalysisResult?,
-        source: HeartRateFusionSource,
-        fusionLog: String
-    ): HeartRateDiagnostics {
-        return base.copy(
-            // 기존 CSV의 ir_* 컬럼은 실제 IR 접촉/DC 진단값으로 유지한다.
-            irDcMean = ir.diagnostics.irDcMean,
-            irMin = ir.diagnostics.irMin,
-            irMax = ir.diagnostics.irMax,
-
-            fusionSource = source,
-            fusionLog = fusionLog,
-
-            irProcessingState = ir.diagnostics.processingState,
-            irCalculatedBpm =
-                ir.estimate?.bpm ?: ir.diagnostics.calculatedBpm,
-            irQualityScore =
-                ir.estimate?.qualityScore ?: ir.diagnostics.qualityScore,
-            irAcceptedIntervalRatio =
-                ir.estimate?.acceptedIntervalRatio
-                    ?: ir.diagnostics.acceptedIntervalRatio,
-            irRawSdsdMs =
-                ir.estimate?.peakFitSdsdMs ?: ir.diagnostics.rawSdsdMs,
-
-            redProcessingState = red.diagnostics.processingState,
-            redCalculatedBpm =
-                red.estimate?.bpm ?: red.diagnostics.calculatedBpm,
-            redQualityScore =
-                red.estimate?.qualityScore ?: red.diagnostics.qualityScore,
-            redAcceptedIntervalRatio =
-                red.estimate?.acceptedIntervalRatio
-                    ?: red.diagnostics.acceptedIntervalRatio,
-            redRawSdsdMs =
-                red.estimate?.peakFitSdsdMs ?: red.diagnostics.rawSdsdMs,
-
-            combinedProcessingState = combined?.diagnostics?.processingState,
-            combinedCalculatedBpm =
-                combined?.estimate?.bpm
-                    ?: combined?.diagnostics?.calculatedBpm,
-            combinedQualityScore =
-                combined?.estimate?.qualityScore
-                    ?: combined?.diagnostics?.qualityScore,
-            combinedAcceptedIntervalRatio =
-                combined?.estimate?.acceptedIntervalRatio
-                    ?: combined?.diagnostics?.acceptedIntervalRatio,
-            combinedRawSdsdMs =
-                combined?.estimate?.peakFitSdsdMs
-                    ?: combined?.diagnostics?.rawSdsdMs
-        )
-    }
-
-    private fun selectMostInformativeFailure(
-        ir: HeartRateAnalysisResult,
-        red: HeartRateAnalysisResult,
-        combined: HeartRateAnalysisResult?
+    private fun selectMoreInformativeFailure(
+        first: HeartRateAnalysisResult,
+        second: HeartRateAnalysisResult
     ): HeartRateAnalysisResult {
-        val candidates = listOfNotNull(ir, red, combined)
-
-        return candidates.maxWithOrNull(
+        return listOf(first, second).maxWithOrNull(
             compareBy<HeartRateAnalysisResult> {
                 failureInformationRank(it.diagnostics.processingState)
             }.thenBy {
                 it.diagnostics.validIbiCount
-            }.thenBy {
-                it.diagnostics.rawIbiCount
-            }.thenBy {
-                it.diagnostics.detectedPeakCount
             }
-        ) ?: ir
+        ) ?: first
     }
 
     private fun failureInformationRank(
         state: HeartRateProcessingState
     ): Int {
         return when (state) {
-            HeartRateProcessingState.INVALID_IBI -> 100
-            HeartRateProcessingState.BPM_OUT_OF_RANGE -> 95
-            HeartRateProcessingState.INSUFFICIENT_PEAKS -> 90
-            HeartRateProcessingState.MOTION_ARTIFACT -> 85
-            HeartRateProcessingState.ABRUPT_SIGNAL_CHANGE -> 80
-            HeartRateProcessingState.AMPLITUDE_UNSTABLE -> 75
-            HeartRateProcessingState.HIGH_SPECTRAL_ENTROPY -> 70
-            HeartRateProcessingState.LOW_SPECTRAL_CONCENTRATION -> 65
-            HeartRateProcessingState.SIGNAL_TOO_WEAK -> 60
-            HeartRateProcessingState.SIGNAL_SATURATED -> 55
-            HeartRateProcessingState.NO_CONTACT -> 50
-            HeartRateProcessingState.PACKET_LOSS -> 40
-            HeartRateProcessingState.COLLECTING -> 10
-            HeartRateProcessingState.VALID -> 110
-            HeartRateProcessingState.HELD_PREVIOUS -> 5
+            HeartRateProcessingState.MOTION_ARTIFACT -> 100
+            HeartRateProcessingState.SIGNAL_SATURATED -> 95
+            HeartRateProcessingState.NO_CONTACT -> 90
+            HeartRateProcessingState.ABRUPT_SIGNAL_CHANGE -> 85
+            HeartRateProcessingState.AMPLITUDE_UNSTABLE -> 80
+            HeartRateProcessingState.HIGH_SPECTRAL_ENTROPY -> 75
+            HeartRateProcessingState.LOW_SPECTRAL_CONCENTRATION -> 70
+            HeartRateProcessingState.INVALID_IBI -> 65
+            HeartRateProcessingState.BPM_OUT_OF_RANGE -> 60
+            HeartRateProcessingState.INSUFFICIENT_PEAKS -> 50
+            HeartRateProcessingState.SIGNAL_TOO_WEAK -> 40
+            HeartRateProcessingState.PACKET_LOSS -> 30
+            HeartRateProcessingState.COLLECTING -> 20
+            HeartRateProcessingState.HELD_PREVIOUS -> 10
+            HeartRateProcessingState.VALID -> 0
         }
     }
-
-    /**
-     * 최근 최대 8초의 단일 PPG 채널 window에서 HR과 상세 실패 사유를 함께 계산한다.
-     *
-     * requiredPolarity가 지정되면 해당 방향 peak만 평가한다.
-     * stable path selector가 IR positive를 primary로 고정하고 fallback 시점만 제어한다.
-     */
-    private fun estimateHeartRateFromBuffer(
-        signalBuffer: ArrayDeque<Int>,
-        contactBuffer: ArrayDeque<Int>,
-        imuMotion: ImuMotionSummary?,
-        source: HeartRateFusionSource,
-        channelLabel: String,
-        requiredPolarity: HeartRatePeakPolarity? = null
+    private fun analyzeGreenHeartRate(
+        requiredPolarity: HeartRatePeakPolarity,
+        imuMotion: ImuMotionSummary?
     ): HeartRateAnalysisResult {
-        val sampleRateHz = 100.0
-        val cleanWindow = buildLatestCleanHeartRateWindow(
-            signalBuffer = signalBuffer,
-            contactBuffer = contactBuffer
-        )
+        val sampleRateHz = POTCH_PPG_SAMPLE_RATE_HZ
+        val cleanWindow = buildLatestCleanHeartRateWindow()
         val signal = cleanWindow.signal
-        val contactSignal = cleanWindow.contactSignal
+        val contactSignal = signal
 
-        val irDcMean = contactSignal.takeIf { it.isNotEmpty() }?.average()
-        val irMin = contactSignal.minOrNull()
-        val irMax = contactSignal.maxOrNull()
+        val greenDcMean = contactSignal.takeIf { it.isNotEmpty() }?.average()
+        val greenMin = contactSignal.minOrNull()
+        val greenMax = contactSignal.maxOrNull()
         val maxRawSampleDelta = calculateMaxConsecutiveDifference(signal)
 
         fun diagnostics(
@@ -2930,12 +1081,12 @@ class PotchDataProcessor(
             return HeartRateDiagnostics(
                 processingState = state,
                 message = message,
-                analysisSegmentId = currentAnalysisSegmentId,
+                analysisSegmentId = analysisSegmentId,
                 windowSampleCount = signal.size,
                 windowSeconds = signal.size / sampleRateHz,
-                irDcMean = irDcMean,
-                irMin = irMin,
-                irMax = irMax,
+                greenDcMean = greenDcMean,
+                greenMin = greenMin,
+                greenMax = greenMax,
                 acRobustAmplitude = acRobustAmplitude,
                 amplitudeCoefficientOfVariation = amplitudeCoefficientOfVariation,
                 spectralConcentration = spectralConcentration,
@@ -2964,6 +1115,10 @@ class PotchDataProcessor(
                 sdsdMs = selectedCandidate?.sdsdSec?.times(1000.0),
                 qualityScore = qualityScore,
                 calculatedBpm = selectedCandidate?.finalBpm?.roundToInt(),
+                source = HeartRateSource.GREEN,
+                sourceLog = "Green PPG 단일 채널",
+                meanPeakInterpolationOffsetMs = selectedCandidate?.meanInterpolationOffsetMs,
+                maxPeakInterpolationOffsetMs = selectedCandidate?.maxInterpolationOffsetMs,
                 imuMaxDeltaG = imuMotion?.maxDeltaG,
                 imuP95DeltaG = imuMotion?.p95DeltaG,
                 imuMotionExceedanceRatio = imuMotion?.exceedanceRatio,
@@ -2989,15 +1144,15 @@ class PotchDataProcessor(
         }
 
         if (
-            irDcMean == null ||
-            irDcMean < HEART_RATE_CONTACT_DC_MIN ||
-            (irMax ?: 0.0) < HEART_RATE_CONTACT_DC_MIN
+            greenDcMean == null ||
+            greenDcMean < HEART_RATE_CONTACT_DC_MIN ||
+            (greenMax ?: 0.0) < HEART_RATE_CONTACT_DC_MIN
         ) {
             return HeartRateAnalysisResult(
                 estimate = null,
                 diagnostics = diagnostics(
                     state = HeartRateProcessingState.NO_CONTACT,
-                    message = "$channelLabel PPG 접촉 신호 없음/약함: DC=${irDcMean?.let { "%.1f".format(it) } ?: "-"}"
+                    message = "Green PPG 접촉 신호 없음/약함: DC=${greenDcMean?.let { "%.1f".format(it) } ?: "-"}"
                 )
             )
         }
@@ -3014,17 +1169,17 @@ class PotchDataProcessor(
                 estimate = null,
                 diagnostics = diagnostics(
                     state = HeartRateProcessingState.SIGNAL_SATURATED,
-                    message = "$channelLabel PPG 포화: ${(saturationRatio * 100.0).let { "%.1f".format(it) }}%"
+                    message = "Green PPG 포화: ${(saturationRatio * 100.0).let { "%.1f".format(it) }}%"
                 )
             )
         }
 
-        if (signal.size < heartRateMinSamples) {
+        if (signal.size < MIN_HR_SAMPLES) {
             return HeartRateAnalysisResult(
                 estimate = null,
                 diagnostics = diagnostics(
                     state = HeartRateProcessingState.COLLECTING,
-                    message = "$channelLabel PPG 심박 신호 수집 중: ${signal.size}/$heartRateMinSamples samples"
+                    message = "Green PPG 심박 신호 수집 중: ${signal.size}/$MIN_HR_SAMPLES samples"
                 )
             )
         }
@@ -3041,7 +1196,7 @@ class PotchDataProcessor(
                 estimate = null,
                 diagnostics = diagnostics(
                     state = HeartRateProcessingState.SIGNAL_TOO_WEAK,
-                    message = "$channelLabel PPG AC 진폭 부족: robust amplitude=${"%.2f".format(acRobustAmplitude)}",
+                    message = "Green PPG AC 진폭 부족: robust amplitude=${"%.2f".format(acRobustAmplitude)}",
                     acRobustAmplitude = acRobustAmplitude,
                     preprocess = preprocessResult
                 )
@@ -3109,7 +1264,7 @@ class PotchDataProcessor(
         ) {
             return spectralDiagnostics(
                 state = HeartRateProcessingState.ABRUPT_SIGNAL_CHANGE,
-                message = "$channelLabel PPG 장시간 artifact 과다: " +
+                message = "Green PPG 장시간 artifact 과다: " +
                         "longest=${preprocessResult.longestInterpolatedRun}, " +
                         "ratio=${"%.3f".format(longArtifactRatio)}"
             )
@@ -3177,7 +1332,7 @@ class PotchDataProcessor(
                     signal = positiveTop,
                     sampleRateHz = sampleRateHz,
                     bufferStartSampleIndex = bufferStartSampleIndex,
-                    segmentId = currentAnalysisSegmentId,
+                    segmentId = analysisSegmentId,
                     polarity = HeartRatePeakPolarity.POSITIVE,
                     excludedPeakMask = preprocessResult.excludedPeakMask
                 )
@@ -3194,7 +1349,7 @@ class PotchDataProcessor(
                     signal = negativeTop,
                     sampleRateHz = sampleRateHz,
                     bufferStartSampleIndex = bufferStartSampleIndex,
-                    segmentId = currentAnalysisSegmentId,
+                    segmentId = analysisSegmentId,
                     polarity = HeartRatePeakPolarity.NEGATIVE,
                     excludedPeakMask = preprocessResult.excludedPeakMask
                 )
@@ -3235,7 +1390,7 @@ class PotchDataProcessor(
             val failureState = when {
                 // 3초부터 계산을 시도하지만, 6초 이전 실패는 데이터 부족 가능성이 커서
                 // 확정 실패가 아니라 COLLECTING으로 남긴다.
-                signal.size < heartRateAdaptiveFitPreferredSamples ->
+                signal.size < ADAPTIVE_FIT_PREFERRED_SAMPLES ->
                     HeartRateProcessingState.COLLECTING
 
                 maxDetectedPeakCount < 4 ->
@@ -3258,7 +1413,7 @@ class PotchDataProcessor(
 
             val message = when (failureState) {
                 HeartRateProcessingState.COLLECTING ->
-                    "adaptive peak fitting용 IBI 추가 수집 중: ${signal.size}/$heartRateAdaptiveFitPreferredSamples samples"
+                    "adaptive peak fitting용 IBI 추가 수집 중: ${signal.size}/$ADAPTIVE_FIT_PREFERRED_SAMPLES samples"
 
                 HeartRateProcessingState.INSUFFICIENT_PEAKS ->
                     "유효 peak 부족: 최대 ${maxDetectedPeakCount}개 검출"
@@ -3422,8 +1577,8 @@ class PotchDataProcessor(
             intervalCount = bestFit.usedIntervals.size,
             averageIntervalSec = avgInterval,
             qualityScore = qualityScore,
-            source = source,
-            fusionLog = "$channelLabel 단일 채널 HR 분석",
+            source = HeartRateSource.GREEN,
+            sourceLog = "Green 단일 채널 HR 분석",
             selectedThresholdPercent = bestFit.thresholdPercent,
             selectedPeakThreshold = bestFit.thresholdOffset,
             selectedPolarity = bestFit.polarity,
@@ -3450,7 +1605,7 @@ class PotchDataProcessor(
             estimate = estimate,
             diagnostics = diagnostics(
                 state = HeartRateProcessingState.VALID,
-                message = "$channelLabel PPG 심박수 정상 검출: $bpm bpm",
+                message = "Green PPG 심박수 정상 검출: $bpm bpm",
                 acRobustAmplitude = acRobustAmplitude,
                 amplitudeCoefficientOfVariation = amplitudeCoefficientOfVariation,
                 spectralConcentration = spectralQuality?.concentration,
@@ -3463,12 +1618,12 @@ class PotchDataProcessor(
                 calculatedBpm = bpm
             )
         )
-    }
 
+    }
     private fun preprocessPpgForHeartRate(
         rawSignal: List<Double>
     ): PpgPreprocessResult {
-        val sampleRateHz = 100.0
+        val sampleRateHz = POTCH_PPG_SAMPLE_RATE_HZ
 
         if (rawSignal.isEmpty()) {
             return PpgPreprocessResult(
@@ -3519,21 +1674,6 @@ class PotchDataProcessor(
         )
     }
 
-    private data class PpgArtifactRepairStats(
-        val excludedPeakMask: BooleanArray,
-        val interpolatedSampleCount: Int,
-        val excludedPeakSampleCount: Int,
-        val longestRun: Int,
-        val longArtifactSampleCount: Int
-    )
-
-    /**
-     * 주변 median + MAD로 outlier sample을 찾은 뒤 연속 run 단위로 보정한다.
-     *
-     * - 짧은 run: 양쪽 정상 sample 사이를 선형 보간
-     * - 긴 run: 필터 폭주 방지를 위해 동일하게 연결하되 long artifact로 기록
-     * - 모든 보정 run 주변은 peak 검출에서 제외
-     */
     private fun interpolateShortPpgArtifacts(
         data: DoubleArray,
         halfWindowSamples: Int,
@@ -3735,16 +1875,6 @@ class PotchDataProcessor(
         return output
     }
 
-    /**
-     * 여러 이동평균 임계값 후보를 시험하고 가장 신뢰할 수 있는 peak fitting 결과를 선택한다.
-     *
-     * 선택 기준:
-     * 1. 최종 BPM이 40~180 범위
-     * 2. raw/정제 IBI가 충분함
-     * 3. SDSD가 작음
-     * 4. IBI 후처리에서 너무 많은 interval이 제거되지 않음
-     * 5. 비슷한 결과라면 더 많은 interval을 유지한 후보를 우선함
-     */
     private fun findBestHeartRatePeakFit(
         signal: DoubleArray,
         sampleRateHz: Double,
@@ -3991,10 +2121,6 @@ class PotchDataProcessor(
         )
     }
 
-    /**
-     * 중심 정렬 이동평균을 O(n) prefix-sum 방식으로 계산한다.
-     * 양 끝에서는 사용할 수 있는 실제 구간 길이만으로 평균을 낸다.
-     */
     private fun calculateCenteredMovingAverage(
         signal: DoubleArray,
         windowSamples: Int
@@ -4021,12 +2147,6 @@ class PotchDataProcessor(
         }
     }
 
-    /**
-     * signal > movingAverage + offset인 연속 구간을 ROI로 보고,
-     * 각 ROI 내부에서 가장 높은 sample 하나만 peak 후보로 선택한다.
-     *
-     * ROI가 너무 가까이 붙어 있으면 생리적 최소 peak 거리 안에서 더 높은 peak만 유지한다.
-     */
     private fun detectHeartRatePeaksByRoi(
         signal: DoubleArray,
         movingAverage: DoubleArray,
@@ -4100,14 +2220,6 @@ class PotchDataProcessor(
         return distanceFiltered
     }
 
-    /**
-     * 정수 sample index로 검출된 peak를 3점 포물선 보간으로 보정한다.
-     *
-     * y[-1], y[0], y[+1]을 지나는 포물선의 꼭짓점 위치를 구하며,
-     * 검출된 중심 sample을 기준으로 최대 ±0.5 sample까지만 이동시킨다.
-     * 100Hz에서는 최대 ±5ms 보정이며, 새로운 센서 정보를 만드는 것이 아니라
-     * 이산 sampling으로 생긴 10ms 격자 오차를 줄이는 추정이다.
-     */
     private fun refineHeartRatePeakPositions(
         signal: DoubleArray,
         peakIndices: List<Int>
@@ -4162,10 +2274,6 @@ class PotchDataProcessor(
         return peakIndex.toDouble() + boundedOffset
     }
 
-    /**
-     * IBI successive difference의 표준편차(SDSD)를 초 단위로 계산한다.
-     * 최소 3개 IBI가 있어야 두 개 이상의 successive difference를 만들 수 있다.
-     */
     private fun calculateSdsd(
         intervalsSec: List<Double>
     ): Double? {
@@ -4209,12 +2317,6 @@ class PotchDataProcessor(
         return if (cv.isFinite()) cv else null
     }
 
-    /**
-     * 이상치 제거 전 raw IBI 품질을 0~1로 정규화한다.
-     *
-     * 한두 개의 나쁜 IBI를 제거한 뒤 남은 interval만 규칙적인 후보가
-     * 높은 quality를 받지 않도록 raw SDSD/CV/유지율/개수/생리범위를 함께 사용한다.
-     */
     private fun calculateRawIntervalQualityScore(
         rawSdsdSec: Double,
         rawIbiCv: Double,
@@ -4258,7 +2360,7 @@ class PotchDataProcessor(
     private fun buildHeartRateIntervals(
         peakPositions: List<Double>,
         bufferStartSampleIndex: Long,
-        sampleRateHz: Double = 100.0,
+        sampleRateHz: Double = POTCH_PPG_SAMPLE_RATE_HZ,
         segmentId: Long,
         enforcePhysiologicalRange: Boolean = true
     ): MutableList<IbiInterval> {
@@ -4368,10 +2470,6 @@ class PotchDataProcessor(
                 sorted[upper] * fraction
     }
 
-    /**
-     * 최근 window를 1초 블록으로 나눠 각 블록의 robust AC amplitude를 구한 뒤
-     * 그 amplitude들의 CV를 계산한다. 센서 압력/접촉이 초마다 크게 달라지면 커진다.
-     */
     private fun calculateWindowAmplitudeCoefficientOfVariation(
         signal: DoubleArray,
         sampleRateHz: Double
@@ -4398,12 +2496,6 @@ class PotchDataProcessor(
         return calculateCoefficientOfVariation(amplitudes)
     }
 
-    /**
-     * 8초 이하의 band-pass BVP에서 HR 허용 대역의 간단한 periodogram을 계산한다.
-     *
-     * concentration = 가장 강한 주파수 bin power / 전체 HR 대역 power
-     * entropy       = power 분포의 정규화 Shannon entropy
-     */
     private fun calculateHeartRateSpectralQuality(
         signal: DoubleArray,
         sampleRateHz: Double
@@ -4497,12 +2589,6 @@ class PotchDataProcessor(
         return maxDelta
     }
 
-    /**
-     * 연속 sample 변화량의 지정 percentile을 계산한다.
-     *
-     * 최대값 하나만 사용하면 정상 맥파의 가파른 한 지점이나 단발성 spike 때문에
-     * 전체 HR window가 거부될 수 있으므로, abrupt-change gate에는 robust percentile을 쓴다.
-     */
     private fun calculateConsecutiveDifferencePercentile(
         values: List<Double>,
         percentile: Double
@@ -4538,16 +2624,16 @@ class PotchDataProcessor(
         var previousMagnitude: Double? = null
         val deltas = mutableListOf<Double>()
 
-        for (i in imuData.indices step 6) {
-            if (i + 5 >= imuData.size) break
+        for (i in imuData.indices step 12) {
+            if (i + 11 >= imuData.size) break
 
             val xRaw = readInt16LittleEndian(imuData, i)
             val yRaw = readInt16LittleEndian(imuData, i + 2)
             val zRaw = readInt16LittleEndian(imuData, i + 4)
 
-            val xG = xRaw / HEART_RATE_IMU_LSB_PER_G
-            val yG = yRaw / HEART_RATE_IMU_LSB_PER_G
-            val zG = zRaw / HEART_RATE_IMU_LSB_PER_G
+            val xG = xRaw / IMU_LSB_PER_G
+            val yG = yRaw / IMU_LSB_PER_G
+            val zG = zRaw / IMU_LSB_PER_G
 
             val magnitude = sqrt(
                 xG * xG +
@@ -4639,418 +2725,221 @@ class PotchDataProcessor(
                         amplitudeScore * 0.15
                 ).coerceIn(0.0, 1.0)
     }
-
-    /**
-     * Zephyr의 crc16_ccitt 방식과 맞춘 CRC16 계산 함수.
-     *
-     * 특징:
-     * - 초기값: 0xFFFF
-     * - LSB-first
-     * - reflected 방식
-     *
-     * 펌웨어에서 계산한 CRC와 앱에서 계산한 CRC가 같아야
-     * Super Frame이 정상적으로 수신되었다고 볼 수 있다.
-     */
-    private fun zephyrCrc16(data: ByteArray): Int {
-        // CRC 초기값
-        var crc = 0xFFFF
-
-        // 모든 바이트를 순회하면서 CRC 갱신
-        for (byte in data) {
-            /**
-             * e = seed ^ *src
-             *
-             * 현재 CRC의 하위 8비트와 입력 byte를 XOR한다.
-             */
-            val e = (crc and 0xFF) xor (byte.toInt() and 0xFF)
-
-            /**
-             * f = e ^ (e << 4)
-             *
-             * Zephyr CRC 구현에 맞춘 중간값 계산.
-             */
-            val f = e xor ((e shl 4) and 0xFF)
-
-            /**
-             * seed = (seed >> 8) ^ (f << 8) ^ (f << 3) ^ (f >> 4)
-             *
-             * 계산 결과는 16-bit 범위로 유지해야 하므로 마지막에 & 0xFFFF를 적용한다.
-             */
-            crc =
-                ((crc shr 8) xor
-                        ((f shl 8) and 0xFFFF) xor
-                        ((f shl 3) and 0xFFFF) xor
-                        (f shr 4)) and 0xFFFF
-        }
-
-        // 최종 CRC16 값 반환
-        return crc
-    }
-
-    /**
-     * lastLog만 간단히 갱신하는 보조 함수.
-     *
-     * 매번 _state.update { it.copy(lastLog = ...) }를 반복하지 않기 위해 사용한다.
-     */
-    private fun updateLog(message: String) {
-        _state.update {
-            it.copy(lastLog = message)
-        }
-    }
-
-    private fun addPacketError(
-        type: String,
-        message: String,
-        fragCounter: Int? = null
-    ) {
-        _state.update { current ->
-            val updatedErrors = listOf(
-                PacketErrorLog(
-                    type = type,
-                    message = message,
-                    fragCounter = fragCounter
-                )
-            ) + current.recentPacketErrors
-
-            current.copy(
-                lastLog = message,
-                recentPacketErrors = updatedErrors.take(8)
+    private fun buildHeartRateGraphData(
+        estimate: HeartRateEstimate?,
+        diagnostics: HeartRateDiagnostics
+    ): HeartRateGraphData {
+        val clean = buildLatestCleanHeartRateWindow()
+        if (clean.signal.isEmpty()) {
+            return HeartRateGraphData(
+                processingState = diagnostics.processingState,
+                retainedBufferSampleCount =
+                    clean.retainedBufferSampleCount,
+                cleanSegmentSampleCount =
+                    clean.cleanSegmentSampleCount,
+                description = diagnostics.message
             )
         }
-    }
 
-    private fun counterDistance(expected: Int, actual: Int): Int {
-        // counter는 12bit라서 0~4095 순환
-        return (actual - expected) and 0x0FFF
-    }
+        val preprocess = preprocessPpgForHeartRate(clean.signal)
+        val start = clean.startSamplePosition.toDouble()
 
-    /**
-     * 테스트용 정상 Mini Packet 생성 함수.
-     *
-     * 실제 BLE에서 들어온 것처럼 204 bytes packet을 만든다.
-     * - 앞 2 bytes: Mini Header
-     * - 나머지 202 bytes: Payload
-     */
-    private fun makeDebugMiniPacket(
-        counter: Int,
-        prefix: Int = 0x5,
-        payloadStartWithSuperHeader: Boolean = true
-    ): ByteArray {
-        val packet = ByteArray(fragmentSize) { 0x00 }
-
-        val miniHeader = ((prefix and 0xF) shl 12) or (counter and 0x0FFF)
-
-        packet[0] = ((miniHeader shr 8) and 0xFF).toByte()
-        packet[1] = (miniHeader and 0xFF).toByte()
-
-        if (payloadStartWithSuperHeader) {
-            packet[2] = 0xAA.toByte()
-            packet[3] = 0xAA.toByte()
+        fun toRelativeIndex(position: Double): Int? {
+            val value = (position - start).roundToInt()
+            return value.takeIf { it in preprocess.bandPassed.indices }
         }
 
-        return packet
+        val detected = estimate?.detectedPeakSamplePositions
+            ?.mapNotNull(::toRelativeIndex)
+            .orEmpty()
+        val accepted = estimate?.acceptedIbiEndSamplePositions
+            ?.mapNotNull(::toRelativeIndex)
+            .orEmpty()
+        val rejected = estimate?.rejectedIbiEndSamplePositions
+            ?.mapNotNull(::toRelativeIndex)
+            .orEmpty()
+        val reference = estimate?.referencePeakSamplePosition
+            ?.let(::toRelativeIndex)
+
+        return HeartRateGraphData(
+            source =
+                if (estimate != null) HeartRateSource.GREEN
+                else HeartRateSource.NONE,
+            processingState = diagnostics.processingState,
+            selectedPolarity =
+                estimate?.selectedPolarity
+                    ?: diagnostics.selectedPolarity,
+            samples = preprocess.bandPassed.toList(),
+            peakSampleIndices = accepted,
+            detectedPeakSampleIndices = detected,
+            acceptedPeakSampleIndices = accepted,
+            rejectedPeakSampleIndices = rejected,
+            referencePeakSampleIndex = reference,
+            retainedBufferSampleCount =
+                clean.retainedBufferSampleCount,
+            cleanSegmentSampleCount =
+                clean.cleanSegmentSampleCount,
+            interpolatedSampleCount =
+                preprocess.interpolatedSampleCount,
+            excludedPeakSampleCount =
+                preprocess.excludedPeakSampleCount,
+            calculatedBpm = estimate?.bpm,
+            qualityScore =
+                estimate?.qualityScore ?: diagnostics.qualityScore,
+            description = diagnostics.message
+        )
     }
 
-    /**
-     * 1. 길이 오류 테스트.
-     *
-     * Mini Packet은 반드시 204 bytes여야 하는데,
-     * 일부러 197 bytes짜리 packet을 넣어서 Length Drop이 뜨는지 확인한다.
-     */
-    fun debugTestLengthError() {
-        val wrongLengthPacket = ByteArray(197) { 0x00 }
-        processIncomingData(wrongLengthPacket)
-    }
-
-    /**
-     * 2. Mini Header prefix 오류 테스트.
-     *
-     * Mini Header 상위 4bit는 반드시 0x5여야 한다.
-     * 일부러 0x3으로 만들어 Header Prefix Drop이 뜨는지 확인한다.
-     */
-    fun debugTestMiniHeaderError() {
-        val wrongHeaderPacket = makeDebugMiniPacket(
-            counter = 1,
-            prefix = 0x3,
-            payloadStartWithSuperHeader = true
-        )
-
-        processIncomingData(wrongHeaderPacket)
-    }
-
-    /**
-     * 3. Sequence 손실 테스트.
-     *
-     * 다음에 counter 10이 와야 하는 상황을 만든 뒤,
-     * 실제로는 counter 12를 넣어서 10, 11번 packet이 손실된 것처럼 만든다.
-     */
-    fun debugTestSequenceLoss() {
-        buffer.clear()
-        expectedFragCounter = 10
-
-        val skippedPacket = makeDebugMiniPacket(
-            counter = 12,
-            prefix = 0x5,
-            payloadStartWithSuperHeader = true
-        )
-
-        processIncomingData(skippedPacket)
-    }
-
-    /**
-     * 4. Super Header 오류 테스트.
-     *
-     * 새 Super Frame의 시작 payload는 0xAA 0xAA여야 한다.
-     * 일부러 0xBB 0xBB로 시작하게 해서 Sync/Super Header 오류를 확인한다.
-     */
-    fun debugTestSuperHeaderError() {
-        buffer.clear()
-        expectedFragCounter = null
-
-        val packet = makeDebugMiniPacket(
-            counter = 20,
-            prefix = 0x5,
-            payloadStartWithSuperHeader = false
-        )
-
-        packet[2] = 0xBB.toByte()
-        packet[3] = 0xBB.toByte()
-
-        processIncomingData(packet)
-    }
-
-    /**
-     * 5. CRC 오류 테스트.
-     *
-     * 1212 bytes짜리 Super Frame을 직접 만들고,
-     * CRC 값을 일부러 틀리게 넣어서 CRC 오류가 뜨는지 확인한다.
-     */
-    fun debugTestCrcError() {
-        buffer.clear()
-        expectedFragCounter = null
-
-        val superFrame = ByteArray(superFrameSize) { 0x00 }
-
-        // Super Header
-        superFrame[0] = 0xAA.toByte()
-        superFrame[1] = 0xAA.toByte()
-
-        // NTC raw 예시값
-        superFrame[2] = 0x05
-        superFrame[3] = 0xDC.toByte()
-
-        // Timestamp 예시값, little endian
-        superFrame[4] = 0x01
-        superFrame[5] = 0x02
-        superFrame[6] = 0x03
-        superFrame[7] = 0x04
-
-        // Battery raw 예시값
-        superFrame[8] = 0x0A
-        superFrame[9] = 0xAF.toByte()
-
-        // CRC를 일부러 틀리게 넣음
-        superFrame[10] = 0x12
-        superFrame[11] = 0x34
-
-        parseSuperFrame(superFrame)
-    }
-
-    /**
-     * 6. Counter wrap-around 테스트.
-     *
-     * counter는 4095 다음에 0으로 돌아가야 한다.
-     * 4095 → 0 순서가 정상으로 처리되는지 확인한다.
-     */
-    fun debugTestCounterWrapAround() {
-        reset()
-
-        val packet4095 = makeDebugMiniPacket(
-            counter = 4095,
-            prefix = 0x5,
-            payloadStartWithSuperHeader = true
-        )
-
-        val packet0 = makeDebugMiniPacket(
-            counter = 0,
-            prefix = 0x5,
-            payloadStartWithSuperHeader = false
-        )
-
-        processIncomingData(packet4095)
-        processIncomingData(packet0)
-
-        updateLog("DEBUG: Counter wrap-around test completed. 4095 → 0")
-    }
-
-    /**
-     * 분석 데이터의 연속성이 끊겼음을 기록하고 새 segment를 시작한다.
-     *
-     * HR raw ring buffer는 유지하되 sample마다 segment ID를 기록하고,
-     * 최신 segment의 연속 clean tail만 분석해 gap 전후 peak가 연결되지 않게 한다.
-     * ArousalCalculator에도 같은 segment ID를 전달해 RR/HRV 계산을 분리한다.
-     */
-    private fun advanceAnalysisSegment(reason: String) {
-        currentAnalysisSegmentId += 1L
-        resetHeartRatePathSelection()
-
-        // HR raw ring buffer는 보존하지만 새 sample에는 증가된 segment ID가 기록된다.
-        // HR 계산은 최신 segment의 연속 clean tail만 사용하므로 gap 전후 IBI가 연결되지 않는다.
-        lastValidHeartRateInputTimestampMillis = null
-
-        // 마지막 정상 HR과 timestamp는 화면 표시용으로만 최대 10초 유지한다.
-        // ArousalCalculator의 RR/HRV buffer는 segment 경계에서 엄격하게 분리한다.
-
-        val gapState = arousalCalculator.onDataDiscontinuity(
-            newSegmentId = currentAnalysisSegmentId,
-            reason = reason
-        )
-
-        Log.w(
-            TAG,
-            "Analysis continuity break: segment=$currentAnalysisSegmentId, reason=$reason"
-        )
-        dataLogger?.logDebug(
-            TAG,
-            "Analysis continuity break: segment=$currentAnalysisSegmentId, reason=$reason",
-            "W"
-        )
-
-        val nowMillis = System.currentTimeMillis()
-        val ageMillis =
-            lastValidHeartRateEstimateTimestampMillis?.let {
-                (nowMillis - it).coerceAtLeast(0L)
-            }
-        val canHoldPrevious =
-            lastValidHeartRateEstimate != null &&
-                    ageMillis != null &&
-                    ageMillis <= heartRateDisplayStaleTimeoutMillis
-
-        val packetLossDiagnostics = HeartRateDiagnostics(
-            processingState =
-                if (canHoldPrevious) {
-                    HeartRateProcessingState.HELD_PREVIOUS
-                } else {
-                    HeartRateProcessingState.PACKET_LOSS
-                },
-            underlyingFailureReason =
-                if (canHoldPrevious) {
-                    HeartRateProcessingState.PACKET_LOSS
-                } else {
-                    null
-                },
-            message =
-                if (canHoldPrevious) {
-                    "데이터 연속성 중단($reason); 마지막 정상 HR을 ${ageMillis}ms 동안 유지"
-                } else {
-                    "데이터 연속성 중단: $reason"
-                },
-            analysisSegmentId = currentAnalysisSegmentId,
-            displayedBpm =
-                if (canHoldPrevious) lastValidHeartRateEstimate?.bpm else null,
-            heartRateFresh = false,
-            heartRateAgeMillis = ageMillis,
-            retainedBufferSampleCount = heartRateCombinedBuffer.size,
-            cleanSegmentSampleCount = 0,
-            crcErrorCount = _state.value.crcErrorCount,
-            sequenceLossCount = _state.value.missingSequenceErrors,
-            estimatedLostPacketCount = _state.value.estimatedLostPacketCount
-        )
-
-        _state.update { current ->
-            current.copy(
-                heartRateBpm =
-                    if (canHoldPrevious) lastValidHeartRateEstimate?.bpm else null,
-                heartRateQuality =
-                    if (canHoldPrevious) lastValidHeartRateEstimate?.qualityScore else null,
-                heartRateFresh = false,
-                heartRateAgeMillis = ageMillis,
-                heartRateDiagnostics = packetLossDiagnostics,
-                heartRateCalculationStatus = MetricCalculationStatus(
-                    state = MetricCalculationState.REJECTED,
-                    message = packetLossDiagnostics.message
-                ),
-                heartRateGraphData = HeartRateGraphData(
-                    source = HeartRateFusionSource.NONE,
-                    processingState = HeartRateProcessingState.PACKET_LOSS,
-                    retainedBufferSampleCount = heartRateCombinedBuffer.size,
-                    cleanSegmentSampleCount = 0,
-                    calculatedBpm =
-                        if (canHoldPrevious) lastValidHeartRateEstimate?.bpm else null,
-                    qualityScore =
-                        if (canHoldPrevious) lastValidHeartRateEstimate?.qualityScore else null,
-                    description = "데이터 연속성 중단으로 새 clean segment 수집 대기: $reason"
-                ),
-                arousalState = gapState,
-                analysisSegmentId = currentAnalysisSegmentId,
-                continuityBreakCount = current.continuityBreakCount + 1,
-                lastContinuityBreakReason = reason
-            )
-        }
-    }
-
-    private fun currentMiniPacketIndexInFrame(): Int {
-        // payload 202B 단위로 몇 개 쌓였는지 계산
-        // 다음에 들어올 패킷 번호이므로 +1
-        return (buffer.size / 202) + 1
-    }
-
-    private fun logMissFrameAndClear(reason: String, missPacketNum: Int?) {
-        // Fragment 길이/헤더/순서 오류는 샘플 연속성이 끊긴 사건이다.
-        advanceAnalysisSegment(reason)
-
-        currentFrameErrors.add(reason)
-
-        if (missPacketNum != null) {
-            currentFrameMissPacketNums.add(missPacketNum.coerceIn(1, 6))
-        }
-
-        val partialFrame = buffer.toByteArray()
-
-        val missEventTimeMillis = System.currentTimeMillis()
-
-        dataLogger?.logSuperFrame(
-            phoneTimeMillis = missEventTimeMillis,
-            timestamp = null,
-            superFrame = partialFrame,
-            complete = "miss",
-            missPacketNum = currentFrameMissPacketNums
-                .distinct()
-                .sorted()
-                .joinToString("|"),
-            errorLog = currentFrameErrors.joinToString(" / ")
-        )
-
-        dataLogger?.logHeartRateDiagnostics(
-            phoneTimeMillis = missEventTimeMillis,
-            timestamp = null,
-            diagnostics = _state.value.heartRateDiagnostics
-        )
-
-        buffer.clear()
-        currentFrameErrors.clear()
-        currentFrameMissPacketNums.clear()
-    }
-    @Synchronized
-    fun updateMicroMovementBandPass(
-        lowCutHz: Double,
-        highCutHz: Double
-    ) {
-        arousalCalculator.updateMicroMovementBandPass(
-            lowCutHz = lowCutHz,
-            highCutHz = highCutHz
+    private fun breakContinuity(reason: String) {
+        burstPackets.clear()
+        analysisSegmentId += 1L
+        resetPolaritySelection()
+        arousalCalculator.reset()
+        stabilityCalculator?.onContinuityBreak(
+            reason = reason,
+            newSegmentId = analysisSegmentId
         )
 
         _state.update {
             it.copy(
-                lastLog = "Micro BPF updated: %.2f~%.2fHz".format(lowCutHz, highCutHz)
+                continuityBreakCount =
+                    it.continuityBreakCount + 1,
+                analysisSegmentId = analysisSegmentId,
+                lastContinuityBreakReason = reason,
+                lastLog = reason
             )
         }
-
-        dataLogger?.logDebug(
-            TAG,
-            "Micro BPF updated: low=$lowCutHz, high=$highCutHz"
-        )
     }
 
+    private fun registerPacketError(
+        type: String,
+        message: String,
+        sequence: Int? = null,
+        crc: Boolean = false
+    ) {
+        Log.w(TAG, message)
+        dataLogger?.logDebug(TAG, message, "W")
+
+        _state.update { current ->
+            current.copy(
+                crcErrorCount =
+                    current.crcErrorCount + if (crc) 1 else 0,
+                damagedPacketCount =
+                    current.damagedPacketCount + 1,
+                recentPacketErrors =
+                    (current.recentPacketErrors +
+                            PacketErrorLog(type, message, sequence))
+                        .takeLast(20),
+                lastLog = message
+            )
+        }
+    }
+
+    private fun decodeGreenPpg(data: ByteArray): IntArray {
+        return IntArray(data.size / 2) { index ->
+            readUInt16(data, index * 2)
+        }
+    }
+
+    private fun readUInt16(data: ByteArray, offset: Int): Int =
+        (data[offset].toInt() and 0xFF) or
+                ((data[offset + 1].toInt() and 0xFF) shl 8)
+
+    private fun readUInt32(data: ByteArray, offset: Int): Long =
+        (data[offset].toLong() and 0xFF) or
+                ((data[offset + 1].toLong() and 0xFF) shl 8) or
+                ((data[offset + 2].toLong() and 0xFF) shl 16) or
+                ((data[offset + 3].toLong() and 0xFF) shl 24)
+
+    private fun crc16CcittFalse(
+        data: ByteArray,
+        offset: Int,
+        length: Int
+    ): Int {
+        var crc = 0xFFFF
+        for (index in offset until offset + length) {
+            crc = crc xor ((data[index].toInt() and 0xFF) shl 8)
+            repeat(8) {
+                crc = if (crc and 0x8000 != 0) {
+                    ((crc shl 1) xor 0x1021) and 0xFFFF
+                } else {
+                    (crc shl 1) and 0xFFFF
+                }
+            }
+        }
+        return crc
+    }
+
+    companion object {
+        private const val TAG = "PotchDataProcessor"
+
+        private const val PACKET_SIZE = 142
+        private const val PACKETS_PER_BURST = 8
+        private const val CRC_OFFSET = 140
+        private const val IMU_OFFSET = 12
+        private const val PPG_OFFSET = 108
+        private const val HEADER_0: Byte = 0xA5.toByte()
+        private const val HEADER_1: Byte = 0x5A.toByte()
+
+        private const val POTCH_PPG_SAMPLE_RATE_HZ = 128.0
+        private const val IMU_LSB_PER_G = 8192.0
+
+        // Green PPG 128 Hz 기준 최대 12초 분석창.
+        private const val HR_WINDOW_SAMPLES = 1536
+        // 12초 분석창보다 3초 더 보관해 continuity/정리 과정의 여유를 둔다.
+        private const val MAX_HR_BUFFER_SAMPLES = 1920
+        // 초기 계산 시작 조건은 기존과 동일하게 약 3초를 유지한다.
+        private const val MIN_HR_SAMPLES = 384
+        private const val ADAPTIVE_FIT_PREFERRED_SAMPLES = 768
+
+        private const val HEART_RATE_MIN_BPM = 40
+        private const val HEART_RATE_MAX_BPM = 180
+        private const val HEART_RATE_MOVING_AVERAGE_SECONDS = 1.5
+
+        private const val HEART_RATE_MIN_USED_INTERVAL_COUNT = 4
+        private const val HEART_RATE_MIN_ACCEPTED_INTERVAL_RATIO = 0.60
+        private const val HEART_RATE_MAX_RAW_SDSD_SEC = 0.200
+        private const val HEART_RATE_MIN_PHYSIOLOGICAL_INTERVAL_RATIO = 0.75
+        private const val HEART_RATE_RAW_IBI_CV_ZERO_SCORE = 0.30
+        private const val HEART_RATE_PREFERRED_USED_INTERVAL_COUNT = 8
+
+        private const val HEART_RATE_MIN_SPECTRAL_CONCENTRATION = 0.12
+        private const val HEART_RATE_MAX_SPECTRAL_ENTROPY = 0.82
+        private const val HEART_RATE_MAX_AMPLITUDE_CV = 0.50
+
+        private const val HEART_RATE_ABRUPT_CHANGE_PERCENTILE = 0.99
+        private const val HEART_RATE_ABRUPT_CHANGE_SCORE_ZERO_RATIO = 1.00
+        private const val HEART_RATE_MAX_ABRUPT_CHANGE_RATIO = 1.50
+
+        // Green uint16 전용. 실제 착용 로그에 따라 조정 가능하다.
+        private const val HEART_RATE_PPG_ADC_MAX = 65535.0
+        private const val HEART_RATE_CONTACT_DC_MIN = 100.0
+        private const val HEART_RATE_SATURATION_HIGH = 65000.0
+        private const val HEART_RATE_MIN_ROBUST_AC_AMPLITUDE = 10.0
+
+        private const val HEART_RATE_MOTION_DELTA_THRESHOLD_G = 0.15
+        private const val HEART_RATE_MOTION_P95_THRESHOLD_G = 0.15
+        private const val HEART_RATE_MOTION_MIN_EXCEEDANCE_RATIO = 0.05
+        private const val HEART_RATE_MOTION_SINGLE_SPIKE_HARD_G = 0.40
+
+        private const val HEART_RATE_SPIKE_INTERPOLATION_MAX_SAMPLES = 10
+        private const val HEART_RATE_SPIKE_PEAK_EXCLUSION_MARGIN_SAMPLES = 2
+        private const val HEART_RATE_MAX_EXCLUDED_SAMPLE_RATIO = 0.40
+
+        private const val HEART_RATE_COUNT_PENALTY_SEC = 0.020
+        private const val HEART_RATE_REJECTION_PENALTY_SEC = 0.050
+
+        private const val POLARITY_FAILURES_BEFORE_FALLBACK = 3
+        private const val POLARITY_CONFIRM_FRAMES = 3
+        private const val POLARITY_RECOVERY_CONFIRM_FRAMES = 3
+        private const val POLARITY_PENDING_BPM_TOLERANCE = 8
+
+        private const val HEART_RATE_HOLD_MILLIS = 10_000L
+
+        private val HEART_RATE_THRESHOLD_PERCENT_CANDIDATES =
+            doubleArrayOf(
+                5.0, 10.0, 15.0, 20.0, 25.0, 30.0,
+                40.0, 50.0, 75.0, 100.0, 150.0, 200.0, 300.0
+            )
+    }
 }

@@ -27,6 +27,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import androidx.core.content.edit
+import java.util.UUID
 
 /**
  * Potch BLE 수신을 백그라운드에서도 유지하기 위한 ForegroundService.
@@ -55,6 +56,19 @@ class PotchBleForegroundService : Service() {
 
         const val EXTRA_MICRO_LOW_CUT = "extra_micro_low_cut"
         const val EXTRA_MICRO_HIGH_CUT = "extra_micro_high_cut"
+
+        /** Potch510 Data Characteristic에 raw command payload를 전달한다. */
+        const val ACTION_WRITE_COMMAND =
+            "com.leejang.sleeptandard.Potch.ACTION_WRITE_COMMAND"
+        const val EXTRA_COMMAND_PAYLOAD = "extra_command_payload"
+        const val EXTRA_COMMAND_WITHOUT_RESPONSE = "extra_command_without_response"
+
+        /**
+         * 구버전 펌웨어 호환용 action.
+         * 최신 펌웨어는 0x01 write를 수신해도 LED/Vibe를 실행하지 않으므로 전송하지 않는다.
+         */
+        const val ACTION_TRIGGER_LED_FLASH =
+            "com.leejang.sleeptandard.Potch.ACTION_TRIGGER_LED_FLASH"
         /**
          * Potch 수신 시작 명령.
          *
@@ -105,17 +119,20 @@ class PotchBleForegroundService : Service() {
     /**
      * Potch 수신 데이터를 CSV 파일로 저장하는 객체.
      *
-     * Super Frame이 들어올 때마다 내부 저장소 파일에 append한다.
+     * 완성된 1초 Burst가 들어올 때마다 내부 저장소 파일에 append한다.
      */
     private var dataLogger: PotchDataLogger? = null
 
     /**
      * BLE로 들어온 raw byte packet을 실제 SensorData로 파싱하는 객체.
      *
-     * 204B mini packet을 모아서 1212B super frame으로 만들고,
-     * CRC / sequence / header 검사를 수행한다.
+     * 142B 서브 패킷 8개를 모아 1초 Burst로 만들고,
+     * CRC-16 CCITT-FALSE / uint16 sequence / header 검사를 수행한다.
      */
     private var dataProcessor: PotchDataProcessor? = null
+
+    /** 안정점수, 안정 episode, 개인 기준선 생명주기를 관리한다. */
+    private var stabilityCalculator: PotchStabilityCalculator? = null
 
     /**
      * 실제 BLE 스캔, 연결, GATT, notify 구독, 재연결을 담당하는 객체.
@@ -189,6 +206,44 @@ class PotchBleForegroundService : Service() {
                     "I"
                 )
             }
+            ACTION_TRIGGER_LED_FLASH -> {
+                // 최신 펌웨어의 rx_write_cb에서 trigger_led_flash() 호출이 제거되었다.
+                // 의미 없는 0x01 write를 보내지 않고 명확한 호환성 로그만 남긴다.
+                val started = bleManager?.triggerLedFlash() ?: false
+                dataLogger?.logDebug(
+                    TAG,
+                    "ACTION_TRIGGER_LED_FLASH unsupported_by_firmware=true, started=$started",
+                    "W"
+                )
+            }
+
+            ACTION_WRITE_COMMAND -> {
+                val payload = intent.getByteArrayExtra(EXTRA_COMMAND_PAYLOAD)
+                val withoutResponse = intent.getBooleanExtra(
+                    EXTRA_COMMAND_WITHOUT_RESPONSE,
+                    true
+                )
+
+                if (payload == null || payload.isEmpty()) {
+                    dataLogger?.logDebug(
+                        TAG,
+                        "ACTION_WRITE_COMMAND ignored: payload is null or empty",
+                        "W"
+                    )
+                } else {
+                    // 위 null/empty 검사 이후 payload는 ByteArray로 smart cast된다.
+                    val started = bleManager?.writeCommand(
+                        payload = payload,
+                        withoutResponse = withoutResponse
+                    ) ?: false
+                    dataLogger?.logDebug(
+                        TAG,
+                        "ACTION_WRITE_COMMAND bytes=${payload.size}, " +
+                                "withoutResponse=$withoutResponse, started=$started",
+                        if (started) "I" else "E"
+                    )
+                }
+            }
             ACTION_START -> {
                 isStoppingService = false
 
@@ -256,7 +311,12 @@ class PotchBleForegroundService : Service() {
      * 이미 생성되어 있다면 중복 생성하지 않는다.
      */
     private fun initializePotchObjects() {
-        if (dataLogger != null && dataProcessor != null && bleManager != null) {
+        if (
+            dataLogger != null &&
+            dataProcessor != null &&
+            stabilityCalculator != null &&
+            bleManager != null
+        ) {
             Log.d(TAG, "initializePotchObjects() skipped - objects already initialized")
             dataLogger?.logDebug(TAG, "initializePotchObjects() skipped - objects already initialized")
             return
@@ -268,8 +328,20 @@ class PotchBleForegroundService : Service() {
         // CSV 로그 저장 담당
         val logger = PotchDataLogger(applicationContext)
 
-        // BLE raw byte를 SensorData로 파싱하는 담당
-        val processor = PotchDataProcessor(dataLogger = logger)
+        // 안정 episode 후보와 개인 기준선을 앱 내부 SQLite에 저장한다.
+        val stableCandidateTable = StableCandidateTable(applicationContext)
+        val personalBaselineTable = PersonalBaselineTable(applicationContext)
+        val stability = PotchStabilityCalculator(
+            stableCandidateTable = stableCandidateTable,
+            personalBaselineTable = personalBaselineTable,
+            dataLogger = logger
+        )
+
+        // BLE raw byte를 SensorData로 파싱하고 안정점수 계산기로 전달한다.
+        val processor = PotchDataProcessor(
+            dataLogger = logger,
+            stabilityCalculator = stability
+        )
 
         // BLE 스캔/연결/notify 수신 담당
         val manager = PotchBleManager(
@@ -280,6 +352,7 @@ class PotchBleForegroundService : Service() {
 
         dataLogger = logger
         dataProcessor = processor
+        stabilityCalculator = stability
         bleManager = manager
 
         Log.i(TAG, "Potch objects initialized")
@@ -330,6 +403,7 @@ class PotchBleForegroundService : Service() {
 
                 // Service 내부 상태를 UI에서 볼 수 있게 공용 StateHolder에 전달
                 PotchServiceStateHolder.updateBleState(state)
+                stabilityCalculator?.onBleConnectionState(state.isConnected)
 
                 // BLE 상태에 따라 foreground notification 문구 변경
                 val text = when {
@@ -435,6 +509,9 @@ class PotchBleForegroundService : Service() {
         Log.i(TAG, "Permissions OK. Starting BLE scan.")
         dataLogger?.logDebug(TAG, "Permissions OK. Starting BLE scan.", "I")
 
+        // 앱 프로세스가 START_STICKY로 재생성되어도 동일 수면 session id를 재사용한다.
+        stabilityCalculator?.startSession(getOrCreateStabilitySessionId())
+        dataProcessor?.refreshStabilityState()
         bleManager?.startScan()
     }
 
@@ -454,6 +531,8 @@ class PotchBleForegroundService : Service() {
         if (manager == null) {
             Log.w(TAG, "stopPotchReceivingAndSave() - manager is null. Stop service only.")
             dataLogger?.logDebug(TAG, "stopPotchReceivingAndSave() - manager is null. Stop service only.", "W")
+            stabilityCalculator?.endSession()
+            clearStabilitySessionId()
             stopForeground(STOP_FOREGROUND_REMOVE)
 
             val notificationManager =
@@ -480,6 +559,13 @@ class PotchBleForegroundService : Service() {
             dataLogger?.logDebug(TAG, "Saving log on Dispatchers.IO", "I")
 
             val savedPath = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                val stabilitySummary = stabilityCalculator?.endSession()
+                dataLogger?.logDebug(
+                    TAG,
+                    "Stability session summary=$stabilitySummary",
+                    "I"
+                )
+                clearStabilitySessionId()
                 manager.saveCurrentLog()
             }
 
@@ -520,6 +606,10 @@ class PotchBleForegroundService : Service() {
     override fun onDestroy() {
         Log.w(TAG, "onDestroy() - ForegroundService destroyed")
         dataLogger?.logDebug(TAG, "onDestroy() - ForegroundService destroyed", "W")
+        // 정상 종료 경로에서 이미 호출됐다면 endSession()은 no-op summary를 반환한다.
+        // 시스템 종료 경로에서는 현재까지 완성된 안정 episode를 가능한 범위에서 보존한다.
+        runCatching { stabilityCalculator?.endSession() }
+
         // BLE 스캔/연결/GATT 자원 정리
         bleManager?.close()
 
@@ -686,6 +776,21 @@ class PotchBleForegroundService : Service() {
         dataLogger?.logDebug(TAG, "Permission check: bluetooth=$hasBluetoothPermissions, notification=$hasNotificationPermission")
 
         return hasBluetoothPermissions && hasNotificationPermission
+    }
+
+    private fun getOrCreateStabilitySessionId(): String {
+        val preferences = getSharedPreferences("potch_service", MODE_PRIVATE)
+        val existing = preferences.getString("stability_session_id", null)
+        if (!existing.isNullOrBlank()) return existing
+
+        val created = UUID.randomUUID().toString()
+        preferences.edit { putString("stability_session_id", created) }
+        return created
+    }
+
+    private fun clearStabilitySessionId() {
+        getSharedPreferences("potch_service", MODE_PRIVATE)
+            .edit { remove("stability_session_id") }
     }
 
     /**

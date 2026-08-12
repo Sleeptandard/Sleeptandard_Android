@@ -10,13 +10,20 @@ import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
+import android.bluetooth.BluetoothStatusCodes
 import android.bluetooth.le.ScanCallback
+import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
+import android.bluetooth.le.ScanSettings
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.ParcelUuid
 import android.util.Log
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -48,6 +55,19 @@ data class PotchBleState(
     // 기본값은 Android BLE 기본 MTU인 23
     val mtu: Int = 23,
 
+    // ble.c 펌웨어가 peripheral-initiated L2 보안을 요청하므로 bond 상태를 UI/로그에 노출한다.
+    val bondState: Int = BluetoothDevice.BOND_NONE,
+
+    // 일반 CCCD write까지 성공하여 실제 센서 notify를 받을 준비가 끝났는지 여부.
+    val isNotificationReady: Boolean = false,
+
+    // 연결 협상 후 선택된 PHY. Android 8.0 미만 또는 미보고 상태면 null.
+    val txPhy: Int? = null,
+    val rxPhy: Int? = null,
+
+    // 최신 펌웨어의 rx_write_cb는 0x01을 수신해도 LED/Vibe를 실행하지 않는다.
+    val supportsLedTrigger: Boolean = false,
+
     // 마지막으로 발생한 오류 메시지
     val lastError: String? = null,
 
@@ -55,7 +75,11 @@ data class PotchBleState(
     val lastLog: String = "BLE idle",
 
     // 마지막으로 저장된 로그 파일 경로
-    val lastSavedLogPath: String? = null
+    val lastSavedLogPath: String? = null,
+
+    // 발견된 Data Characteristic의 Write 지원 여부
+    val supportsWrite: Boolean = false,
+    val supportsWriteWithoutResponse: Boolean = false
 )
 
 /**
@@ -84,7 +108,7 @@ class PotchBleManager(
          * Android 앱은 연결 후 이 UUID를 가진 Service를 찾아야 한다.
          */
         val SERVICE_UUID: UUID =
-            UUID.fromString("00001234-0000-1000-8000-00805F9B34FB")
+            UUID.fromString("12345678-1234-5678-1234-56789abcdef0")
 
         /**
          * Potch 펌웨어에 정의된 BLE Characteristic UUID.
@@ -92,7 +116,7 @@ class PotchBleManager(
          * 실제 센서 데이터가 notify로 들어오는 통로다.
          */
         val CHAR_UUID: UUID =
-            UUID.fromString("00005678-0000-1000-8000-00805F9B34FB")
+            UUID.fromString("12345678-1234-5678-1234-56789abcdef1")
 
         /**
          * CCCD(Client Characteristic Configuration Descriptor) UUID.
@@ -113,12 +137,14 @@ class PotchBleManager(
         /**
          * 요청할 MTU 크기.
          *
-         * Potch는 한 번에 204 bytes notification을 보내므로,
-         * Android 기본 MTU 23으로는 부족하다.
-         *
-         * 247 정도로 요청하면 ATT payload를 충분히 크게 받을 수 있다.
+         * Potch510은 142 bytes notification을 보내므로 Android 기본 MTU 23으로는 부족하다.
+         * ATT notification payload는 MTU-3이므로 최소 MTU 145가 필요하다.
+         * 최신 펌웨어의 확장 여유까지 고려해 247을 요청한다.
          */
+        // 142B notification에는 최소 MTU 145가 필요하다.
+        // 펌웨어가 향후 204B notification까지 고려하므로 Android에서는 247을 요청한다.
         private const val TARGET_MTU = 247
+        private const val MIN_REQUIRED_MTU = 145
     }
 
     // 메인 스레드에서 재연결 딜레이 작업을 실행하기 위한 Handler
@@ -134,10 +160,10 @@ class PotchBleManager(
     private var reconnectAttempt = 0
 
     // 최대 재연결 시도 횟수
-    private val maxReconnectAttempts = 5
+    private val maxReconnectAttempts = 3
 
     // 재연결 시도 간격
-    private val reconnectDelayMs = 1000L
+    private val reconnectDelayMs = 2000L
 
     /**
      * Activity context 대신 applicationContext를 저장한다.
@@ -147,7 +173,77 @@ class PotchBleManager(
      */
     private val appContext = context.applicationContext
 
+    // 연결마다 MTU/서비스 탐색을 한 번만 시작하도록 막는 플래그.
+    private var gattSetupStarted = false
 
+    private var bondReceiverRegistered = false
+
+    /**
+     * ble.c 펌웨어가 peripheral 쪽에서 BT_SECURITY_L2를 요청하므로
+     * Android는 bond 상태를 관찰하고 UI/로그에만 반영한다.
+     * GATT 초기화와 CCCD 구독은 bond 완료를 기다리지 않고 즉시 진행한다.
+     */
+    private val bondStateReceiver = object : BroadcastReceiver() {
+        @SuppressLint("MissingPermission")
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action != BluetoothDevice.ACTION_BOND_STATE_CHANGED) return
+
+            val device = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
+            } ?: return
+
+            val activeDevice = gatt?.device ?: targetDevice ?: return
+            if (device.address != activeDevice.address) return
+
+            val newBondState = intent.getIntExtra(
+                BluetoothDevice.EXTRA_BOND_STATE,
+                BluetoothDevice.BOND_NONE
+            )
+            val previousBondState = intent.getIntExtra(
+                BluetoothDevice.EXTRA_PREVIOUS_BOND_STATE,
+                BluetoothDevice.BOND_NONE
+            )
+
+            _state.update {
+                it.copy(
+                    bondState = newBondState,
+                    lastLog = "Bond state changed: ${bondStateLabel(previousBondState)} -> ${bondStateLabel(newBondState)}"
+                )
+            }
+
+            dataLogger.logConnectionEvent(
+                event = "bond_state_changed",
+                message = "device=${getDeviceName(device) ?: TARGET_NAME}, " +
+                        "previous=${bondStateLabel(previousBondState)}, " +
+                        "current=${bondStateLabel(newBondState)}"
+            )
+
+            when (newBondState) {
+                BluetoothDevice.BOND_BONDED -> {
+                    dataLogger.logConnectionEvent(
+                        event = "bond_completed",
+                        message = "Peripheral-initiated L2 pairing/bonding completed"
+                    )
+                }
+
+                BluetoothDevice.BOND_NONE -> {
+                    if (previousBondState == BluetoothDevice.BOND_BONDING) {
+                        val msg =
+                            "Bluetooth pairing was canceled or failed. GATT setup continues, but the firmware may disconnect if L2 security is required."
+                        dataLogger.logConnectionEvent("bond_failed_or_canceled", msg)
+                        _state.update { it.copy(lastError = msg, lastLog = msg) }
+                    }
+                }
+            }
+        }
+    }
+
+    init {
+        registerBondStateReceiver()
+    }
 
     /**
      * Android 시스템의 BluetoothManager.
@@ -243,19 +339,23 @@ class PotchBleManager(
             // 그것도 없으면 "Unknown"으로 처리한다.
             val name = deviceName ?: advertisedName ?: "Unknown"
 
-            Log.d(TAG, "Scan result: name=$name")
-            if (name.contains(TARGET_NAME, ignoreCase = true)) {
-                dataLogger.logDebug(TAG, "Scan result target found: name=$name", "I")
-            }
+            val advertisedServices = result.scanRecord?.serviceUuids.orEmpty()
+            val hasTargetService = advertisedServices.any { it.uuid == SERVICE_UUID }
+            val nameMatches = name.contains(TARGET_NAME, ignoreCase = true)
 
+            Log.d(
+                TAG,
+                "Scan result: name=$name, targetService=$hasTargetService, rssi=${result.rssi}"
+            )
 
-            // 이름에 "Potch"가 포함된 기기를 찾으면 타겟으로 판단한다.
-            if (name.contains(TARGET_NAME, ignoreCase = true)) {
+            // 최신 펌웨어는 Service UUID를 광고하고, 일부 빌드는 기기 이름을 Scan Response에 둔다.
+            // 따라서 UUID를 1순위로 사용하고 이름은 구형/캐시 호환 fallback으로만 사용한다.
+            if (hasTargetService || nameMatches) {
                 val foundMsg =
                     if (isReconnecting) {
-                        "Found Potch again during reconnect scan: $name"
+                        "Found Potch during reconnect scan: name=$name, rssi=${result.rssi}"
                     } else {
-                        "Found target peripheral: $name"
+                        "Found target peripheral: name=$name, rssi=${result.rssi}"
                     }
 
                 log(foundMsg)
@@ -266,9 +366,7 @@ class PotchBleManager(
                 )
 
                 targetDevice = device
-
                 stopScan()
-
                 connect(device)
             }
         }
@@ -365,17 +463,18 @@ class PotchBleManager(
                         )
                     }
 
-                    gatt.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH)
+                    gattSetupStarted = false
 
-                    // Potch는 204 bytes notification을 보내므로 기본 MTU 23으로는 부족하다.
-                    // 먼저 MTU를 247로 요청하고, MTU 변경이 완료되면 서비스 탐색을 시작한다.
-                    val requested = gatt.requestMtu(TARGET_MTU)
-
-                    // MTU 요청 자체가 실패하면 그냥 바로 서비스 탐색을 진행한다.
-                    if (!requested) {
-                        log("MTU request failed. Discover services directly.")
-                        gatt.discoverServices()
+                    _state.update {
+                        it.copy(
+                            bondState = gatt.device.bondState,
+                            isNotificationReady = false,
+                            txPhy = null,
+                            rxPhy = null
+                        )
                     }
+
+                    beginGattSetup(gatt)
                 }
 
                 BluetoothProfile.STATE_DISCONNECTED -> {
@@ -399,6 +498,7 @@ class PotchBleManager(
                                 isScanning = false,
                                 isReconnecting = true,
                                 deviceName = name,
+                                isNotificationReady = false,
                                 lastLog = msg
                             )
                         }
@@ -411,6 +511,7 @@ class PotchBleManager(
                                 isScanning = false,
                                 isReconnecting = false,
                                 deviceName = null,
+                                isNotificationReady = false,
                                 lastLog = "Disconnected by user"
                             )
                         }
@@ -445,8 +546,37 @@ class PotchBleManager(
                 )
             }
 
+            if (status != BluetoothGatt.GATT_SUCCESS || mtu < MIN_REQUIRED_MTU) {
+                val failure =
+                    "Usable MTU negotiation failed: mtu=$mtu, status=$status, required>=$MIN_REQUIRED_MTU"
+                dataLogger.logConnectionEvent("mtu_too_small", failure)
+                error(failure)
+                gatt.disconnect()
+                return
+            }
+
             // MTU 설정 후 Potch Service를 찾기 위해 서비스 탐색 시작
             gatt.discoverServices()
+        }
+
+
+        @SuppressLint("MissingPermission")
+        override fun onPhyUpdate(
+            gatt: BluetoothGatt,
+            txPhy: Int,
+            rxPhy: Int,
+            status: Int
+        ) {
+            val msg = "PHY updated: tx=${phyLabel(txPhy)}, rx=${phyLabel(rxPhy)}, status=$status"
+            Log.i(TAG, msg)
+            dataLogger.logConnectionEvent("phy_updated", msg)
+            _state.update {
+                it.copy(
+                    txPhy = txPhy,
+                    rxPhy = rxPhy,
+                    lastLog = msg
+                )
+            }
         }
 
         /**
@@ -476,8 +606,42 @@ class PotchBleManager(
                 return
             }
 
-            // 나중에 참조할 수 있도록 저장
+            val supportsNotify =
+                characteristic.properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY != 0
+            val supportsWrite =
+                characteristic.properties and BluetoothGattCharacteristic.PROPERTY_WRITE != 0
+            val supportsWriteWithoutResponse =
+                characteristic.properties and
+                        BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE != 0
+
+            if (!supportsNotify) {
+                error("Data characteristic does not support Notify: $CHAR_UUID")
+                return
+            }
+
+            val propertyMsg =
+                "Characteristic properties: notify=$supportsNotify, " +
+                        "write=$supportsWrite, writeNoResponse=$supportsWriteWithoutResponse"
+            Log.i(TAG, propertyMsg)
+            dataLogger.logDebug(TAG, propertyMsg, "I")
+
+            if (!supportsWrite || !supportsWriteWithoutResponse) {
+                val mismatch =
+                    "Characteristic properties differ from ble.c protocol: expected Notify + Write + WriteWithoutResponse"
+                dataLogger.logConnectionEvent("characteristic_property_mismatch", mismatch)
+                Log.w(TAG, mismatch)
+            }
+
+            // 나중에 명령 Write와 Notify 구독에 사용할 수 있도록 저장한다.
             notifyCharacteristic = characteristic
+            _state.update {
+                it.copy(
+                    supportsWrite = supportsWrite,
+                    supportsWriteWithoutResponse = supportsWriteWithoutResponse,
+                    supportsLedTrigger = false,
+                    isNotificationReady = false
+                )
+            }
 
             // 이 characteristic의 notify를 활성화한다.
             enableNotification(gatt, characteristic)
@@ -506,9 +670,17 @@ class PotchBleManager(
                         message = msg
                     )
 
-                    log(msg)
+                    _state.update {
+                        it.copy(
+                            isNotificationReady = true,
+                            bondState = gatt.device.bondState,
+                            lastError = null,
+                            lastLog = msg
+                        )
+                    }
                 } else {
-                    val msg = "CCCD write failed: status=$status"
+                    val msg =
+                        "CCCD write failed: status=$status, bond=${bondStateLabel(gatt.device.bondState)}"
 
                     Log.e(TAG, msg)
                     dataLogger.logDebug(TAG, msg, "E")
@@ -561,6 +733,30 @@ class PotchBleManager(
                 // 수신된 raw byte 데이터를 파서로 전달
                 dataProcessor.processIncomingData(value)
             }
+        }
+
+
+        override fun onCharacteristicWrite(
+            gatt: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+            status: Int
+        ) {
+            if (characteristic.uuid != CHAR_UUID) return
+
+            val message = if (status == BluetoothGatt.GATT_SUCCESS) {
+                "Potch command write completed"
+            } else {
+                "Potch command write failed: status=$status"
+            }
+            dataLogger.logConnectionEvent(
+                event = if (status == BluetoothGatt.GATT_SUCCESS) {
+                    "command_write_success"
+                } else {
+                    "command_write_failed"
+                },
+                message = message
+            )
+            if (status == BluetoothGatt.GATT_SUCCESS) log(message) else error(message)
         }
     }
 
@@ -623,8 +819,18 @@ class PotchBleManager(
             )
         }
 
-        // 실제 BLE 스캔 시작
-        scanner?.startScan(scanCallback)
+        // 최신 펌웨어는 기기 이름보다 Service UUID 광고를 통신 식별자로 사용한다.
+        scanner?.startScan(
+            listOf(
+                ScanFilter.Builder()
+                    .setServiceUuid(ParcelUuid(SERVICE_UUID))
+                    .build()
+            ),
+            ScanSettings.Builder()
+                .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+                .build(),
+            scanCallback
+        )
     }
 
     /**
@@ -730,6 +936,7 @@ class PotchBleManager(
                 isScanning = false,
                 isReconnecting = false,
                 deviceName = null,
+                isNotificationReady = false,
                 lastSavedLogPath = savedPath,
                 lastLog = if (savedPath != null) {
                     "Disconnected. Super frame log saved: $savedPath"
@@ -738,6 +945,103 @@ class PotchBleManager(
                 }
             )
         }
+    }
+
+    /**
+     * Potch510 Data Characteristic으로 명령 payload를 전송한다.
+     *
+     * 최신 guide는 characteristic이 Write/Write Without Response를 지원한다고 명시하지만
+     * 명령 opcode와 payload 형식은 제공하지 않는다. 따라서 이 함수는 raw payload 전송만
+     * 담당하며, 수동 로깅 트리거 등의 실제 명령 바이트는 펌웨어 명세가 정해진 뒤 호출부에서 넣는다.
+     */
+    @SuppressLint("MissingPermission")
+    fun writeCommand(
+        payload: ByteArray,
+        withoutResponse: Boolean = true
+    ): Boolean {
+        if (payload.isEmpty()) {
+            error("Potch command payload is empty")
+            return false
+        }
+
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            appContext.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            error("Missing BLUETOOTH_CONNECT permission")
+            return false
+        }
+
+        val activeGatt = gatt ?: run {
+            error("Cannot write Potch command: GATT is not connected")
+            return false
+        }
+        val characteristic = notifyCharacteristic ?: run {
+            error("Cannot write Potch command: data characteristic is unavailable")
+            return false
+        }
+
+        val requestedWriteType = if (withoutResponse) {
+            BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+        } else {
+            BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+        }
+        val requiredProperty = if (withoutResponse) {
+            BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE
+        } else {
+            BluetoothGattCharacteristic.PROPERTY_WRITE
+        }
+
+        if (characteristic.properties and requiredProperty == 0) {
+            error(
+                if (withoutResponse) {
+                    "Potch characteristic does not support Write Without Response"
+                } else {
+                    "Potch characteristic does not support Write"
+                }
+            )
+            return false
+        }
+
+        val started = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            activeGatt.writeCharacteristic(
+                characteristic,
+                payload,
+                requestedWriteType
+            ) == BluetoothStatusCodes.SUCCESS
+        } else {
+            @Suppress("DEPRECATION")
+            characteristic.writeType = requestedWriteType
+            @Suppress("DEPRECATION")
+            characteristic.value = payload.copyOf()
+            @Suppress("DEPRECATION")
+            activeGatt.writeCharacteristic(characteristic)
+        }
+
+        if (started) {
+            dataLogger.logDebug(
+                TAG,
+                "Potch command write started: bytes=${payload.size}, withoutResponse=$withoutResponse",
+                "I"
+            )
+        } else {
+            error("Potch command write could not be started")
+        }
+        return started
+    }
+
+    /**
+     * 최신 펌웨어에서는 rx_write_cb가 payload를 기록만 하고 trigger_led_flash()를 호출하지 않는다.
+     * 0x01을 보내도 LED/Vibe가 실행되지 않으므로 기존 UI 명령을 명시적으로 차단한다.
+     * raw write 자체가 필요한 경우 writeCommand()를 직접 사용한다.
+     */
+    fun triggerLedFlash(): Boolean {
+        val msg =
+            "LED/Vibe command 0x01 is unsupported by the current firmware; command was not sent."
+        dataLogger.logConnectionEvent("led_trigger_unsupported", msg)
+        error(msg)
+        return false
     }
 
     /**
@@ -752,6 +1056,94 @@ class PotchBleManager(
         reconnectHandler.removeCallbacksAndMessages(null)
         stopScan()
         disconnect()
+        unregisterBondStateReceiver()
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun beginGattSetup(gatt: BluetoothGatt) {
+        // ble.c는 peripheral 쪽에서 L2 security를 요청한다.
+        // Android는 createBond()로 선행 강제하지 않고 GATT 협상을 바로 진행한다.
+        gatt.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val preferredMask =
+                BluetoothDevice.PHY_LE_1M_MASK or BluetoothDevice.PHY_LE_CODED_MASK
+            gatt.setPreferredPhy(
+                preferredMask,
+                preferredMask,
+                BluetoothDevice.PHY_OPTION_S8
+            )
+        }
+
+        val bondState = gatt.device.bondState
+        _state.update {
+            it.copy(
+                bondState = bondState,
+                lastLog =
+                    "Starting GATT setup immediately; peripheral may request L2 security. bond=${bondStateLabel(bondState)}"
+            )
+        }
+
+        dataLogger.logConnectionEvent(
+            event = "gatt_setup_started",
+            message = "bond=${bondStateLabel(bondState)}, forcedCreateBond=false"
+        )
+
+        requestMtuAndDiscoverServices(gatt)
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun requestMtuAndDiscoverServices(gatt: BluetoothGatt) {
+        if (gattSetupStarted) return
+        gattSetupStarted = true
+
+        val requested = gatt.requestMtu(TARGET_MTU)
+        dataLogger.logConnectionEvent(
+            event = "mtu_requested",
+            message = "requested=$TARGET_MTU, started=$requested"
+        )
+
+        if (!requested) {
+            log("MTU request could not start. Discovering services with current MTU.")
+            gatt.discoverServices()
+        }
+    }
+
+    private fun registerBondStateReceiver() {
+        if (bondReceiverRegistered) return
+
+        val filter = IntentFilter(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            appContext.registerReceiver(
+                bondStateReceiver,
+                filter,
+                Context.RECEIVER_NOT_EXPORTED
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            appContext.registerReceiver(bondStateReceiver, filter)
+        }
+        bondReceiverRegistered = true
+    }
+
+    private fun unregisterBondStateReceiver() {
+        if (!bondReceiverRegistered) return
+        runCatching { appContext.unregisterReceiver(bondStateReceiver) }
+        bondReceiverRegistered = false
+    }
+
+    private fun bondStateLabel(state: Int): String = when (state) {
+        BluetoothDevice.BOND_NONE -> "NONE"
+        BluetoothDevice.BOND_BONDING -> "BONDING"
+        BluetoothDevice.BOND_BONDED -> "BONDED"
+        else -> "UNKNOWN($state)"
+    }
+
+    private fun phyLabel(phy: Int): String = when (phy) {
+        BluetoothDevice.PHY_LE_1M -> "1M"
+        BluetoothDevice.PHY_LE_2M -> "2M"
+        BluetoothDevice.PHY_LE_CODED -> "CODED"
+        else -> "UNKNOWN($phy)"
     }
 
     /**
@@ -768,6 +1160,8 @@ class PotchBleManager(
     ) {
         Log.d(TAG,"enableNotification() Called")
         dataLogger.logDebug(TAG, "enableNotification() Called")
+
+
         // Android 로컬 쪽에서 해당 characteristic notify를 받을 준비를 한다.
         val notificationSet = gatt.setCharacteristicNotification(characteristic, true)
         if (!notificationSet) {
@@ -816,6 +1210,17 @@ class PotchBleManager(
             // GATT와 characteristic 참조 제거
             gatt = null
             notifyCharacteristic = null
+            gattSetupStarted = false
+            _state.update {
+                it.copy(
+                    supportsWrite = false,
+                    supportsWriteWithoutResponse = false,
+                    supportsLedTrigger = false,
+                    isNotificationReady = false,
+                    txPhy = null,
+                    rxPhy = null
+                )
+            }
         }
     }
 
@@ -933,25 +1338,28 @@ class PotchBleManager(
 
         if (reconnectAttempt >= maxReconnectAttempts) {
             reconnectAttempt = 0
-            isReconnecting = false
+            isReconnecting = true
 
-            val failMsg = "Direct reconnect attempts exceeded. Waiting for user action."
+            val fallbackMsg =
+                "Direct reconnect attempts exceeded. Falling back to Service UUID scan."
 
-            Log.e(TAG, failMsg)
+            Log.w(TAG, fallbackMsg)
 
             dataLogger.logConnectionEvent(
-                event = "direct_reconnect_failed",
-                message = failMsg
+                event = "direct_reconnect_scan_fallback",
+                message = fallbackMsg
             )
 
             _state.update {
                 it.copy(
-                    isReconnecting = false,
-                    isScanning = false,
-                    lastLog = failMsg
+                    isReconnecting = true,
+                    isScanning = true,
+                    lastError = null,
+                    lastLog = fallbackMsg
                 )
             }
 
+            startScanForReconnect()
             return
         }
 
@@ -1081,7 +1489,17 @@ class PotchBleManager(
             message = "BLE scan restarted for reconnect."
         )
 
-        scanner?.startScan(scanCallback)
+        scanner?.startScan(
+            listOf(
+                ScanFilter.Builder()
+                    .setServiceUuid(ParcelUuid(SERVICE_UUID))
+                    .build()
+            ),
+            ScanSettings.Builder()
+                .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+                .build(),
+            scanCallback
+        )
     }
 
     @SuppressLint("MissingPermission")
@@ -1110,6 +1528,7 @@ class PotchBleManager(
                 isScanning = false,
                 isReconnecting = false,
                 deviceName = null,
+                isNotificationReady = false,
                 lastSavedLogPath = savedPath,
                 lastLog = if (savedPath != null) {
                     "Reconnect stopped. Log saved: $savedPath"
@@ -1146,6 +1565,7 @@ class PotchBleManager(
                 isScanning = false,
                 isReconnecting = false,
                 deviceName = null,
+                isNotificationReady = false,
                 lastLog = "Reconnect stopped. Saving log..."
             )
         }
@@ -1160,6 +1580,7 @@ class PotchBleManager(
                 isScanning = false,
                 isReconnecting = false,
                 deviceName = null,
+                isNotificationReady = false,
                 lastSavedLogPath = savedPath,
                 lastLog = if (savedPath != null) {
                     "Log saved: $savedPath"

@@ -38,6 +38,40 @@ class PotchBleViewModel(
     /** 가장 최근 수면 단계 추론 결과 — UI에서 collectAsState()로 관찰 */
     val sleepStage = PotchServiceStateHolder.sleepStage
 
+    /**
+     * ble(3).c 및 iOS 구현과 동일하게 0x01 명령을 Write Without Response로 전송한다.
+     * 펌웨어에서는 이 Write를 받으면 trigger_led_flash()를 실행한다.
+     */
+    fun triggerLedFlash() {
+        val context = getApplication<Application>().applicationContext
+        val intent = Intent(context, PotchBleForegroundService::class.java).apply {
+            action = PotchBleForegroundService.ACTION_TRIGGER_LED_FLASH
+        }
+        ContextCompat.startForegroundService(context, intent)
+    }
+
+    /**
+     * Potch510 Data Characteristic으로 raw command payload를 보낸다.
+     * 실제 opcode/payload 규칙은 최신 펌웨어 명령 명세가 확정된 뒤 호출부에서 구성한다.
+     */
+    fun writePotchCommand(
+        payload: ByteArray,
+        withoutResponse: Boolean = true
+    ) {
+        require(payload.isNotEmpty()) { "Potch command payload must not be empty" }
+
+        val context = getApplication<Application>().applicationContext
+        val intent = Intent(context, PotchBleForegroundService::class.java).apply {
+            action = PotchBleForegroundService.ACTION_WRITE_COMMAND
+            putExtra(PotchBleForegroundService.EXTRA_COMMAND_PAYLOAD, payload)
+            putExtra(
+                PotchBleForegroundService.EXTRA_COMMAND_WITHOUT_RESPONSE,
+                withoutResponse
+            )
+        }
+        ContextCompat.startForegroundService(context, intent)
+    }
+
     fun startScan() {
         val context = getApplication<Application>().applicationContext
 
@@ -190,6 +224,6 @@ class PotchBleViewModel(
 
     private fun isSupportedInternalLogFile(file: File): Boolean {
         val ext = file.extension.lowercase()
-        return ext == "csv" || ext == "txt"
+        return ext == "bin" || ext == "csv" || ext == "txt"
     }
 }
