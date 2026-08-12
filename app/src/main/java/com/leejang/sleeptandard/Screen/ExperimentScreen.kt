@@ -16,7 +16,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -35,6 +37,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -57,6 +60,7 @@ import com.leejang.sleeptandard.Potch.PpgRespirationGraphData
 import com.leejang.sleeptandard.Potch.PotchBleState
 import com.leejang.sleeptandard.Potch.PotchBleViewModel
 import com.leejang.sleeptandard.Potch.SensorData
+import com.leejang.sleeptandard.Potch.SleepStagePotch
 import com.leejang.sleeptandard.Potch.StabilityEpisodePhase
 import com.leejang.sleeptandard.Potch.StabilityState
 import java.text.SimpleDateFormat
@@ -75,8 +79,6 @@ fun ExperimentScreen(
     val internalLogFiles by viewModel.internalLogFiles.collectAsState()
     val lastExportMessage by viewModel.lastExportMessage.collectAsState()
 
-    var microLowCutHz by rememberSaveable { mutableFloatStateOf(0.5f) }
-    var microHighCutHz by rememberSaveable { mutableFloatStateOf(5.0f) }
     val selectedLogNames = remember { mutableStateListOf<String>() }
     val greenSamples = remember { mutableStateListOf<Int>() }
 
@@ -128,14 +130,6 @@ fun ExperimentScreen(
     }
     // ──────────────────────────────────────────────────────────────
 
-    LaunchedEffect(microLowCutHz, microHighCutHz, bleState.isConnected) {
-        if (!bleState.isConnected || microLowCutHz >= microHighCutHz) return@LaunchedEffect
-        kotlinx.coroutines.delay(250)
-        viewModel.updateMicroMovementBandPass(
-            lowCutHz = microLowCutHz.toDouble(),
-            highCutHz = microHighCutHz.toDouble()
-        )
-    }
 
     LaunchedEffect(sensorData?.timestamp, sensorData?.sequenceEnd) {
         val samples = sensorData?.ppgData?.let(::decodeGreenPpg) ?: IntArray(0)
@@ -304,12 +298,6 @@ fun ExperimentScreen(
         StabilitySection(stabilityState)
         PersonalBaselineSection(stabilityState)
 
-        BandPassControl(
-            lowCutHz = microLowCutHz,
-            highCutHz = microHighCutHz,
-            onLowChange = { microLowCutHz = it.coerceAtMost(microHighCutHz - 0.1f) },
-            onHighChange = { microHighCutHz = it.coerceAtLeast(microLowCutHz + 0.1f) }
-        )
 
         LogFileSection(
             files = internalLogFiles,
@@ -918,20 +906,7 @@ private fun MetricStatusCard(
     }
 }
 
-@Composable
-private fun BandPassControl(
-    lowCutHz: Float,
-    highCutHz: Float,
-    onLowChange: (Float) -> Unit,
-    onHighChange: (Float) -> Unit
-) {
-    SectionCard("Micro movement Band-pass") {
-        Text("Low cut ${"%.1f".format(lowCutHz)} Hz", color = Color.White)
-        Slider(value = lowCutHz, onValueChange = onLowChange, valueRange = 0.1f..4.5f)
-        Text("High cut ${"%.1f".format(highCutHz)} Hz", color = Color.White)
-        Slider(value = highCutHz, onValueChange = onHighChange, valueRange = 0.5f..10.0f)
-    }
-}
+
 
 @Composable
 private fun LogFileSection(
