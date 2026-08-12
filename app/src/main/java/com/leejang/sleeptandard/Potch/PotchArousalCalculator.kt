@@ -1544,17 +1544,25 @@ class PotchArousalCalculator(
         return lastState
     }
 
-    /** 최신 PotchDataProcessor API 호환 진입점. */
+    /**
+     * PotchDataProcessor API 호환 진입점.
+     *
+     * analysisSegmentId는 DataProcessor가 가진 값을 명시적으로 전달받는다.
+     * 내부 segment와 다르면 process()의 continuity guard가 onDataDiscontinuity()를 호출해
+     * HRV/RR 등 segment 기반 buffer가 잘못된 segment의 데이터를 섞지 않도록 동기화한다.
+     * 기본값은 기존 외부 호출부와의 호환성을 위해 유지한다.
+     */
     fun processBurst(
         sensorData: SensorData,
         heartRateEstimate: HeartRateEstimate?,
-        heartRateStatus: MetricCalculationStatus
+        heartRateStatus: MetricCalculationStatus,
+        analysisSegmentId: Long = currentAnalysisSegmentId
     ): ArousalState {
         return process(
             sensorData = sensorData,
             heartRateEstimate = heartRateEstimate,
             heartRateSignalStatus = heartRateStatus,
-            analysisSegmentId = currentAnalysisSegmentId
+            analysisSegmentId = analysisSegmentId
         )
     }
 
