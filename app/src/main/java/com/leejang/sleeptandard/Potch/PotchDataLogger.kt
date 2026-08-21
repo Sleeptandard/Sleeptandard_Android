@@ -41,8 +41,8 @@ data class StabilityEpisodeLogRecord(
 class PotchDataLogger(context: Context) {
     private val appContext = context.applicationContext
     private var isLogging = false
-    private var workingSuperFrameRawFile: File? = null
-    private var superFrameRawOutput: BufferedOutputStream? = null
+    private var workingPacketRawFile: File? = null
+    private var packetRawOutput: BufferedOutputStream? = null
     private var workingDebugFile: File? = null
     private var workingArousalFile: File? = null
     private var workingHeartRateFile: File? = null
@@ -56,10 +56,10 @@ class PotchDataLogger(context: Context) {
         val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
         val directory = File(appContext.filesDir, INTERNAL_LOG_DIR_NAME).apply { mkdirs() }
 
-        closeSuperFrameRawOutput()
-        workingSuperFrameRawFile =
-            File(directory, "potch_superframe_raw_data_$timestamp.bin")
-        superFrameRawOutput = FileOutputStream(workingSuperFrameRawFile, false).buffered()
+        closePacketRawOutput()
+        workingPacketRawFile =
+            File(directory, "potch_packet_raw_data_$timestamp.bin")
+        packetRawOutput = FileOutputStream(workingPacketRawFile, false).buffered()
 
         workingDebugFile = File(directory, "potch_debug_log_$timestamp.txt")
         workingArousalFile = File(directory, "potch_arousal_state_log_$timestamp.csv")
@@ -400,7 +400,7 @@ class PotchDataLogger(context: Context) {
 
     @Synchronized
     fun startIfNeeded() {
-        if (!isLogging || workingSuperFrameRawFile == null || superFrameRawOutput == null) start()
+        if (!isLogging || workingPacketRawFile == null || packetRawOutput == null) start()
     }
 
     @Synchronized
@@ -411,34 +411,44 @@ class PotchDataLogger(context: Context) {
     }
 
     /**
-     * CRC/sequence/burst-slot 검사를 모두 통과한 완성 superframe의 원시 패킷 바이트를
-     * 헤더나 구분자 없이 수신 순서 그대로 binary 파일에 이어 붙인다.
+     * 수신한 142-byte BLE 패킷을 앱 수신 시각과 함께 고정 길이 binary record로 기록한다.
      *
-     * Potch510의 현재 형식은 142 bytes x 8 packets = 1,136 bytes다.
+     * Record format (150 bytes):
+     * - [0..7]   phone time, Unix epoch milliseconds, little-endian unsigned 64-bit
+     * - [8..149] raw BLE packet, 142 bytes
+     *
+     * 길이가 다른 notification은 record alignment를 깨므로 이 함수에서 기록하지 않는다.
      */
     @Synchronized
-    fun logCompleteSuperFrame(rawSuperFrame: ByteArray) {
+    fun logRawPacket(phoneTimeMillis: Long, rawPacket: ByteArray) {
         if (!isLogging) return
-        if (rawSuperFrame.size != COMPLETE_SUPERFRAME_SIZE_BYTES) {
+        if (rawPacket.size != PACKET_SIZE_BYTES) {
             workingDebugFile?.appendText(
-                "${phoneTime(System.currentTimeMillis())} W/PotchDataLogger: " +
-                        "완성 superframe 크기 불일치: " +
-                        "expected=$COMPLETE_SUPERFRAME_SIZE_BYTES actual=${rawSuperFrame.size}\n",
+                "${phoneTime(phoneTimeMillis)} W/PotchDataLogger: " +
+                        "raw packet 크기 불일치: " +
+                        "expected=$PACKET_SIZE_BYTES actual=${rawPacket.size}\n",
                 Charsets.UTF_8
             )
             return
         }
 
         runCatching {
-            superFrameRawOutput?.apply {
-                write(rawSuperFrame)
-                // 1초 단위 기록이므로 최근 frame이 프로세스 종료로 유실되지 않도록 즉시 flush한다.
+            val record = ByteArray(RAW_RECORD_SIZE_BYTES)
+            for (byteIndex in 0 until PHONE_TIME_SIZE_BYTES) {
+                record[byteIndex] =
+                    ((phoneTimeMillis ushr (byteIndex * 8)) and 0xFFL).toByte()
+            }
+            rawPacket.copyInto(record, destinationOffset = PHONE_TIME_SIZE_BYTES)
+
+            packetRawOutput?.apply {
+                write(record)
+                // 최근 패킷이 프로세스 종료로 유실되지 않도록 즉시 flush한다.
                 flush()
             }
         }.onFailure { error ->
             workingDebugFile?.appendText(
                 "${phoneTime(System.currentTimeMillis())} E/PotchDataLogger: " +
-                        "superframe binary 기록 실패: ${error.message}\n",
+                        "raw packet binary 기록 실패: ${error.message}\n",
                 Charsets.UTF_8
             )
         }
@@ -716,10 +726,10 @@ class PotchDataLogger(context: Context) {
     fun stopAndSave(): String? {
         if (!isLogging) return lastSavedFilePath
         isLogging = false
-        closeSuperFrameRawOutput()
+        closePacketRawOutput()
 
         val files = listOfNotNull(
-            workingSuperFrameRawFile,
+            workingPacketRawFile,
             workingDebugFile,
             workingArousalFile,
             workingHeartRateFile,
@@ -732,7 +742,7 @@ class PotchDataLogger(context: Context) {
         return lastSavedFilePath
     }
 
-    fun getWorkingLogPath(): String? = workingSuperFrameRawFile?.absolutePath
+    fun getWorkingLogPath(): String? = workingPacketRawFile?.absolutePath
     fun getWorkingDebugLogPath(): String? = workingDebugFile?.absolutePath
     fun getWorkingArousalLogPath(): String? = workingArousalFile?.absolutePath
     fun getWorkingHeartRateDiagnosticLogPath(): String? = workingHeartRateFile?.absolutePath
@@ -742,9 +752,9 @@ class PotchDataLogger(context: Context) {
     @Synchronized
     fun clear() {
         isLogging = false
-        closeSuperFrameRawOutput()
+        closePacketRawOutput()
         listOfNotNull(
-            workingSuperFrameRawFile,
+            workingPacketRawFile,
             workingDebugFile,
             workingArousalFile,
             workingHeartRateFile,
@@ -755,18 +765,18 @@ class PotchDataLogger(context: Context) {
     }
 
     private fun clearWorkingReferences() {
-        closeSuperFrameRawOutput()
-        workingSuperFrameRawFile = null
+        closePacketRawOutput()
+        workingPacketRawFile = null
         workingDebugFile = null
         workingArousalFile = null
         workingHeartRateFile = null
         workingStabilityEpisodeFile = null
     }
 
-    private fun closeSuperFrameRawOutput() {
-        runCatching { superFrameRawOutput?.flush() }
-        runCatching { superFrameRawOutput?.close() }
-        superFrameRawOutput = null
+    private fun closePacketRawOutput() {
+        runCatching { packetRawOutput?.flush() }
+        runCatching { packetRawOutput?.close() }
+        packetRawOutput = null
     }
 
     private fun DomainEvidence.toCsvValues(): Array<Any?> = arrayOf(
@@ -811,10 +821,9 @@ class PotchDataLogger(context: Context) {
         private const val INTERNAL_LOG_DIR_NAME = "PotchLogs"
         private const val DOWNLOAD_SUBDIRECTORY = "PotchLogs"
         private const val UTF8_BOM = "\uFEFF"
+        private const val PHONE_TIME_SIZE_BYTES = Long.SIZE_BYTES
         private const val PACKET_SIZE_BYTES = 142
-        private const val PACKETS_PER_SUPERFRAME = 8
-        private const val COMPLETE_SUPERFRAME_SIZE_BYTES =
-            PACKET_SIZE_BYTES * PACKETS_PER_SUPERFRAME
+        private const val RAW_RECORD_SIZE_BYTES = PHONE_TIME_SIZE_BYTES + PACKET_SIZE_BYTES
 
         fun listInternalLogFiles(context: Context): List<InternalPotchLogFile> {
             val directory = File(context.applicationContext.filesDir, INTERNAL_LOG_DIR_NAME)
