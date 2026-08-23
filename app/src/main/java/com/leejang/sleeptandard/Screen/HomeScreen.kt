@@ -92,6 +92,7 @@ fun HomeScreen(
     // 타임피커가 돌아가던중 다른 컴포넌트를 클릭했을때의 타임피커 멈춤 트리거
     var stopSignal by remember { mutableIntStateOf(0) }
 
+    /*
     /****** 상황선택 관련 녀석들 ******/
     var showSituationModal by remember { mutableStateOf(false) }     // 메모 모달창 띄우는 트리거
     var customText by remember { mutableStateOf("") }    // "직접추가"에서 입력한 텍스트
@@ -103,6 +104,8 @@ fun HomeScreen(
     )
     // "직접추가" 모드 트리거
     var isCustomMode by remember { mutableStateOf(false) }
+
+     */
 
 
     /** 사운드 설정창 띄우는 트리거 **/
@@ -224,6 +227,7 @@ fun HomeScreen(
             ) {
                 Spacer(Modifier.weight(1f))
 
+                /*
                 WakeUpWindow(
                     modifier = Modifier
                         .fillMaxWidth(),
@@ -233,6 +237,8 @@ fun HomeScreen(
                     selectedIsAm = selectedIsAm,
                     earlyWakeUpMinutes = earlyWakeUpMinutes
                 )
+
+                 */
 
                 Spacer(Modifier.weight(1f))
 
@@ -285,7 +291,12 @@ fun HomeScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(56.dp),
-                    onClick = { showSituationModal = true }
+                    onClick = {
+                        // TODO: 팟치 배터리 상태를 확인한 경고창을 띄울지말지 정한 다음 알람 설정 완료 화면으로 navigate
+                        /*
+                        showSituationModal = true
+                         */
+                    }
                 )
 
                 Button(
@@ -313,8 +324,11 @@ fun HomeScreen(
             onDismissRequest = {
                 // ✅ 핵심: 모달이 어떤 방식으로든 닫힐 때 모든 입력 상태를 초기화합니다.
                 showSoundSheet = false
+                /*
                 isCustomMode = false  // 다음번 열 때 리스트가 보이도록 리셋
                 customText = ""       // 입력하던 텍스트도 비워줌
+
+                 */
             },
             sheetState = soundSheetState,
             containerColor = DarkBackground,
@@ -346,6 +360,7 @@ fun HomeScreen(
         }
     }
 
+    /*
     /*** 상황 설정 모달 ***/
     if (showSituationModal) {
 
@@ -386,6 +401,8 @@ fun HomeScreen(
             )
         }
     }
+
+     */
 
     /**** 윈도우 튜토리얼창 ****/
     if (showWindowTutorial) {
