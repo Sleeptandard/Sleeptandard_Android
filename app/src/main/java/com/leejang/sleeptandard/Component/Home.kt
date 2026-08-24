@@ -17,6 +17,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -98,7 +99,7 @@ fun OptionsSection(
             if (isNone) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
             else MaterialTheme.colorScheme.onSurface
 
-    val entireHeight = 164.dp
+    val entireHeight = 128.dp
     var vibTogglechecked = checked
     var vibToggleEnabled = true
 
@@ -112,69 +113,8 @@ fun OptionsSection(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Box(
-                modifier =
-                        Modifier
-                            .zIndex(3f)
-                            .neumorphicBackground(
-                                highlightColor = Color(0xFFB9C8DF).copy(alpha = 0.1f),
-                                blurRadius1 = 20.dp,
-                            )
-                            // Inner shadow
-                                .innerShadow(
-                                    shape = RoundedCornerShape(28.dp),
-                                    shadow =
-                                        Shadow(
-                                            radius = 25.dp,
-                                            spread = (-12).dp,
-                                            color = Color(0xFF030E1E).copy(0.8f),
-                                            offset = DpOffset(x = 5.dp, 6.dp)
-                                        )
-                                )
-        ) {
-            Box(
-                    modifier =
-                            Modifier.clip(RoundedCornerShape(28.dp)).size(100.dp).clickable {
-                                onRemCheckedChange(!isRem)
-                            },
-                    contentAlignment = Alignment.Center
-            ) {
-                Text(
-                        modifier = Modifier,
-                        text = if (isRem) "REM" else "N1",
-                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 15.sp),
-                )
-                // 2. 우측 하단에 배치될 전환 정보 (아이콘 + 반대 상태 텍스트)
-                Row(
-                        modifier =
-                                Modifier.align(Alignment.BottomEnd) // ✅ 우측 하단 정렬
-                                        .padding(bottom = 12.dp, end = 12.dp), // 적절한 여백 추가
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    // 전환 아이콘 (image_16cecb.png의 화살표 아이콘)
-                    Icon(
-                            painter = painterResource(AppIcons.HomeSwitch),
-                            contentDescription = "Switch",
-                            modifier = Modifier.size(11.dp),
-                            tint = Color.White.copy(alpha = 0.7f)
-                    )
-                    // 반대 상태 텍스트 (작게 표시)
-                    Text(
-                            text = if (isRem) "N1" else "REM",
-                            style =
-                                    MaterialTheme.typography.bodySmall.copy(
-                                            fontSize = 12.sp,
-                                            color = Color.White.copy(alpha = 0.7f),
-                                            textAlign = TextAlign.Center
-                                    )
-                    )
-                }
-            }
-        }
-
         Column(
-                modifier = Modifier.height(entireHeight).fillMaxWidth(),
+                modifier = Modifier.height(entireHeight).weight(2f),
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally,
         ) {
@@ -182,8 +122,9 @@ fun OptionsSection(
             Box(
                     modifier =
                             Modifier.zIndex(2f)
-                                    .fillMaxWidth(95f / 100f)
-                                    .height(56.dp)
+                                    .fillMaxWidth()
+                                    .aspectRatio(3.7f)
+                                    //.height(56.dp)
                                     .neumorphicBackground(
                                             highlightColor = Color(0xFFB9C8DF).copy(alpha = 0.1f),
                                     )
@@ -233,8 +174,9 @@ fun OptionsSection(
             Box(
                     modifier =
                             Modifier.zIndex(1f)
-                                    .fillMaxWidth(95f / 100f)
-                                    .height(56.dp)
+                                    .fillMaxWidth()
+                                    .aspectRatio(3.7f)
+                                    //.height(56.dp)
                                     .neumorphicBackground(
                                             highlightColor = Color(0xFFB9C8DF).copy(alpha = 0.1f),
                                     )
@@ -297,6 +239,58 @@ fun OptionsSection(
                         Spacer(Modifier.height(4.dp))
                     }
                 }
+            }
+        }
+
+        Spacer(Modifier.width(12.dp))
+
+        // 팟치 연결 버튼
+        Box(
+            modifier =
+                Modifier
+                    .weight(1f)
+                    .aspectRatio(1f)
+                    .zIndex(3f)
+                    .neumorphicBackground(
+                        highlightColor = Color(0xFFB9C8DF).copy(alpha = 0.1f),
+                        blurRadius1 = 20.dp,
+                    )
+                    // Inner shadow
+                    .innerShadow(
+                        shape = RoundedCornerShape(28.dp),
+                        shadow =
+                            Shadow(
+                                radius = 25.dp,
+                                spread = (-12).dp,
+                                color = Color(0xFF030E1E).copy(0.8f),
+                                offset = DpOffset(x = 5.dp, 6.dp)
+                            )
+                    )
+        ) {
+            Box(
+                modifier =
+                    Modifier.clip(RoundedCornerShape(28.dp)).fillMaxSize().clickable {
+                        onRemCheckedChange(!isRem)
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    modifier = Modifier,
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Icon(
+                        painter = painterResource(AppIcons.HomePotch),
+                        contentDescription = "팟치 아이콘",
+                        modifier = Modifier.size(28.dp),
+                        tint = MaterialTheme.colorScheme.tertiary
+                    )
+                    Text(
+                        text = "팟치 연결",
+                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp)
+                    )
+                }
+
             }
         }
     }
