@@ -51,10 +51,12 @@ import com.leejang.sleeptandard.Component.AlarmSoundSettingContent
 import com.leejang.sleeptandard.Component.ConfirmButton
 import com.leejang.sleeptandard.Component.CustomTimePicker
 import com.leejang.sleeptandard.Component.OptionsSection
+import com.leejang.sleeptandard.Component.ShowWakeUpRange
 import com.leejang.sleeptandard.Component.SituationContent
 import com.leejang.sleeptandard.Component.SituationOption
 import com.leejang.sleeptandard.Component.WakeUpWindow
 import com.leejang.sleeptandard.Component.WindowTutorial
+import com.leejang.sleeptandard.Component.calculateWakeUpRangeText
 import com.leejang.sleeptandard.Component.neumorphicBackground
 import com.leejang.sleeptandard.Prefs.AlarmPreferences
 import com.leejang.sleeptandard.ViewModel.AlarmViewModel
@@ -168,6 +170,9 @@ fun HomeScreen(
             Spacer(
                 modifier = Modifier.weight(5f)
             )
+
+            ShowWakeUpRange(selectedHour,selectedMinute,selectedIsAm)
+
             /*** 타임 피커 ***/
             Box(
                 modifier = Modifier

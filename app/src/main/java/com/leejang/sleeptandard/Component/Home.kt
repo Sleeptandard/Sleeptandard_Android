@@ -78,6 +78,7 @@ import java.util.Calendar
 import java.util.Locale
 import kotlin.math.abs
 import kotlinx.coroutines.delay
+import java.time.format.TextStyle
 
 @Composable
 fun OptionsSection(
@@ -585,6 +586,23 @@ fun WakeUpWindow(
         }
 
     }
+}
+
+@Composable
+fun ShowWakeUpRange(hour: Int, minute: Int, isAm: Boolean, earlyMinutes: Int = 15,
+                    style: androidx.compose.ui.text.TextStyle = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 15.sp,
+                    )
+){
+    Text(
+        text = calculateWakeUpRangeText(
+            hour = hour,
+            minute = minute,
+            isAm = isAm,
+            earlyMinutes = earlyMinutes
+        ),
+        style = style
+    )
 }
 
 /** 튜토리얼을 끝내고 홈 화면으로 들어오면 나오는 기상윈도우 설명창
