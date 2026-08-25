@@ -27,6 +27,8 @@ object AppIcons {
     @DrawableRes val RingBar = R.drawable.ic_ring_bar
     @DrawableRes val ArrowRight = R.drawable.ic_ring_arrowright
 
+    @DrawableRes val HomePotch = R.drawable.ic_home_potch
+
 
     // 피드백 리뷰 화면
     @DrawableRes val ReviewBadFace = R.drawable.ic_review_badface
