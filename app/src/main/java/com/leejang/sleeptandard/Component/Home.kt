@@ -76,11 +76,19 @@ import androidx.compose.ui.zIndex
 import com.leejang.sleeptandard.ui.theme.AppIcons
 import com.leejang.sleeptandard.ui.theme.Key
 import com.leejang.sleeptandard.ui.theme.SkyBlue
+import com.leejang.sleeptandard.ui.theme.WRed
 import java.util.Calendar
 import java.util.Locale
 import kotlin.math.abs
 import kotlinx.coroutines.delay
 import java.time.format.TextStyle
+
+enum class PotchConnectionState {
+    NOTHING,
+    CONNECTING,
+    CONNECTED,
+    FAILED
+}
 
 @Composable
 fun OptionsSection(
@@ -91,8 +99,8 @@ fun OptionsSection(
         onCheckedChange: (Boolean) -> Unit,
         alarmName: String,
         isSystemVibrationOn: Boolean,
-        isRem: Boolean,
-        onRemCheckedChange: (Boolean) -> Unit
+        potchState: PotchConnectionState,
+        tryPotchConnecting: () -> Unit
 ) {
     val isNone = alarmName == "소리 없음"
 
@@ -270,28 +278,53 @@ fun OptionsSection(
         ) {
             Box(
                 modifier =
-                    Modifier.clip(RoundedCornerShape(28.dp)).fillMaxSize().clickable {
-                        onRemCheckedChange(!isRem)
-                    },
+                    Modifier.clip(RoundedCornerShape(28.dp)).fillMaxSize()
+                        .clickable {
+                            tryPotchConnecting()
+                        },
                 contentAlignment = Alignment.Center
             ) {
-                Column(
-                    modifier = Modifier,
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Icon(
-                        painter = painterResource(AppIcons.HomePotch),
-                        contentDescription = "팟치 아이콘",
-                        modifier = Modifier.size(28.dp),
-                        tint = MaterialTheme.colorScheme.tertiary
-                    )
-                    Text(
-                        text = "팟치 연결",
-                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp)
-                    )
-                }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Icon(
+                            painter = painterResource(AppIcons.HomePotch),
+                            contentDescription = "팟치 아이콘",
+                            tint = Color.Unspecified
+                        )
+                        Text(
+                            text = "팟치 연결",
+                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp)
+                        )
+                    }
 
+                    when (potchState) {
+                        PotchConnectionState.CONNECTING ->
+                            Text(
+                                "연결 중...",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = SkyBlue
+                            )
+
+                        PotchConnectionState.CONNECTED ->
+                            Text(
+                                "연결 성공!",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = SkyBlue
+                            )
+
+                        PotchConnectionState.FAILED ->
+                            Text(
+                                "연결 실패",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = WRed
+                            )
+
+                        PotchConnectionState.NOTHING -> Unit
+                        }
+                }
             }
         }
     }
@@ -823,15 +856,15 @@ fun WindowTutorial(
 
 @Composable
 fun Modifier.neumorphicBackground(
-        highlightColor: Color = Color(0xFFB9C8DF).copy(alpha = 0.15f),
-        blurRadius1: Dp = 20.dp,
-        offsetX1: Dp = (-5).dp,
-        offsetY1: Dp = (-5).dp,
-        shadowColor: Color = Color(0xFF020710).copy(alpha = 0.9f),
-        blurRadius2: Dp = 15.dp,
-        offsetX2: Dp = 8.dp,
-        offsetY2: Dp = 8.dp,
-        cornerRadius: Dp = 30.dp
+    highlightColor: Color = Color(0x1AC2E4E9).copy(alpha = 0.15f),
+    blurRadius1: Dp = 20.dp,
+    offsetX1: Dp = (-5).dp,
+    offsetY1: Dp = (-5).dp,
+    shadowColor: Color = Color(0xFF020710).copy(alpha = 0.9f),
+    blurRadius2: Dp = 15.dp,
+    offsetX2: Dp = 8.dp,
+    offsetY2: Dp = 8.dp,
+    cornerRadius: Dp = 30.dp
 ) =
         this.drawBehind() {
             drawIntoCanvas { canvas ->

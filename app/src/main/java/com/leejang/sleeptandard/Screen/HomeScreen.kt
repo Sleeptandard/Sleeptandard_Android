@@ -51,6 +51,7 @@ import com.leejang.sleeptandard.Component.AlarmSoundSettingContent
 import com.leejang.sleeptandard.Component.ConfirmButton
 import com.leejang.sleeptandard.Component.CustomTimePicker
 import com.leejang.sleeptandard.Component.OptionsSection
+import com.leejang.sleeptandard.Component.PotchConnectionState
 import com.leejang.sleeptandard.Component.ShowWakeUpRange
 import com.leejang.sleeptandard.Component.SituationContent
 import com.leejang.sleeptandard.Component.SituationOption
@@ -151,6 +152,8 @@ fun HomeScreen(
             alarmName = "소리 없음"
         }
     }
+
+    var potchState: PotchConnectionState by remember { mutableStateOf(PotchConnectionState.NOTHING) }
 
     Column(
         modifier = Modifier
@@ -292,8 +295,15 @@ fun HomeScreen(
                     onCheckedChange = { selectedVibrationEnabled = it },
                     alarmName = alarmName,
                     isSystemVibrationOn = isNotificationVibrationOn,
-                    isRem = isRem,
-                    onRemCheckedChange = { isRem = it }
+                    potchState = potchState,
+                    tryPotchConnecting = {
+                        potchState = when (potchState) {
+                            PotchConnectionState.NOTHING -> PotchConnectionState.CONNECTING
+                            PotchConnectionState.CONNECTING -> PotchConnectionState.CONNECTED
+                            PotchConnectionState.CONNECTED -> PotchConnectionState.FAILED
+                            PotchConnectionState.FAILED -> PotchConnectionState.NOTHING
+                        }
+                    }
                 )
 
                 Spacer(modifier = Modifier.weight(2f))
