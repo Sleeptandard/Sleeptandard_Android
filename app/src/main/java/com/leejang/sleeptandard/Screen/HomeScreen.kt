@@ -12,6 +12,9 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -37,17 +40,27 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.innerShadow
 import androidx.compose.ui.graphics.shadow.Shadow
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
@@ -73,6 +86,7 @@ import com.leejang.sleeptandard.Prefs.AlarmPreferences
 import com.leejang.sleeptandard.ViewModel.AlarmViewModel
 import com.leejang.sleeptandard.ui.theme.DarkBackground
 import com.leejang.sleeptandard.utility.getIsNotificationVibrationOn
+import kotlin.math.roundToInt
 
 private fun requiredPotchPermissions(): Array<String> = buildList {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -98,12 +112,16 @@ fun HomeScreen(
     showWindowTutorial: Boolean,
     onDismissTutorial: (Boolean) -> Unit, // ✅ Boolean 인자 추가
     goExperimentScreen: ()-> Unit = {},
+    onBatteryWarningVisibilityChange: (Boolean) -> Unit = {},
     potchViewModel: PotchBleViewModel = viewModel(),
 ) {
     val context = LocalContext.current
     val alarmPrefs = remember(context) { AlarmPreferences(context) }  // 알람 SharedPreference 가져오기
     val bleState by potchViewModel.bleState.collectAsState()
+    val processorState by potchViewModel.processorState.collectAsState()
     var potchPermissionDenied by remember { mutableStateOf(false) }
+    var showLowBatteryWarning by remember { mutableStateOf(false) }
+    var warningBattery by remember { mutableIntStateOf(0) }
 
     val potchPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
@@ -208,9 +226,45 @@ fun HomeScreen(
         else -> PotchConnectionState.NOTHING
     }
 
+    val currentBattery = processorState.lastParsedData
+        ?.batteryVoltage
+        ?.takeIf { it.isFinite() }
+        ?.let(::voltageToPotchBatteryPercent)
+
+    fun saveAndScheduleAlarm() {
+        alarmViewModel.saveAlarm(
+            hour = selectedHour,
+            minute = selectedMinute,
+            isAm = selectedIsAm,
+            ringtoneUri = selectedRingtoneUri,
+            vibrationEnabled = selectedVibrationEnabled,
+            volume = selectedVolume,
+            earlyWakeUpMinutes = earlyWakeUpMinutes,
+            isRem = isRem,
+        )
+        scheduler.schedule(alarmViewModel.alarm)
+        alarmViewModel.startSleepTracking(
+            targetTime = scheduler.getTriggerTime(),
+            situationLabel = "normal"
+        )
+        alarmPrefs.saveAlarm(alarmViewModel.alarm)
+        onClickConfirm()
+    }
+
+    LaunchedEffect(showLowBatteryWarning) {
+        onBatteryWarningVisibilityChange(showLowBatteryWarning)
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            onBatteryWarningVisibilityChange(false)
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .blur(if (showLowBatteryWarning) 20.dp else 0.dp)
             .padding(horizontal = 20.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -375,10 +429,16 @@ fun HomeScreen(
                         .fillMaxWidth()
                         .height(56.dp),
                     onClick = {
-                        // TODO: 팟치 배터리 상태를 확인한 경고창을 띄울지말지 정한 다음 알람 설정 완료 화면으로 navigate
-                        /*
-                        showSituationModal = true
-                         */
+                        if (
+                            potchState == PotchConnectionState.CONNECTED &&
+                            currentBattery != null &&
+                            currentBattery <= LOW_POTCH_BATTERY_PERCENT
+                        ) {
+                            warningBattery = currentBattery
+                            showLowBatteryWarning = true
+                        } else {
+                            saveAndScheduleAlarm()
+                        }
                     }
                 )
 
@@ -406,6 +466,17 @@ fun HomeScreen(
             onSelect = potchViewModel::selectPotch,
             onRetry = potchViewModel::startHomeConnection,
             onDismiss = potchViewModel::cancelDeviceDiscovery
+        )
+    }
+
+    if (showLowBatteryWarning) {
+        PotchLowBatteryWarningDialog(
+            currentBattery = warningBattery,
+            onDismiss = { showLowBatteryWarning = false },
+            onUseAnyway = {
+                showLowBatteryWarning = false
+                saveAndScheduleAlarm()
+            }
         )
     }
 
@@ -518,3 +589,128 @@ fun HomeScreen(
         }
     }
 }
+
+@Composable
+private fun PotchLowBatteryWarningDialog(
+    currentBattery: Int,
+    onDismiss: () -> Unit,
+    onUseAnyway: () -> Unit,
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0x4D050C16))
+                .clickable(onClick = onDismiss),
+            contentAlignment = Alignment.Center
+        ) {
+            Surface(
+                modifier = Modifier
+                    .padding(horizontal = 20.dp)
+                    .fillMaxWidth()
+                    .aspectRatio(4f / 3f)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = {}
+                    ),
+                shape = RoundedCornerShape(40.dp),
+                color = Color(0xFFF1F2F3),
+                tonalElevation = 0.dp,
+                shadowElevation = 12.dp
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 20.dp, vertical = 22.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "팟치 배터리가 부족해요",
+                            style = MaterialTheme.typography.headlineSmall.copy(
+                                color = Color(0xFF050C16),
+                                fontSize = 24.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        )
+
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = "현재 ${currentBattery}%",
+                                style = MaterialTheme.typography.bodyLarge.copy(
+                                    color = Color(0xFF050C16),
+                                    fontSize = 18.sp
+                                )
+                            )
+                            Text(
+                                text = buildAnnotatedString {
+                                    append("8시간 30분 사용에는 ")
+                                    withStyle(SpanStyle(color = Color(0xFFEB3737))) {
+                                        append("${LOW_POTCH_BATTERY_PERCENT}%")
+                                    }
+                                    append(" 이상 필요해요.")
+                                },
+                                style = MaterialTheme.typography.bodyLarge.copy(
+                                    color = Color(0xFF050C16),
+                                    fontSize = 17.sp
+                                )
+                            )
+                        }
+                    }
+
+                    Spacer(Modifier.height(20.dp))
+
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Button(
+                            onClick = onDismiss,
+                            modifier = Modifier
+                                .fillMaxWidth(0.68f)
+                                .height(58.dp),
+                            shape = RoundedCornerShape(24.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFFB1F7FC),
+                                contentColor = Color(0xFF050C16)
+                            ),
+                            elevation = ButtonDefaults.buttonElevation(defaultElevation = 8.dp)
+                        ) {
+                            Text(
+                                text = "충전하고 오기",
+                                style = MaterialTheme.typography.bodyLarge.copy(
+                                    fontSize = 20.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            )
+                        }
+
+                        TextButton(
+                            onClick = onUseAnyway,
+                            colors = ButtonDefaults.textButtonColors(
+                                contentColor = Color(0xFF30343A)
+                            )
+                        ) {
+                            Text(
+                                text = "그냥 사용하기",
+                                style = MaterialTheme.typography.bodyLarge.copy(fontSize = 17.sp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private const val LOW_POTCH_BATTERY_PERCENT = 40
+
+private fun voltageToPotchBatteryPercent(voltage: Double): Int =
+    (((voltage - 3.2) / (4.2 - 3.2)) * 100.0).roundToInt().coerceIn(0, 100)

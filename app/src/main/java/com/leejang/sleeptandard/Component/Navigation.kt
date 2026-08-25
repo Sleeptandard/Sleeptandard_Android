@@ -184,6 +184,10 @@ fun AppNav(
                     rememberNavController.navigate(Screen.Experiment.route)
                 },
 
+                onBatteryWarningVisibilityChange = { visible ->
+                    isBlurred = visible
+                },
+
                 showWindowTutorial = showWindowTutorial,
                 onDismissTutorial = { isChecked ->
                     // 2번 요구사항: 체크박스를 체크하고 닫았다면 영구적으로 보이지 않게 저장
