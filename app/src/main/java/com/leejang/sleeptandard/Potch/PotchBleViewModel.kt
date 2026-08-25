@@ -79,6 +79,39 @@ class PotchBleViewModel(
         ContextCompat.startForegroundService(context, intent)
     }
 
+    fun startHomeConnection() {
+        val context = getApplication<Application>().applicationContext
+        val intent = Intent(context, PotchBleForegroundService::class.java).apply {
+            action = PotchBleForegroundService.ACTION_START_HOME_CONNECTION
+        }
+        ContextCompat.startForegroundService(context, intent)
+    }
+
+    fun selectPotch(address: String) {
+        val context = getApplication<Application>().applicationContext
+        val intent = Intent(context, PotchBleForegroundService::class.java).apply {
+            action = PotchBleForegroundService.ACTION_SELECT_DEVICE
+            putExtra(PotchBleForegroundService.EXTRA_DEVICE_ADDRESS, address)
+        }
+        ContextCompat.startForegroundService(context, intent)
+    }
+
+    fun cancelDeviceDiscovery() {
+        val context = getApplication<Application>().applicationContext
+        val intent = Intent(context, PotchBleForegroundService::class.java).apply {
+            action = PotchBleForegroundService.ACTION_CANCEL_DEVICE_DISCOVERY
+        }
+        ContextCompat.startForegroundService(context, intent)
+    }
+
+    fun removeRegisteredPotch() {
+        val context = getApplication<Application>().applicationContext
+        val intent = Intent(context, PotchBleForegroundService::class.java).apply {
+            action = PotchBleForegroundService.ACTION_REMOVE_REGISTERED_DEVICE
+        }
+        ContextCompat.startForegroundService(context, intent)
+    }
+
     fun disconnect() {
         stopReconnectAndSaveLog()
     }

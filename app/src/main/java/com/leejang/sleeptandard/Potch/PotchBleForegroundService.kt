@@ -74,6 +74,16 @@ class PotchBleForegroundService : Service() {
          */
         const val ACTION_START = "com.leejang.sleeptandard.Potch.ACTION_START"
 
+        const val ACTION_START_HOME_CONNECTION =
+            "com.leejang.sleeptandard.Potch.ACTION_START_HOME_CONNECTION"
+        const val ACTION_SELECT_DEVICE =
+            "com.leejang.sleeptandard.Potch.ACTION_SELECT_DEVICE"
+        const val ACTION_CANCEL_DEVICE_DISCOVERY =
+            "com.leejang.sleeptandard.Potch.ACTION_CANCEL_DEVICE_DISCOVERY"
+        const val ACTION_REMOVE_REGISTERED_DEVICE =
+            "com.leejang.sleeptandard.Potch.ACTION_REMOVE_REGISTERED_DEVICE"
+        const val EXTRA_DEVICE_ADDRESS = "extra_device_address"
+
         /**
          * Potch 수신 종료 및 로그 저장 명령.
          *
@@ -137,6 +147,7 @@ class PotchBleForegroundService : Service() {
     private var bleManager: PotchBleManager? = null
 
     private var isStoppingService = false
+    private var registerDeviceWhenReady = false
 
     /**
      * Service가 처음 생성될 때 호출된다.
@@ -246,6 +257,44 @@ class PotchBleForegroundService : Service() {
 
                 // BLE 스캔/연결 시작
                 startPotchReceiving()
+            }
+
+            ACTION_START_HOME_CONNECTION -> {
+                isStoppingService = false
+                registerDeviceWhenReady = false
+                markSessionRunning(true)
+                startPotchReceiving(useRegisteredDevice = true)
+            }
+
+            ACTION_SELECT_DEVICE -> {
+                val address = intent.getStringExtra(EXTRA_DEVICE_ADDRESS)
+                if (address.isNullOrBlank()) {
+                    dataLogger?.logDebug(TAG, "ACTION_SELECT_DEVICE ignored: missing address", "E")
+                } else {
+                    registerDeviceWhenReady = true
+                    val started = bleManager?.selectDiscoveredDevice(address) ?: false
+                    if (!started) registerDeviceWhenReady = false
+                }
+            }
+
+            ACTION_CANCEL_DEVICE_DISCOVERY -> {
+                registerDeviceWhenReady = false
+                markSessionRunning(false)
+                bleManager?.cancelDeviceDiscovery()
+                clearStabilitySessionId()
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+            }
+
+            ACTION_REMOVE_REGISTERED_DEVICE -> {
+                registerDeviceWhenReady = false
+                clearRegisteredPotch()
+                bleManager?.reportRegisteredDeviceRemoved()
+
+                if (!isSessionRunning()) {
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf()
+                }
             }
 
             ACTION_STOP_AND_SAVE -> {
@@ -367,19 +416,28 @@ class PotchBleForegroundService : Service() {
 
                 Log.d(
                     TAG,
-                    "BLE state: connected=${state.isConnected}, scanning=${state.isScanning}, reconnecting=${state.isReconnecting}, device=${state.deviceName}, log=${state.lastLog}, error=${state.lastError}"
+                    "BLE state: connected=${state.isConnected}, connecting=${state.isConnecting}, scanning=${state.isScanning}, reconnecting=${state.isReconnecting}, device=${state.deviceName}, log=${state.lastLog}, error=${state.lastError}"
                 )
-                dataLogger?.logDebug(TAG, "BLE state: connected=${state.isConnected}, scanning=${state.isScanning}, reconnecting=${state.isReconnecting}, device=${state.deviceName}, log=${state.lastLog}, error=${state.lastError}")
+                dataLogger?.logDebug(TAG, "BLE state: connected=${state.isConnected}, connecting=${state.isConnecting}, scanning=${state.isScanning}, reconnecting=${state.isReconnecting}, device=${state.deviceName}, log=${state.lastLog}, error=${state.lastError}")
 
                 // Service 내부 상태를 UI에서 볼 수 있게 공용 StateHolder에 전달
                 PotchServiceStateHolder.updateBleState(state)
                 stabilityCalculator?.onBleConnectionState(state.isConnected)
+
+                if (state.isNotificationReady && registerDeviceWhenReady) {
+                    val address = state.deviceAddress
+                    if (!address.isNullOrBlank()) {
+                        saveRegisteredPotch(address, state.deviceName)
+                        registerDeviceWhenReady = false
+                    }
+                }
 
                 // BLE 상태에 따라 foreground notification 문구 변경
                 val text = when {
                     state.isConnected -> "Potch 연결됨 · 데이터 수신 중"
                     state.isReconnecting -> "Potch 재연결 시도 중"
                     state.isScanning -> "Potch 검색 중"
+                    state.isConnecting -> "Potch 연결 중"
                     else -> "Potch 대기 중"
                 }
 
@@ -454,7 +512,7 @@ class PotchBleForegroundService : Service() {
      *
      * startScan() 이후 Potch가 발견되면 BLE 연결과 notify 구독이 이어진다.
      */
-    private fun startPotchReceiving() {
+    private fun startPotchReceiving(useRegisteredDevice: Boolean = false) {
         Log.i(TAG, "startPotchReceiving() called")
 
         initializePotchObjects()
@@ -475,7 +533,17 @@ class PotchBleForegroundService : Service() {
         // 앱 프로세스가 START_STICKY로 재생성되어도 동일 수면 session id를 재사용한다.
         stabilityCalculator?.startSession(getOrCreateStabilitySessionId())
         dataProcessor?.refreshStabilityState()
-        bleManager?.startScan()
+        if (useRegisteredDevice) {
+            val registeredAddress = getRegisteredPotchAddress()
+            if (!registeredAddress.isNullOrBlank()) {
+                val started = bleManager?.connectToAddress(registeredAddress) ?: false
+                if (started) return
+                clearRegisteredPotch()
+            }
+            bleManager?.startDeviceDiscovery()
+        } else {
+            bleManager?.startScan()
+        }
     }
 
     /**
@@ -754,6 +822,31 @@ class PotchBleForegroundService : Service() {
     private fun clearStabilitySessionId() {
         getSharedPreferences("potch_service", MODE_PRIVATE)
             .edit { remove("stability_session_id") }
+    }
+
+    private fun getRegisteredPotchAddress(): String? {
+        return getSharedPreferences("potch_service", MODE_PRIVATE)
+            .getString("registered_potch_address", null)
+    }
+
+    private fun saveRegisteredPotch(address: String, name: String?) {
+        getSharedPreferences("potch_service", MODE_PRIVATE)
+            .edit {
+                putString("registered_potch_address", address)
+                putString("registered_potch_name", name)
+            }
+        dataLogger?.logConnectionEvent(
+            event = "device_registered",
+            message = "Registered Potch name=${name ?: "Potch"}, address=$address"
+        )
+    }
+
+    private fun clearRegisteredPotch() {
+        getSharedPreferences("potch_service", MODE_PRIVATE)
+            .edit {
+                remove("registered_potch_address")
+                remove("registered_potch_name")
+            }
     }
 
     /**

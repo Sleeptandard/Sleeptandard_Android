@@ -1,17 +1,23 @@
 package com.leejang.sleeptandard.Screen
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.media.RingtoneManager
+import android.os.Build
 import android.provider.Settings
 import android.util.Log
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -43,14 +49,17 @@ import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.net.toUri
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.leejang.sleeptandard.ClassFile.AlarmScheduler
 import com.leejang.sleeptandard.Component.AlarmSoundSettingContent
 import com.leejang.sleeptandard.Component.ConfirmButton
 import com.leejang.sleeptandard.Component.CustomTimePicker
 import com.leejang.sleeptandard.Component.OptionsSection
+import com.leejang.sleeptandard.Component.PotchSelectionSheet
 import com.leejang.sleeptandard.Component.PotchConnectionState
 import com.leejang.sleeptandard.Component.ShowWakeUpRange
 import com.leejang.sleeptandard.Component.SituationContent
@@ -59,10 +68,24 @@ import com.leejang.sleeptandard.Component.WakeUpWindow
 import com.leejang.sleeptandard.Component.WindowTutorial
 import com.leejang.sleeptandard.Component.calculateWakeUpRangeText
 import com.leejang.sleeptandard.Component.neumorphicBackground
+import com.leejang.sleeptandard.Potch.PotchBleViewModel
 import com.leejang.sleeptandard.Prefs.AlarmPreferences
 import com.leejang.sleeptandard.ViewModel.AlarmViewModel
 import com.leejang.sleeptandard.ui.theme.DarkBackground
 import com.leejang.sleeptandard.utility.getIsNotificationVibrationOn
+
+private fun requiredPotchPermissions(): Array<String> = buildList {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        add(Manifest.permission.BLUETOOTH_SCAN)
+        add(Manifest.permission.BLUETOOTH_CONNECT)
+    } else {
+        add(Manifest.permission.ACCESS_FINE_LOCATION)
+    }
+
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        add(Manifest.permission.POST_NOTIFICATIONS)
+    }
+}.toTypedArray()
 
 
 @SuppressLint("ConfigurationScreenWidthHeight")
@@ -75,9 +98,32 @@ fun HomeScreen(
     showWindowTutorial: Boolean,
     onDismissTutorial: (Boolean) -> Unit, // ✅ Boolean 인자 추가
     goExperimentScreen: ()-> Unit = {},
+    potchViewModel: PotchBleViewModel = viewModel(),
 ) {
     val context = LocalContext.current
     val alarmPrefs = remember(context) { AlarmPreferences(context) }  // 알람 SharedPreference 가져오기
+    val bleState by potchViewModel.bleState.collectAsState()
+    var potchPermissionDenied by remember { mutableStateOf(false) }
+
+    val potchPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) {
+        val allGranted = requiredPotchPermissions().all { permission ->
+            ContextCompat.checkSelfPermission(context, permission) ==
+                    PackageManager.PERMISSION_GRANTED
+        }
+        potchPermissionDenied = !allGranted
+
+        if (allGranted) {
+            potchViewModel.startHomeConnection()
+        } else {
+            Toast.makeText(
+                context,
+                "팟치 연결을 위해 블루투스 권한이 필요합니다.",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
 
     /**** 알람뷰모델에 넣을 값들임 ****/
     var selectedHour by remember { mutableIntStateOf(alarmViewModel.alarm.hour) }
@@ -153,7 +199,14 @@ fun HomeScreen(
         }
     }
 
-    var potchState: PotchConnectionState by remember { mutableStateOf(PotchConnectionState.NOTHING) }
+    val potchState = when {
+        bleState.isNotificationReady -> PotchConnectionState.CONNECTED
+        bleState.isScanning || bleState.isConnecting || bleState.isReconnecting ->
+            PotchConnectionState.CONNECTING
+        potchPermissionDenied || bleState.lastError != null -> PotchConnectionState.FAILED
+        bleState.isConnected -> PotchConnectionState.CONNECTING
+        else -> PotchConnectionState.NOTHING
+    }
 
     Column(
         modifier = Modifier
@@ -297,11 +350,20 @@ fun HomeScreen(
                     isSystemVibrationOn = isNotificationVibrationOn,
                     potchState = potchState,
                     tryPotchConnecting = {
-                        potchState = when (potchState) {
-                            PotchConnectionState.NOTHING -> PotchConnectionState.CONNECTING
-                            PotchConnectionState.CONNECTING -> PotchConnectionState.CONNECTED
-                            PotchConnectionState.CONNECTED -> PotchConnectionState.FAILED
-                            PotchConnectionState.FAILED -> PotchConnectionState.NOTHING
+                        if (potchState == PotchConnectionState.NOTHING ||
+                            potchState == PotchConnectionState.FAILED
+                        ) {
+                            potchPermissionDenied = false
+                            val missingPermissions = requiredPotchPermissions().filter { permission ->
+                                ContextCompat.checkSelfPermission(context, permission) !=
+                                        PackageManager.PERMISSION_GRANTED
+                            }
+
+                            if (missingPermissions.isEmpty()) {
+                                potchViewModel.startHomeConnection()
+                            } else {
+                                potchPermissionLauncher.launch(missingPermissions.toTypedArray())
+                            }
                         }
                     }
                 )
@@ -335,6 +397,17 @@ fun HomeScreen(
     }
 
     /************************       이 밑으로 모달 창          *********************************/
+
+    if (bleState.isDeviceSelectionRequired) {
+        PotchSelectionSheet(
+            devices = bleState.discoveredDevices,
+            isScanning = bleState.isScanning,
+            errorMessage = bleState.lastError,
+            onSelect = potchViewModel::selectPotch,
+            onRetry = potchViewModel::startHomeConnection,
+            onDismiss = potchViewModel::cancelDeviceDiscovery
+        )
+    }
 
     /*** 사운드 선택 모달 ***/
     if (showSoundSheet) {
