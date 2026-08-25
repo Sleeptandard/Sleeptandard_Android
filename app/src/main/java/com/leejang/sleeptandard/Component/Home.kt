@@ -75,6 +75,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.leejang.sleeptandard.ui.theme.AppIcons
 import com.leejang.sleeptandard.ui.theme.Key
+import com.leejang.sleeptandard.ui.theme.SkyBlue
 import java.util.Calendar
 import java.util.Locale
 import kotlin.math.abs
@@ -586,6 +587,7 @@ fun WakeUpWindow(
 fun ShowWakeUpRange(hour: Int, minute: Int, isAm: Boolean, earlyMinutes: Int = 15,
                     style: androidx.compose.ui.text.TextStyle = MaterialTheme.typography.bodyMedium.copy(
                         fontSize = 15.sp,
+                        color = SkyBlue
                     )
 ){
     Text(

@@ -171,8 +171,14 @@ fun HomeScreen(
                 modifier = Modifier.weight(5f)
             )
 
-            ShowWakeUpRange(selectedHour,selectedMinute,selectedIsAm)
-
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                contentAlignment = Alignment.Center
+            ){
+                ShowWakeUpRange(selectedHour,selectedMinute,selectedIsAm)
+            }
             /*** 타임 피커 ***/
             Box(
                 modifier = Modifier
