@@ -33,6 +33,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -57,12 +58,15 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.text.style.BaselineShift
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.leejang.sleeptandard.ClassFile.Alarm
 
 import com.leejang.sleeptandard.ClassFile.AlarmScheduler
 import com.leejang.sleeptandard.Component.neumorphicBackground
+import com.leejang.sleeptandard.Potch.PotchBleViewModel
 import com.leejang.sleeptandard.Prefs.AlarmPreferences
 import com.leejang.sleeptandard.ViewModel.AlarmViewModel
 import com.leejang.sleeptandard.ui.theme.AppIcons
@@ -73,10 +77,12 @@ import java.util.Locale
 fun SettedAlarmScreen(
     alarmViewModel: AlarmViewModel,
     scheduler: AlarmScheduler,
-    onTurnAlarmOff : ()-> Unit
+    onTurnAlarmOff : ()-> Unit,
+    potchViewModel: PotchBleViewModel = viewModel(),
 ) {
     val context = LocalContext.current
     val alarm = alarmViewModel.alarm
+    val processorState by potchViewModel.processorState.collectAsState()
 
     val fontAnimatable = remember { Animatable(48f) }
     val fontSpaceAnimatable = remember { Animatable(8f) }
@@ -137,7 +143,12 @@ fun SettedAlarmScreen(
                     ) {
                         ShowWakeUpTime(alarm, fontAnimatable.value, fontSpaceAnimatable.value)
                         Spacer(Modifier.weight(45f))
-                        SensingStartInfo()
+                        SensingStartInfo(
+                            heartRateBpm = processorState.heartRateBpm,
+                            temperatureCelsius = processorState.lastParsedData
+                                ?.ntcCelsius
+                                ?.takeIf { it.isFinite() }
+                        )
                         Spacer(Modifier.weight(51f))
                         ActivityAnimation(
                             modifier = Modifier
@@ -259,7 +270,10 @@ private fun ShowWakeUpTime(
 }
 
 @Composable
-private fun SensingStartInfo(){
+private fun SensingStartInfo(
+    heartRateBpm: Int?,
+    temperatureCelsius: Double?,
+){
     Box(
         modifier = Modifier
             .size(320.dp, 112.dp)
@@ -277,34 +291,56 @@ private fun SensingStartInfo(){
         contentAlignment = Alignment.Center
 
     ){
-        Column(
+        Row(
             modifier = Modifier
                 .fillMaxWidth(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ){
-            Text(
-                text = "데이터 센싱 시작",
-                fontSize = 16.sp
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(
+                space = 28.dp,
+                alignment = Alignment.CenterHorizontally
             )
-
+        ){
             Row(
-                modifier = Modifier
-                    .fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ){
                 Text(
-                    text = "워치",
+                    text = "심박수",
                     style = MaterialTheme.typography.bodyMedium.copy(
-                        fontSize = 18.sp,
-                        color = Color(0xFFAFF4F9)
+                        fontSize = 16.sp,
+                        color = Color(0xCCF1F4F9)
                     )
-
                 )
                 Text(
-                    text = "를 착용해주세요",
-                    fontSize = 18.sp
+                    text = heartRateBpm?.let { "$it bpm" } ?: "-- bpm",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 18.sp,
+                        color = Color(0xFFAFF4F9),
+                        fontWeight = FontWeight.SemiBold
+                    )
+                )
+            }
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ){
+                Text(
+                    text = "체온",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 16.sp,
+                        color = Color(0xCCF1F4F9)
+                    )
+                )
+                Text(
+                    text = temperatureCelsius
+                        ?.let { String.format(Locale.getDefault(), "%.0f °C", it) }
+                        ?: "-- °C",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 18.sp,
+                        color = Color(0xFFAFF4F9),
+                        fontWeight = FontWeight.SemiBold
+                    )
                 )
             }
         }
