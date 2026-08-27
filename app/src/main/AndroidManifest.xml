@@ -90,22 +90,15 @@
             android:name=".ClassFile.AlarmReceiver"
             android:exported="false" />
 
+        <receiver
+            android:name=".ClassFile.PotchAlarmMonitorReceiver"
+            android:exported="false" />
+
         <activity
             android:name=".AlarmRingActivity"
             android:exported="false"
             android:excludeFromRecents="true" />
         
-        <!-- Phone Listener Service (Watch-to-Phone Communication) -->
-        <service
-            android:name=".service.PhoneListenerService"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="com.google.android.gms.wearable.MESSAGE_RECEIVED" />
-                <action android:name="com.google.android.gms.wearable.CHANNEL_EVENT" />
-                <data android:scheme="wear" android:host="*" />
-            </intent-filter>
-        </service>
-
         <!-- FileProvider for sharing log files -->
         <provider
             android:name="androidx.core.content.FileProvider"
@@ -122,12 +115,6 @@
             android:name="androidx.work.impl.foreground.SystemForegroundService"
             android:foregroundServiceType="dataSync"
             tools:node="merge" />
-
-        <!-- 삼성 PowerManager WakeLock 강제 비활성화 방지를 위한 ForegroundService -->
-        <service
-            android:name=".service.FileReceiveForegroundService"
-            android:foregroundServiceType="dataSync"
-            android:exported="false" />
 
         <service
             android:name=".Potch.PotchBleForegroundService"

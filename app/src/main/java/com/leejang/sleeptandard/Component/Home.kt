@@ -74,6 +74,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.leejang.sleeptandard.ui.theme.AppIcons
 import com.leejang.sleeptandard.ui.theme.Key
+import com.leejang.sleeptandard.ClassFile.AlarmScheduler
 import java.util.Calendar
 import java.util.Locale
 import kotlin.math.abs
@@ -87,9 +88,7 @@ fun OptionsSection(
         checked: Boolean,
         onCheckedChange: (Boolean) -> Unit,
         alarmName: String,
-        isSystemVibrationOn: Boolean,
-        isRem: Boolean,
-        onRemCheckedChange: (Boolean) -> Unit
+        isSystemVibrationOn: Boolean
 ) {
     val isNone = alarmName == "소리 없음"
 
@@ -111,67 +110,6 @@ fun OptionsSection(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Box(
-                modifier =
-                        Modifier
-                            .zIndex(3f)
-                            .neumorphicBackground(
-                                highlightColor = Color(0xFFB9C8DF).copy(alpha = 0.1f),
-                                blurRadius1 = 20.dp,
-                            )
-                            // Inner shadow
-                                .innerShadow(
-                                    shape = RoundedCornerShape(28.dp),
-                                    shadow =
-                                        Shadow(
-                                            radius = 25.dp,
-                                            spread = (-12).dp,
-                                            color = Color(0xFF030E1E).copy(0.8f),
-                                            offset = DpOffset(x = 5.dp, 6.dp)
-                                        )
-                                )
-        ) {
-            Box(
-                    modifier =
-                            Modifier.clip(RoundedCornerShape(28.dp)).size(100.dp).clickable {
-                                onRemCheckedChange(!isRem)
-                            },
-                    contentAlignment = Alignment.Center
-            ) {
-                Text(
-                        modifier = Modifier,
-                        text = if (isRem) "REM" else "N1",
-                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 15.sp),
-                )
-                // 2. 우측 하단에 배치될 전환 정보 (아이콘 + 반대 상태 텍스트)
-                Row(
-                        modifier =
-                                Modifier.align(Alignment.BottomEnd) // ✅ 우측 하단 정렬
-                                        .padding(bottom = 12.dp, end = 12.dp), // 적절한 여백 추가
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    // 전환 아이콘 (image_16cecb.png의 화살표 아이콘)
-                    Icon(
-                            painter = painterResource(AppIcons.HomeSwitch),
-                            contentDescription = "Switch",
-                            modifier = Modifier.size(11.dp),
-                            tint = Color.White.copy(alpha = 0.7f)
-                    )
-                    // 반대 상태 텍스트 (작게 표시)
-                    Text(
-                            text = if (isRem) "N1" else "REM",
-                            style =
-                                    MaterialTheme.typography.bodySmall.copy(
-                                            fontSize = 12.sp,
-                                            color = Color.White.copy(alpha = 0.7f),
-                                            textAlign = TextAlign.Center
-                                    )
-                    )
-                }
-            }
-        }
-
         Column(
                 modifier = Modifier.height(entireHeight).fillMaxWidth(),
                 verticalArrangement = Arrangement.Center,
@@ -499,57 +437,21 @@ fun DiamondStepSlider(
 @Composable
 fun WakeUpWindow(
         modifier: Modifier = Modifier,
-        onValueChange: (Int) -> Unit,
         selectedHour: Int,
         selectedMinute: Int,
         selectedIsAm: Boolean,
-        earlyWakeUpMinutes: Int,
         enabled: Boolean = true
 ) {
     Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-        // 기상 윈도우 슬라이더 부분
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 15.dp),
-            horizontalArrangement = Arrangement.SpaceAround,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // 최소 설정 시간
-            Text(
-                text = "10분",
-                style =
-                    MaterialTheme.typography.bodySmall.copy(
-                        color = Color(0xFFAFF4F9),
-                        fontSize = 14.sp
-                    )
+        Text(
+            text = "Potch 각성점수 모니터링",
+            style = MaterialTheme.typography.bodySmall.copy(
+                color = Color(0xFFAFF4F9),
+                fontSize = 14.sp
             )
+        )
+        Spacer(Modifier.height(8.dp))
 
-            // 슬라이더
-            Column(
-                modifier =
-                    Modifier.fillMaxWidth(0.8f) // 슬라이더의 전체 길이
-                        .padding(end = 4.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                DiamondStepSlider(
-                    value = earlyWakeUpMinutes,
-                    onValueChange = onValueChange,
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = enabled
-                )
-            }
-
-            // 최대 설정 시간
-            Text(
-                "30분",
-                style =
-                    MaterialTheme.typography.bodySmall.copy(
-                        color = Color(0xFFAFF4F9),
-                        fontSize = 14.sp
-                    )
-            )
-        }
-        // enabled: 홈 화면에서 사용할 때
-        // 알람 시간범위 출력
         if (enabled) {
             Text(
                 text =
@@ -557,28 +459,13 @@ fun WakeUpWindow(
                         selectedHour,
                         selectedMinute,
                         selectedIsAm,
-                        earlyWakeUpMinutes
+                        AlarmScheduler.MONITORING_WINDOW_MINUTES
                     ),
                 style =
                     MaterialTheme.typography.bodyMedium.copy(
                         fontSize = 15.sp,
                     )
             )
-
-            Spacer(Modifier.height(8.dp))
-
-            if (earlyWakeUpMinutes < 20) {
-                Text(
-                    text = "윈도우가 좁으면 적절한 기상 타이밍이 없을 수 있어요",
-                    style =
-                        MaterialTheme.typography.bodyMedium.copy(
-                            fontSize = 13.sp,
-                            color = Color(0xFFFF9F0A)
-                        )
-                )
-            }
-            // !enabled: 윈도우 튜토리얼에서 사용할 때
-            // 알람시간 범위 미출력
         }else{
             Spacer(Modifier.height((15.sp).value.dp))
             Spacer(Modifier.height(8.dp))
@@ -597,35 +484,6 @@ fun WindowTutorial(
         modifier: Modifier = Modifier,
         onDismiss: (Boolean) -> Unit,
 ) {
-    val density = LocalDensity.current
-    var selectedHour by remember { mutableIntStateOf(8) }
-    var selectedMinute by remember { mutableIntStateOf(30) }
-    var selectedIsAm by remember { mutableStateOf(true) }
-
-    // 1. ✅ rememberInfiniteTransition 대신 Animatable을 사용하여 수동 제어 상태를 만듭니다.
-    val animatedMinutes = remember { Animatable(30f) }
-
-    // 2. ✅ LaunchedEffect를 통해 화면 진입 시 한 번만 실행되는 시퀀스를 정의합니다.
-    LaunchedEffect(Unit) {
-        delay(1500) // 사용자가 화면을 인식할 수 있도록 아주 잠깐 대기합니다.
-
-        // [왕복 1단계] 30분 -> 10분으로 이동 (2초간 부드럽게)
-        animatedMinutes.animateTo(
-            targetValue = 10f,
-            animationSpec = tween(durationMillis = 1000, easing = LinearEasing)
-        )
-
-        delay(2500) // 10분 지점에서 잠시 멈춰 강조 효과를 줍니다.
-
-        // [왕복 2단계] 10분 -> 30분으로 다시 복귀 (2초간)
-        animatedMinutes.animateTo(
-            targetValue = 30f,
-            animationSpec = tween(durationMillis = 1000, easing = LinearEasing)
-        )
-    }
-
-    // 애니메이션되는 float 값을 정수로 변환하여 기존 로직에 전달
-    val earlyWakeUpMinutes = animatedMinutes.value.toInt()
     var isChecked by remember { mutableStateOf(true) }
 
     val checkBackground = if (isChecked) Color(0xFF050C16) else Color.White
@@ -634,7 +492,6 @@ fun WindowTutorial(
 
         Column(modifier = Modifier.fillMaxSize()) {
 
-            // 타임피커 부분 박스
             Box(modifier = Modifier.weight(1f)) {
                 Column(
                     modifier = modifier.fillMaxSize(),
@@ -643,103 +500,35 @@ fun WindowTutorial(
                     Spacer(Modifier.height(200.dp))
 
                     Text(
-                        text = "기상 가능 시간을 설정해보세요",
+                        text = "Potch 스마트 알람",
                         style =
                             MaterialTheme.typography.titleMedium.copy(
                                 color = Color(0xFFBCD8FF),
                                 fontSize = 24.sp
                             )
                     )
+                    Spacer(Modifier.height(16.dp))
+                    Text(
+                        text = "설정 시각 15분 전부터\n각성점수를 실시간으로 확인해요",
+                        textAlign = TextAlign.Center,
+                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 16.sp)
+                    )
                 }
             }
 
-            // 기상윈도우 ~ 끝(완료 버튼 밑 공간) 까지에 해당하는 박스
             Column(
-                modifier = Modifier.fillMaxWidth().weight(1f)
+                modifier = Modifier.fillMaxWidth().weight(1f),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Spacer(Modifier.weight(1f))
-
-                BoxWithConstraints(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
-                    val fullWidth = constraints.maxWidth.toFloat()
-
-                    // ✅ [최적화 1] 변하지 않는 값들은 람다 밖에서 한 번만 계산합니다.
-                    val rowPaddingPx = with(density) { 35.dp.toPx() }
-                    val sliderWidth = (fullWidth - (rowPaddingPx * 2)) * 0.8f
-                    val sliderStartOffset = rowPaddingPx + ((fullWidth - (rowPaddingPx * 2)) * 0.1f)
-                    val internalSideMarginPx =
-                        with(density) { 12.dp.toPx() } // 원래는 15.dp인데 뭔가 비율이 안맞아서 임의로 내린 값
-                    val usableWidth = sliderWidth - (internalSideMarginPx * 2)
-                    val thumbCenterY = with(density) { 48.dp.toPx() / 2 }
-
-                    val fraction = (earlyWakeUpMinutes - 10).toFloat() / 20f
-                    val thumbCenterX =
-                        sliderStartOffset + internalSideMarginPx + (usableWidth * fraction)
-
-                    WakeUpWindow(
-                        onValueChange = {},
-                        modifier = Modifier,
-                        selectedHour = selectedHour,
-                        selectedMinute = selectedMinute,
-                        selectedIsAm = selectedIsAm,
-                        earlyWakeUpMinutes = earlyWakeUpMinutes,
-                        enabled = false
+                Text(
+                    text = "각성점수가 80점을 넘으면 즉시 알람이 울리고,\n그렇지 않으면 설정 시각에 울려요.",
+                    textAlign = TextAlign.Center,
+                    style = MaterialTheme.typography.titleSmall.copy(
+                        color = Color(0xFFBCD8FF),
+                        fontSize = 18.sp
                     )
-
-                    Icon(
-                        modifier =
-                            Modifier.graphicsLayer {
-                                // 실제 위치 이동 (레이아웃 재계산 없음)
-                                translationX = thumbCenterX - 12.dp.toPx()
-                                translationY = thumbCenterY + 5.dp.toPx()
-                            },
-                        painter = painterResource(AppIcons.HomeHand),
-                        contentDescription = "손모양"
-                    )
-                }
-                Spacer(Modifier.weight(1f))
-
-                Box(modifier = Modifier.height(164.dp)) {
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Spacer(Modifier.height(47.dp))
-
-                        Text(
-                            text =
-                                calculateWakeUpRangeText(
-                                    selectedHour,
-                                    selectedMinute,
-                                    selectedIsAm,
-                                    earlyWakeUpMinutes
-                                ),
-                            style =
-                                MaterialTheme.typography.bodySmall.copy(
-                                    color = Color.White,
-                                    fontSize = 15.sp,
-                                )
-                        )
-
-                        Spacer(Modifier.height(24.dp))
-
-                        Text(
-                            text = "이 범위 안에서",
-                            style =
-                                MaterialTheme.typography.titleSmall.copy(
-                                    color = Color(0xFFBCD8FF),
-                                    fontSize = 18.sp
-                                )
-                        )
-                        Text(
-                            text = "가장 편하게 깨어날 순간에 알람이 울려요",
-                            style =
-                                MaterialTheme.typography.titleSmall.copy(
-                                    color = Color(0xFFBCD8FF),
-                                    fontSize = 18.sp
-                                )
-                        )
-                    }
-                }
+                )
                 Spacer(Modifier.weight(2f))
                 Spacer(Modifier.height(56.dp))
                 Spacer(Modifier.height(25.dp))

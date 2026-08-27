@@ -10,8 +10,10 @@ import kotlin.math.sqrt
 
 /** 안정점수 및 개인 기준선 계산의 초기 조정값. */
 data class StabilityConfig(
-    // HRV 안정점수 구조가 변경되어 이전 후보/기준선과 섞이지 않도록 version을 올린다.
+    // 기존 RR/HR/체온 안정 episode 후보 버전은 유지한다.
     val algorithmVersion: Int = 3,
+    // HRV/RRV lower-tail 후보만 이전 안정 episode 기준선과 분리한다.
+    val lowerTailBaselineAlgorithmVersion: Int = 4,
 
     val minimumMetricQuality: Double = 0.35,
     val minimumDomainCount: Int = 3,
@@ -47,6 +49,7 @@ data class StabilityConfig(
     val maxStoredCandidates: Int = 300,
     val maxCandidateAgeDays: Int = 90,
     val episodeSeparationMillis: Long = 30L * 60L * 1000L,
+    val maxSessionLowerTailSamplesPerMetric: Int = 60_000,
 
     // 값의 단위에 맞춘 초기 MAD/slope 정규화 크기. 실제 착용 로그로 재조정해야 한다.
     val rrVariationScaleBpm: Double = 1.5,
@@ -159,11 +162,60 @@ data class StabilitySessionSummary(
     val totalStoredCandidateCount: Int
 )
 
-private data class TimedMetricValue(
+internal data class TimedMetricValue(
     val timestampMillis: Long,
     val value: Double,
     val quality: Double
 )
+
+/** HRV/RRV 개인 기준선은 안정 episode가 아니라 전체 유효 세션 값의 하위 꼬리에서 뽑는다. */
+internal object LowerTailBaselinePolicy {
+    private val fractions = mapOf(
+        BaselineMetricType.HRV_RMSSD to 0.002,
+        BaselineMetricType.HRV_LF_HF to 0.10,
+        BaselineMetricType.RRV to 0.15
+    )
+
+    fun fractionFor(metricType: BaselineMetricType): Double? = fractions[metricType]
+
+    fun isLowerTailMetric(metricType: BaselineMetricType): Boolean =
+        metricType in fractions
+
+    fun select(
+        samples: List<TimedMetricValue>,
+        metricType: BaselineMetricType
+    ): List<TimedMetricValue> {
+        val fraction = fractionFor(metricType) ?: return emptyList()
+        val sorted = samples
+            .filter { it.value.isFinite() && it.quality.isFinite() }
+            .sortedBy { it.value }
+        if (sorted.isEmpty()) return emptyList()
+        val count = ceil(sorted.size * fraction)
+            .toInt()
+            .coerceIn(1, sorted.size)
+        return sorted.take(count)
+    }
+
+    fun densestRegion(values: List<Double>, fraction: Double): List<Double> {
+        val sorted = values.filter { it.isFinite() }.sorted()
+        if (sorted.isEmpty()) return emptyList()
+
+        val windowSize = ceil(sorted.size * fraction.coerceIn(0.1, 1.0))
+            .toInt()
+            .coerceAtLeast(minOf(8, sorted.size))
+            .coerceAtMost(sorted.size)
+        var bestStart = 0
+        var bestWidth = Double.POSITIVE_INFINITY
+        for (start in 0..sorted.size - windowSize) {
+            val width = sorted[start + windowSize - 1] - sorted[start]
+            if (width < bestWidth) {
+                bestWidth = width
+                bestStart = start
+            }
+        }
+        return sorted.subList(bestStart, bestStart + windowSize)
+    }
+}
 
 private data class StabilityFrameSample(
     val timestampMillis: Long,
@@ -236,6 +288,11 @@ class PotchStabilityCalculator(
 ) {
     private val histories = BaselineMetricType.values().associateWith { ArrayDeque<TimedMetricValue>() }
     private val hrvLfHfHistory = ArrayDeque<TimedMetricValue>()
+    private val sessionLowerTailSamples = listOf(
+        BaselineMetricType.HRV_RMSSD,
+        BaselineMetricType.HRV_LF_HF,
+        BaselineMetricType.RRV
+    ).associateWith { ArrayDeque<TimedMetricValue>() }
 
     private var sessionId: String? = null
     private var sessionActive = false
@@ -262,7 +319,14 @@ class PotchStabilityCalculator(
 
         sessionId = requestedSessionId
         sessionActive = true
-        frozenBaselines = personalBaselineTable.loadAll(config.algorithmVersion)
+        frozenBaselines = BaselineMetricType.values()
+            .mapNotNull { metricType ->
+                personalBaselineTable.load(
+                    metricType,
+                    baselineAlgorithmVersion(metricType)
+                )?.let { metricType to it }
+            }
+            .toMap()
 
         clearTransientState(clearSessionCandidates = true)
         log(
@@ -334,6 +398,14 @@ class PotchStabilityCalculator(
         val hrvRmssdQuality = state.hrvRmssdQuality.coerceIn(0.0, 1.0)
         val hrvFrequencyQuality = state.hrvFrequencyQuality.coerceIn(0.0, 1.0)
         val temperatureQuality = state.skinTemperatureQuality.coerceIn(0.0, 1.0)
+
+        collectLowerTailBaselineSamples(
+            state = state,
+            nowMillis = input.phoneTimeMillis,
+            rrvQuality = rrvQuality,
+            hrvRmssdQuality = hrvRmssdQuality,
+            hrvFrequencyQuality = hrvFrequencyQuality
+        )
 
         val rrSignalConsistency = calculateRrSignalConsistency(state)
         val rrvSignalConsistency = calculateRrvSignalConsistency(state)
@@ -574,6 +646,14 @@ class PotchStabilityCalculator(
             maxRecordCount = config.maxStoredCandidates
         )
 
+        val lowerTailCandidates = buildLowerTailCandidateRecords(nowMillis)
+        stableCandidateTable.insertLowerTailCandidates(lowerTailCandidates)
+        stableCandidateTable.pruneLowerTailCandidates(
+            nowMillis = nowMillis,
+            maxAgeDays = config.maxCandidateAgeDays,
+            maxRecordCountPerMetric = config.maxStoredCandidates
+        )
+
         // INSERT IGNORE, START_STICKY 동일 세션 재개, DB 수준 최대 5개 trim까지 반영한
         // 최종 후보 테이블 잔존 여부를 다시 조회한다.
         val currentSessionId = sessionId
@@ -619,7 +699,8 @@ class PotchStabilityCalculator(
 
         log(
             "stability session ended: id=${sessionId}, detected=${sessionCandidates.size}, " +
-                    "retained=$retainedCurrentSessionCount, baselineUpdated=$updatedBaselineCount, total=$totalStored"
+                    "retained=$retainedCurrentSessionCount, lowerTail=${lowerTailCandidates.size}, " +
+                    "baselineUpdated=$updatedBaselineCount, total=$totalStored"
         )
 
         sessionActive = false
@@ -645,6 +726,48 @@ class PotchStabilityCalculator(
 
         if (input.analysisSegmentId < 0L) return "유효하지 않은 analysis segment"
         return null
+    }
+
+    private fun collectLowerTailBaselineSamples(
+        state: ArousalState,
+        nowMillis: Long,
+        rrvQuality: Double,
+        hrvRmssdQuality: Double,
+        hrvFrequencyQuality: Double
+    ) {
+        fun append(metricType: BaselineMetricType, value: Double?, quality: Double) {
+            if (value == null || !value.isFinite()) return
+            if (quality < config.minimumMetricQuality) return
+            val buffer = sessionLowerTailSamples.getValue(metricType)
+            if (buffer.lastOrNull()?.timestampMillis == nowMillis) buffer.removeLast()
+            buffer.add(TimedMetricValue(nowMillis, value, quality.coerceIn(0.0, 1.0)))
+            while (buffer.size > config.maxSessionLowerTailSamplesPerMetric) {
+                buffer.removeFirst()
+            }
+        }
+
+        append(BaselineMetricType.RRV, state.rrvRmssd, rrvQuality)
+        append(BaselineMetricType.HRV_RMSSD, state.hrvRmssd, hrvRmssdQuality)
+        if (state.hrvFrequencyUsable) {
+            append(BaselineMetricType.HRV_LF_HF, state.hrvLfHf, hrvFrequencyQuality)
+        }
+    }
+
+    private fun buildLowerTailCandidateRecords(nowMillis: Long): List<LowerTailCandidateRecord> {
+        val currentSessionId = sessionId ?: return emptyList()
+        return sessionLowerTailSamples.flatMap { (metricType, samples) ->
+            LowerTailBaselinePolicy.select(samples.toList(), metricType).map { sample ->
+                LowerTailCandidateRecord(
+                    sleepSessionId = currentSessionId,
+                    metricType = metricType,
+                    value = sample.value,
+                    quality = sample.quality,
+                    observedAt = sample.timestampMillis,
+                    algorithmVersion = config.lowerTailBaselineAlgorithmVersion,
+                    createdAt = nowMillis
+                )
+            }
+        }
     }
 
     private fun handleHardGateFailure(nowMillis: Long, reason: String) {
@@ -737,10 +860,7 @@ class PotchStabilityCalculator(
     }
 
 
-    /**
-     * LF/HF도 안정 episode에서 만든 개인 기준선과 비교한다.
-     * 주파수영역 사용 제한을 통과한 frame만 history와 안정점수에 반영한다.
-     */
+    /** 주파수영역 사용 제한을 통과한 LF/HF frame만 안정점수에 반영한다. */
     private fun addAndCalculateHrvFrequencyMetric(
         state: ArousalState,
         quality: Double,
@@ -1119,15 +1239,26 @@ class PotchStabilityCalculator(
         var updateCount = 0
 
         BaselineMetricType.values().forEach { metricType ->
-            val values = stableCandidateTable.loadMetricValues(
-                metricType = metricType,
-                algorithmVersion = config.algorithmVersion,
-                nowMillis = nowMillis,
-                maxAgeDays = config.maxCandidateAgeDays,
-                limit = config.maxStoredCandidates
-            )
+            val baselineVersion = baselineAlgorithmVersion(metricType)
+            val values = if (LowerTailBaselinePolicy.isLowerTailMetric(metricType)) {
+                stableCandidateTable.loadLowerTailMetricValues(
+                    metricType = metricType,
+                    algorithmVersion = baselineVersion,
+                    nowMillis = nowMillis,
+                    maxAgeDays = config.maxCandidateAgeDays,
+                    limit = config.maxStoredCandidates
+                )
+            } else {
+                stableCandidateTable.loadMetricValues(
+                    metricType = metricType,
+                    algorithmVersion = baselineVersion,
+                    nowMillis = nowMillis,
+                    maxAgeDays = config.maxCandidateAgeDays,
+                    limit = config.maxStoredCandidates
+                )
+            }
             val count = values.size
-            val existing = personalBaselineTable.load(metricType, config.algorithmVersion)
+            val existing = personalBaselineTable.load(metricType, baselineVersion)
             val lifecycleState = lifecycleStateFor(count)
 
             if (count < config.minimumCandidateCountForBaseline) {
@@ -1141,7 +1272,7 @@ class PotchStabilityCalculator(
                     lastCandidateId = values.maxOfOrNull { it.candidateId },
                     updatedAt = nowMillis,
                     distributionVersion = existing?.distributionVersion ?: 0,
-                    algorithmVersion = config.algorithmVersion
+                    algorithmVersion = baselineVersion
                 )
                 personalBaselineTable.upsert(record)
                 updateCount += 1
@@ -1162,7 +1293,7 @@ class PotchStabilityCalculator(
 
             if (!shouldRecalculate) return@forEach
 
-            val denseValues = densestRegion(
+            val denseValues = LowerTailBaselinePolicy.densestRegion(
                 values = values.map { it.value },
                 fraction = config.denseRegionFraction
             )
@@ -1191,7 +1322,7 @@ class PotchStabilityCalculator(
                     lastCandidateId = values.maxOfOrNull { it.candidateId },
                     updatedAt = nowMillis,
                     distributionVersion = (existing?.distributionVersion ?: 0) + 1,
-                    algorithmVersion = config.algorithmVersion
+                    algorithmVersion = baselineVersion
                 )
             )
             updateCount += 1
@@ -1209,27 +1340,12 @@ class PotchStabilityCalculator(
         }
     }
 
-    private fun densestRegion(values: List<Double>, fraction: Double): List<Double> {
-        val sorted = values.filter { it.isFinite() }.sorted()
-        if (sorted.isEmpty()) return emptyList()
-
-        val windowSize = ceil(sorted.size * fraction.coerceIn(0.1, 1.0))
-            .toInt()
-            .coerceAtLeast(minOf(8, sorted.size))
-            .coerceAtMost(sorted.size)
-
-        var bestStart = 0
-        var bestWidth = Double.POSITIVE_INFINITY
-        for (start in 0..sorted.size - windowSize) {
-            val end = start + windowSize - 1
-            val width = sorted[end] - sorted[start]
-            if (width < bestWidth) {
-                bestWidth = width
-                bestStart = start
-            }
+    private fun baselineAlgorithmVersion(metricType: BaselineMetricType): Int =
+        if (LowerTailBaselinePolicy.isLowerTailMetric(metricType)) {
+            config.lowerTailBaselineAlgorithmVersion
+        } else {
+            config.algorithmVersion
         }
-        return sorted.subList(bestStart, bestStart + windowSize)
-    }
 
     private fun calculateBaselineProximity(
         metricType: BaselineMetricType,
@@ -1431,6 +1547,7 @@ class PotchStabilityCalculator(
     private fun clearTransientState(clearSessionCandidates: Boolean) {
         histories.values.forEach { it.clear() }
         hrvLfHfHistory.clear()
+        sessionLowerTailSamples.values.forEach { it.clear() }
         resetEntryState()
         activeEpisode = null
         lastAnalysisSegmentId = null

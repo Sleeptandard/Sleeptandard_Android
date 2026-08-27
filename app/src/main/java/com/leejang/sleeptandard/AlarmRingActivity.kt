@@ -1,8 +1,6 @@
 package com.leejang.sleeptandard
 
-import android.app.AlarmManager
 import android.app.NotificationManager
-import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
@@ -48,11 +46,9 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.ViewModelProvider
 import com.leejang.sleeptandard.ClassFile.AlarmPlayer
-import com.leejang.sleeptandard.ClassFile.AlarmReceiver
+import com.leejang.sleeptandard.ClassFile.AlarmScheduler
 import com.leejang.sleeptandard.Prefs.AlarmPreferences
-import com.leejang.sleeptandard.ViewModel.AlarmViewModel
 import com.leejang.sleeptandard.ui.theme.Sleeptandard_MVP_DemoTheme
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
@@ -63,14 +59,9 @@ import kotlin.math.roundToInt
 class AlarmRingActivity : ComponentActivity() {
 
     private var alarmId: Int = 0
-    // private var label: String = "알람"
-    private lateinit var alarmViewModel: AlarmViewModel
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
-        // ViewModel 초기화
-        alarmViewModel = ViewModelProvider(this)[AlarmViewModel::class.java]
 
         val alarmPrefs = AlarmPreferences(this)
         alarmId = intent.getIntExtra("alarmId", 0)
@@ -102,43 +93,16 @@ class AlarmRingActivity : ComponentActivity() {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         nm.cancel(alarmId)
 
-        // 3) 백업 알람 취소 (스마트 알람이 먼저 울렸을 경우 목표 시각의 백업 알람을 제거)
+        // 3) 정시 알람과 Potch 모니터링 시작 알람을 모두 정리
         try {
-            val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
             val alarmPrefs = AlarmPreferences(this)
             val currentAlarm = alarmPrefs.loadAlarm()
-            
-            // ✅ AlarmScheduler에서 설정한 것과 동일한 extras를 넣어야 PendingIntent를 찾을 수 있음
-            val intent = Intent(this, AlarmReceiver::class.java).apply {
-                putExtra("alarmId", currentAlarm.id)
-                putExtra("ringtoneUri", currentAlarm.ringtoneUri)
-                putExtra("volume", currentAlarm.volume)
-                putExtra("vibrationEnabled", currentAlarm.vibrationEnabled)
-            }
-            val pendingIntent = PendingIntent.getBroadcast(
-                this,
-                alarmId, // 동일한 requestCode 사용
-                intent,
-                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_NO_CREATE
-            )
-            
-            // PendingIntent가 존재하면 취소
-            if (pendingIntent != null) {
-                alarmManager.cancel(pendingIntent)
-                pendingIntent.cancel()
-                Log.i(TAG, "✅ Backup alarm cancelled for alarmId: $alarmId")
-            } else {
-                Log.w(TAG, "⚠️ No pending alarm found for alarmId: $alarmId")
-            }
+            AlarmScheduler(this).cancel(currentAlarm)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to cancel backup alarm", e)
+            Log.e(TAG, "Failed to cancel Potch alarm reservations", e)
         }
 
-        // 4) 워치에 수면 추적 중지 명령 전송
-        alarmViewModel.stopSleepTracking()
-        Log.i(TAG, "Stop command sent to Watch")
-
-        // 5) MainActivity로 넘어가면서 알람 리뷰 화면에서 부터 시작하도록 요청
+        // 4) MainActivity로 넘어가면서 알람 리뷰 화면에서 부터 시작하도록 요청
         val intent = Intent(this, MainActivity::class.java).apply {
             putExtra("startDestination", "reviewAlarm") // Screen.AfterAlarm.route 값
             addFlags(
@@ -148,7 +112,7 @@ class AlarmRingActivity : ComponentActivity() {
         }
         startActivity(intent)
 
-        // 6) 화면 닫기
+        // 5) 화면 닫기
         finish()
     }
 

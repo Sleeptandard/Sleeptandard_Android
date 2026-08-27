@@ -83,8 +83,6 @@ fun HomeScreen(
     var selectedRingtoneUri by remember { mutableStateOf(alarmViewModel.alarm.ringtoneUri) }
     var selectedVibrationEnabled by remember { mutableStateOf(alarmViewModel.alarm.vibrationEnabled) }
     var selectedVolume by remember { mutableIntStateOf(alarmViewModel.alarm.volume) }
-    var earlyWakeUpMinutes by remember { mutableIntStateOf(alarmViewModel.alarm.earlyWakeUpMinutes) }
-    var isRem by remember { mutableStateOf(alarmViewModel.alarm.isRem) }
 
     // 옵션섹션 - 알람음설정 컴포넌트에 띄울 알람음 이름
     var alarmName by remember { mutableStateOf("") }
@@ -227,11 +225,9 @@ fun HomeScreen(
                 WakeUpWindow(
                     modifier = Modifier
                         .fillMaxWidth(),
-                    onValueChange = { earlyWakeUpMinutes = it },
                     selectedHour = selectedHour,
                     selectedMinute = selectedMinute,
-                    selectedIsAm = selectedIsAm,
-                    earlyWakeUpMinutes = earlyWakeUpMinutes
+                    selectedIsAm = selectedIsAm
                 )
 
                 Spacer(Modifier.weight(1f))
@@ -274,9 +270,7 @@ fun HomeScreen(
                     checked = selectedVibrationEnabled,
                     onCheckedChange = { selectedVibrationEnabled = it },
                     alarmName = alarmName,
-                    isSystemVibrationOn = isNotificationVibrationOn,
-                    isRem = isRem,
-                    onRemCheckedChange = { isRem = it }
+                    isSystemVibrationOn = isNotificationVibrationOn
                 )
 
                 Spacer(modifier = Modifier.weight(2f))
@@ -336,9 +330,7 @@ fun HomeScreen(
                         isAm = selectedIsAm,
                         ringtoneUri = uriStr,
                         vibrationEnabled = selectedVibrationEnabled,
-                        volume = selectedVolume,
-                        earlyWakeUpMinutes = earlyWakeUpMinutes,
-                        isRem = isRem,
+                        volume = selectedVolume
                     )
                 },
                 defaultVolume = alarmViewModel.alarm.volume,
@@ -364,7 +356,6 @@ fun HomeScreen(
         ) {
             // 진짜 개지랄
             SituationContent(
-                alarmPrefs = alarmPrefs,
                 alarmViewModel = alarmViewModel,
                 scheduler = scheduler,
                 selectedHour = selectedHour,
@@ -373,8 +364,6 @@ fun HomeScreen(
                 selectedRingtoneUri = selectedRingtoneUri,
                 selectedVibrationEnabled = selectedVibrationEnabled,
                 selectedVolume = selectedVolume,
-                earlyWakeUpMinutes = earlyWakeUpMinutes,
-                isRem = isRem,
                 isCustomMode = isCustomMode,
                 situationOptions = situationOptions,
                 onCustomMode = { isCustomMode = true },

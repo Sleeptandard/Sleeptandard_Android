@@ -81,9 +81,10 @@ data class StableCandidateRecord(
  */
 internal object PotchStabilitySchema {
     const val DATABASE_NAME = "potch_stability.db"
-    const val DATABASE_VERSION = 2
+    const val DATABASE_VERSION = 3
 
     const val STABLE_CANDIDATE_TABLE = "stable_candidate"
+    const val LOWER_TAIL_CANDIDATE_TABLE = "lower_tail_candidate"
     const val PERSONAL_BASELINE_TABLE = "personal_baseline"
 
     const val CREATE_STABLE_CANDIDATE_TABLE = """
@@ -142,6 +143,20 @@ internal object PotchStabilitySchema {
             PRIMARY KEY(metric_type, algorithm_version)
         )
     """
+
+    const val CREATE_LOWER_TAIL_CANDIDATE_TABLE = """
+        CREATE TABLE IF NOT EXISTS lower_tail_candidate (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            sleep_session_id TEXT NOT NULL,
+            metric_type TEXT NOT NULL,
+            value REAL NOT NULL,
+            quality REAL NOT NULL,
+            observed_at INTEGER NOT NULL,
+            algorithm_version INTEGER NOT NULL,
+            created_at INTEGER NOT NULL,
+            UNIQUE(sleep_session_id, metric_type, observed_at, value)
+        )
+    """
 }
 
 internal class PotchStabilityDbHelper(context: Context) : SQLiteOpenHelper(
@@ -152,6 +167,7 @@ internal class PotchStabilityDbHelper(context: Context) : SQLiteOpenHelper(
 ) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(PotchStabilitySchema.CREATE_STABLE_CANDIDATE_TABLE)
+        db.execSQL(PotchStabilitySchema.CREATE_LOWER_TAIL_CANDIDATE_TABLE)
         db.execSQL(PotchStabilitySchema.CREATE_PERSONAL_BASELINE_TABLE)
         db.execSQL(
             "CREATE INDEX IF NOT EXISTS idx_stable_candidate_created " +
@@ -161,6 +177,7 @@ internal class PotchStabilityDbHelper(context: Context) : SQLiteOpenHelper(
             "CREATE INDEX IF NOT EXISTS idx_stable_candidate_session " +
                     "ON ${PotchStabilitySchema.STABLE_CANDIDATE_TABLE}(sleep_session_id)"
         )
+        createLowerTailCandidateIndexes(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -170,6 +187,23 @@ internal class PotchStabilityDbHelper(context: Context) : SQLiteOpenHelper(
                         "ADD COLUMN hrv_lf_hf_median REAL"
             )
         }
+        if (oldVersion < 3) {
+            db.execSQL(PotchStabilitySchema.CREATE_LOWER_TAIL_CANDIDATE_TABLE)
+            createLowerTailCandidateIndexes(db)
+        }
+    }
+
+    private fun createLowerTailCandidateIndexes(db: SQLiteDatabase) {
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS idx_lower_tail_metric_created " +
+                    "ON ${PotchStabilitySchema.LOWER_TAIL_CANDIDATE_TABLE}" +
+                    "(metric_type, algorithm_version, created_at DESC)"
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS idx_lower_tail_session " +
+                    "ON ${PotchStabilitySchema.LOWER_TAIL_CANDIDATE_TABLE}" +
+                    "(sleep_session_id)"
+        )
     }
 }
 
@@ -188,6 +222,7 @@ internal object PotchStabilityDatabaseProvider {
  * 안정 후보 테이블 접근 객체.
  *
  * - 한 수면 세션에서 선별된 최대 5개 episode 대표값을 저장한다.
+ * - HRV RMSSD/LF-HF/RRV는 별도 lower-tail 후보 테이블에 세션 하위 표본을 저장한다.
  * - 최근 90일, 최대 300개 제한을 적용한다.
  * - 개인 기준선 재계산 시 지표별 유효 값을 읽어 온다.
  */
@@ -320,6 +355,100 @@ class StableCandidateTable(context: Context) {
         }
     }
 
+    /** 전체 세션 값의 하위 꼬리에서 선별된 개인 기준선 후보를 저장한다. */
+    @Synchronized
+    fun insertLowerTailCandidates(records: List<LowerTailCandidateRecord>): List<Long> {
+        if (records.isEmpty()) return emptyList()
+
+        val db = helper.writableDatabase
+        val insertedIds = mutableListOf<Long>()
+        db.beginTransaction()
+        try {
+            records.forEach { record ->
+                val values = ContentValues().apply {
+                    put("sleep_session_id", record.sleepSessionId)
+                    put("metric_type", record.metricType.name)
+                    put("value", record.value)
+                    put("quality", record.quality.coerceIn(0.0, 1.0))
+                    put("observed_at", record.observedAt)
+                    put("algorithm_version", record.algorithmVersion)
+                    put("created_at", record.createdAt)
+                }
+                val id = db.insertWithOnConflict(
+                    PotchStabilitySchema.LOWER_TAIL_CANDIDATE_TABLE,
+                    null,
+                    values,
+                    SQLiteDatabase.CONFLICT_IGNORE
+                )
+                if (id >= 0L) insertedIds += id
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+        return insertedIds
+    }
+
+    @Synchronized
+    fun loadLowerTailMetricValues(
+        metricType: BaselineMetricType,
+        algorithmVersion: Int,
+        nowMillis: Long,
+        maxAgeDays: Int = 90,
+        limit: Int = 300
+    ): List<StableMetricValue> {
+        val minimumCreatedAt = nowMillis - maxAgeDays * 24L * 60L * 60L * 1000L
+        val cursor = helper.readableDatabase.query(
+            PotchStabilitySchema.LOWER_TAIL_CANDIDATE_TABLE,
+            arrayOf("id", "value", "created_at", "sleep_session_id"),
+            "metric_type = ? AND algorithm_version = ? AND created_at >= ?",
+            arrayOf(metricType.name, algorithmVersion.toString(), minimumCreatedAt.toString()),
+            null,
+            null,
+            "created_at DESC, id DESC",
+            limit.toString()
+        )
+        return cursor.useAndMap {
+            StableMetricValue(
+                candidateId = getLong(getColumnIndexOrThrow("id")),
+                value = getDouble(getColumnIndexOrThrow("value")),
+                createdAt = getLong(getColumnIndexOrThrow("created_at")),
+                sleepSessionId = getString(getColumnIndexOrThrow("sleep_session_id"))
+            )
+        }
+    }
+
+    @Synchronized
+    fun pruneLowerTailCandidates(
+        nowMillis: Long,
+        maxAgeDays: Int = 90,
+        maxRecordCountPerMetric: Int = 300
+    ) {
+        val db = helper.writableDatabase
+        val minimumCreatedAt = nowMillis - maxAgeDays * 24L * 60L * 60L * 1000L
+        db.delete(
+            PotchStabilitySchema.LOWER_TAIL_CANDIDATE_TABLE,
+            "created_at < ?",
+            arrayOf(minimumCreatedAt.toString())
+        )
+
+        BaselineMetricType.values().forEach { metricType ->
+            db.execSQL(
+                """
+                DELETE FROM ${PotchStabilitySchema.LOWER_TAIL_CANDIDATE_TABLE}
+                WHERE id IN (
+                    SELECT id
+                    FROM ${PotchStabilitySchema.LOWER_TAIL_CANDIDATE_TABLE}
+                    WHERE metric_type = ?
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT -1 OFFSET $maxRecordCountPerMetric
+                )
+                """.trimIndent(),
+                arrayOf(metricType.name)
+            )
+        }
+    }
+
     @Synchronized
     fun countAll(): Int {
         helper.readableDatabase.rawQuery(
@@ -408,4 +537,14 @@ data class StableMetricValue(
     val value: Double,
     val createdAt: Long,
     val sleepSessionId: String
+)
+
+data class LowerTailCandidateRecord(
+    val sleepSessionId: String,
+    val metricType: BaselineMetricType,
+    val value: Double,
+    val quality: Double,
+    val observedAt: Long,
+    val algorithmVersion: Int,
+    val createdAt: Long
 )

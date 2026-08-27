@@ -21,4 +21,3 @@ dependencyResolutionManagement {
 
 rootProject.name = "Sleeptandard_MVP_Demo"
 include(":app")
-include(":wear")

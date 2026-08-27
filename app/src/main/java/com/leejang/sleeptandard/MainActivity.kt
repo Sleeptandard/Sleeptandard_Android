@@ -7,7 +7,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
-import androidx.interpolator.view.animation.FastOutSlowInInterpolator
+import android.view.animation.AccelerateDecelerateInterpolator
 
 import com.leejang.sleeptandard.ClassFile.AlarmScheduler
 import com.leejang.sleeptandard.Component.AppNav
@@ -72,7 +72,7 @@ class MainActivity : ComponentActivity() {
                 .scaleX(0.98f)
                 .scaleY(0.98f)
                 .setDuration(750L)
-                .setInterpolator(FastOutSlowInInterpolator())
+                .setInterpolator(AccelerateDecelerateInterpolator())
                 .withEndAction {
                     // ✅ 반드시 제거해줘야 함
                     splashScreenView.remove()

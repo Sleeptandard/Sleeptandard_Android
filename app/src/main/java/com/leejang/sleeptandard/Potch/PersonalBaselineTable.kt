@@ -27,6 +27,7 @@ enum class BaselineLifecycleState {
  * 개인 기준선 테이블의 한 행.
  *
  * center/spread는 후보 20개 미만일 때 null이다. spread에는 dense region의 MAD를 저장한다.
+ * HRV RMSSD/LF-HF/RRV의 candidateCount는 안정 episode 수가 아니라 lower-tail 표본 수다.
  */
 data class PersonalBaselineRecord(
     val metricType: BaselineMetricType,

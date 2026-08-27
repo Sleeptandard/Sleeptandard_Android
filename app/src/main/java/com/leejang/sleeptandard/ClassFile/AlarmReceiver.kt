@@ -112,12 +112,17 @@ object AlarmPlayer {
 
 class AlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        // 알람 정보 (없으면 기본값 사용)
-        // val label = intent.getStringExtra("label") ?: "알람"
-        val ringtoneUriString = intent.getStringExtra("ringtoneUri")
-        val vibrationEnabled = intent.getBooleanExtra("vibrationEnabled", true)
-        val alarmId = intent.getIntExtra("alarmId", 0)
-        val volume = intent.getIntExtra("volume", 10)
+        val ringtoneUriString = intent.getStringExtra(AlarmScheduler.EXTRA_RINGTONE_URI)
+        val vibrationEnabled =
+            intent.getBooleanExtra(AlarmScheduler.EXTRA_VIBRATION_ENABLED, true)
+        val alarmId = intent.getIntExtra(AlarmScheduler.EXTRA_ALARM_ID, 0)
+        val volume = intent.getIntExtra(AlarmScheduler.EXTRA_VOLUME, 10)
+        val targetTimeMillis =
+            intent.getLongExtra(AlarmScheduler.EXTRA_TARGET_TIME_MILLIS, 0L)
+
+        // Whether this is the target-time fallback or an early Potch trigger,
+        // make both exact-alarm reservations disappear before ringing.
+        AlarmScheduler(context).completeTriggeredAlarm(alarmId, targetTimeMillis)
 
         // 1) 소리/진동 시작 (Activity가 안 떠도 최소한 울리게)
         AlarmPlayer.start(context, ringtoneUriString, vibrationEnabled, volume)

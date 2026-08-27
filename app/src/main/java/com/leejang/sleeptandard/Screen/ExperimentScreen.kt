@@ -46,7 +46,6 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.leejang.sleeptandard.Potch.ArousalState
 import com.leejang.sleeptandard.Potch.BaselineLifecycleState
 import com.leejang.sleeptandard.Potch.BaselineMetricType
-import com.leejang.sleeptandard.Potch.DomainEvidence
 import com.leejang.sleeptandard.Potch.HeartRateGraphData
 import com.leejang.sleeptandard.Potch.HeartRatePeakPolarity
 import com.leejang.sleeptandard.Potch.InternalPotchLogFile
@@ -411,13 +410,10 @@ private fun RespirationGraphCard(data: PpgRespirationGraphData) {
 
 @Composable
 private fun ArousalSection(state: ArousalState) {
-    SectionCard("각성도 분석 · Evidence Scoring") {
+    SectionCard("각성도 분석 · Fixed Scoring") {
         ValueTile(
             title = "최종 Wake Score",
-            value = "%.1f / 100 · confidence %.1f%%".format(
-                state.finalWakeScore,
-                state.finalWakeConfidence
-            ),
+            value = "%.1f / 100".format(state.finalWakeScore),
             modifier = Modifier.fillMaxWidth()
         )
         StatusLine(
@@ -425,41 +421,12 @@ private fun ArousalSection(state: ArousalState) {
             if (state.isWakeTimingCandidate) "기상 후보" else state.wakeDecisionReason,
             if (state.isWakeTimingCandidate) Color(0xFFFF7777) else Color(0xFFA9B5C7)
         )
+        StatusLine("판정 기준", "80점 이상 · confidence/domain/24초 게이트 없음")
+        StatusLine("고정 가중치", "움직임 25% · HR 25% · HRV 25% · RR 20% · RRV 20%")
         StatusLine(
-            "증거 coverage",
-            "%.1f%% · 사용 영역 %d/4".format(
-                state.finalWakeCoverage,
-                state.usedArousalDomainCount
-            )
+            "체온 multiplier",
+            if ((state.skinTemperatureScore ?: 0.0) >= 100.0) "ON · ×1.20" else "OFF · ×1.00"
         )
-        StatusLine(
-            "현재 게이트",
-            if (state.wakeCurrentConditionPassed) "통과" else "실패",
-            if (state.wakeCurrentConditionPassed) Color(0xFF7BE0A3) else Color(0xFFFFB66E)
-        )
-        StatusLine(
-            "Tolerant persistence",
-            "최근 ${state.wakePersistenceWindowSeconds}초 중 " +
-                    "${state.wakePersistencePassedSeconds}초 통과 / " +
-                    "필요 ${state.wakePersistenceRequiredPassSeconds}초"
-        )
-        StatusLine(
-            "Persistence 관측",
-            "${state.wakePersistenceObservedSeconds}/${state.wakePersistenceWindowSeconds}초 · " +
-                    "실패 ${state.wakePersistenceFailedSeconds}초 · " +
-                    "통과율 ${"%.1f".format(state.wakePersistencePassRatio)}%"
-        )
-
-        Text(
-            text = "영역별 결합 결과",
-            color = Color.White,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.SemiBold
-        )
-        DomainEvidenceRow("움직임", state.movementDomainEvidence)
-        DomainEvidenceRow("호흡", state.respiratoryDomainEvidence)
-        DomainEvidenceRow("심장", state.cardiacDomainEvidence)
-        DomainEvidenceRow("온도", state.temperatureDomainEvidence)
 
         MetricStatusRow("현재 RR", state.rrFinal, state.rrCalculationStatus, " bpm")
         MetricStatusRow("현재 RRV RMSSD", state.rrvRmssdMs, state.rrvCalculationStatus, " ms")
@@ -470,7 +437,9 @@ private fun ArousalSection(state: ArousalState) {
 
         EvidenceDetailCard(
             label = "1. Micro movement",
-            currentValue = state.microMovementScore?.let { "%.1f / 100".format(it) } ?: "--",
+            currentValue = "score=${state.microMovementScore?.let { "%.1f".format(it) } ?: "--"} · " +
+                    "max Δaxis=${state.microMovementMaxAxisDeltaG?.let { "%.4fg".format(it) } ?: "--"} · " +
+                    "twitch=${state.microMovementTwitchDetected}",
             evidence = state.microEvidence
         )
         EvidenceDetailCard(
@@ -540,31 +509,6 @@ private fun ArousalSection(state: ArousalState) {
 }
 
 @Composable
-private fun DomainEvidenceRow(
-    label: String,
-    evidence: DomainEvidence
-) {
-    val value = if (evidence.usable && evidence.score != null) {
-        "score=${"%.1f".format(evidence.score)} · " +
-                "confidence=${"%.1f".format(evidence.confidence * 100.0)}% · " +
-                "coverage=${"%.1f".format(evidence.coverage * 100.0)}%"
-    } else {
-        "사용 불가 · confidence=${"%.1f".format(evidence.confidence * 100.0)}% · " +
-                "coverage=${"%.1f".format(evidence.coverage * 100.0)}%"
-    }
-    StatusLine(
-        label,
-        value,
-        if (evidence.usable) Color(0xFF54E2A0) else Color(0xFFFFB35C)
-    )
-    Text(
-        text = evidence.composition,
-        color = Color(0xFF7F8EA3),
-        fontSize = 10.sp
-    )
-}
-
-@Composable
 private fun EvidenceDetailCard(
     label: String,
     currentValue: String,
@@ -601,9 +545,8 @@ private fun EvidenceDetailCard(
             )
             StatusLine("현재값", currentValue)
             StatusLine(
-                "evidence",
-                "score=$scoreText · confidence=${"%.1f".format(evidence.confidence * 100.0)}% · " +
-                        "coverage=${"%.1f".format(evidence.coverage * 100.0)}%",
+                "score",
+                scoreText,
                 if (evidence.usable) Color(0xFF54E2A0) else Color(0xFFFF7777)
             )
             StatusLine("사용", if (evidence.usable) "YES" else "NO")

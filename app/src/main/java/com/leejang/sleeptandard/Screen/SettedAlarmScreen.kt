@@ -159,14 +159,11 @@ fun SettedAlarmScreen(
                     // 1) 알람 스케줄 취소
                     scheduler.cancel(alarmViewModel.alarm)
 
-                    // 2) 워치에 수면 추적 중지 명령 전송
-                    alarmViewModel.stopSleepTracking()
-
-                    // 3) SharedPreferences 플래그/값 삭제
+                    // 2) SharedPreferences 플래그/값 삭제
                     val alarmPrefs = AlarmPreferences(context)
                     alarmPrefs.clearAlarm()
 
-                    // 4) 네비게이션 처리
+                    // 3) 네비게이션 처리
                     onTurnAlarmOff()
                 },
             contentAlignment = Alignment.Center
@@ -218,7 +215,12 @@ private fun ShowWakeUpTime(
         modifier = Modifier
     ) {
         Text(
-            text = earlyWakeUpText(alarm.hour, alarm.minute, alarm.isAm, alarm.earlyWakeUpMinutes),
+            text = earlyWakeUpText(
+                alarm.hour,
+                alarm.minute,
+                alarm.isAm,
+                AlarmScheduler.MONITORING_WINDOW_MINUTES
+            ),
             style = MaterialTheme.typography.bodyMedium.copy(
                 fontSize = 16.sp,
                 color = Color(0xCCF1F4F9)
@@ -295,7 +297,7 @@ private fun SensingStartInfo(){
                 horizontalArrangement = Arrangement.Center
             ){
                 Text(
-                    text = "워치",
+                    text = "Potch",
                     style = MaterialTheme.typography.bodyMedium.copy(
                         fontSize = 18.sp,
                         color = Color(0xFFAFF4F9)

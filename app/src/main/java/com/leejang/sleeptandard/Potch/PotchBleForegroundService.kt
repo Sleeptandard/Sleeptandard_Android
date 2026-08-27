@@ -13,7 +13,10 @@ import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
+import com.leejang.sleeptandard.ClassFile.AlarmScheduler
+import com.leejang.sleeptandard.ClassFile.PotchAlarmTriggerPolicy
 import com.leejang.sleeptandard.MainActivity
+import com.leejang.sleeptandard.Prefs.AlarmPreferences
 import com.leejang.sleeptandard.Potch.PotchBleManager
 import com.leejang.sleeptandard.Potch.PotchDataLogger
 import com.leejang.sleeptandard.Potch.PotchDataProcessor
@@ -74,6 +77,12 @@ class PotchBleForegroundService : Service() {
          */
         const val ACTION_START = "com.leejang.sleeptandard.Potch.ACTION_START"
 
+        /** Fixed-window alarm monitoring commands sent by AlarmScheduler. */
+        const val ACTION_START_ALARM_MONITORING =
+            "com.leejang.sleeptandard.Potch.ACTION_START_ALARM_MONITORING"
+        const val ACTION_STOP_ALARM_MONITORING =
+            "com.leejang.sleeptandard.Potch.ACTION_STOP_ALARM_MONITORING"
+
         /**
          * Potch 수신 종료 및 로그 저장 명령.
          *
@@ -99,6 +108,27 @@ class PotchBleForegroundService : Service() {
          * 로그 확인용 태그
          */
         private const val TAG = "PotchBleFgService"
+
+        private const val SERVICE_PREFS = "potch_service"
+        private const val KEY_ALARM_MONITORING_ACTIVE = "alarm_monitoring_active"
+        private const val KEY_MONITORED_ALARM_ID = "monitored_alarm_id"
+        private const val KEY_MONITORED_TARGET_TIME = "monitored_target_time"
+        private const val KEY_ALARM_MONITOR_OWNS_SESSION = "alarm_monitor_owns_session"
+
+        /** Avoid starting a stopped service merely to deliver a no-op stop command. */
+        fun requestStopAlarmMonitoring(context: android.content.Context, targetTimeMillis: Long) {
+            val preferences = context.getSharedPreferences(SERVICE_PREFS, MODE_PRIVATE)
+            if (!preferences.getBoolean(KEY_ALARM_MONITORING_ACTIVE, false)) return
+
+            val monitoredTarget = preferences.getLong(KEY_MONITORED_TARGET_TIME, 0L)
+            if (targetTimeMillis > 0L && monitoredTarget != targetTimeMillis) return
+
+            val intent = Intent(context, PotchBleForegroundService::class.java).apply {
+                action = ACTION_STOP_ALARM_MONITORING
+                putExtra(AlarmScheduler.EXTRA_TARGET_TIME_MILLIS, targetTimeMillis)
+            }
+            ContextCompat.startForegroundService(context, intent)
+        }
     }
 
     /**
@@ -137,6 +167,7 @@ class PotchBleForegroundService : Service() {
     private var bleManager: PotchBleManager? = null
 
     private var isStoppingService = false
+    private var hasTriggeredCurrentAlarm = false
 
     /**
      * Service가 처음 생성될 때 호출된다.
@@ -246,6 +277,19 @@ class PotchBleForegroundService : Service() {
 
                 // BLE 스캔/연결 시작
                 startPotchReceiving()
+            }
+
+            ACTION_START_ALARM_MONITORING -> {
+                val alarmId = intent.getIntExtra(AlarmScheduler.EXTRA_ALARM_ID, 0)
+                val targetTimeMillis =
+                    intent.getLongExtra(AlarmScheduler.EXTRA_TARGET_TIME_MILLIS, 0L)
+                startAlarmMonitoring(alarmId, targetTimeMillis)
+            }
+
+            ACTION_STOP_ALARM_MONITORING -> {
+                val targetTimeMillis =
+                    intent.getLongExtra(AlarmScheduler.EXTRA_TARGET_TIME_MILLIS, 0L)
+                stopAlarmMonitoring(targetTimeMillis)
             }
 
             ACTION_STOP_AND_SAVE -> {
@@ -410,6 +454,7 @@ class PotchBleForegroundService : Service() {
         serviceScope.launch {
             processor.state.collect { state ->
                 PotchServiceStateHolder.updateProcessorState(state)
+                evaluatePotchAlarm(state.arousalState.finalWakeScore)
 
                 val hasNewError =
                     state.missingSequenceErrors != lastLoggedSeqErr ||
@@ -781,7 +826,115 @@ class PotchBleForegroundService : Service() {
      * Android가 Service를 복구한 것으로 보고 다시 Potch 수신을 시작한다.
      */
     private fun isSessionRunning(): Boolean {
-        return getSharedPreferences("potch_service", MODE_PRIVATE)
+        return getSharedPreferences(SERVICE_PREFS, MODE_PRIVATE)
             .getBoolean("session_running", false)
     }
+
+    private fun startAlarmMonitoring(alarmId: Int, targetTimeMillis: Long) {
+        val alarmPreferences = AlarmPreferences(this)
+        val now = System.currentTimeMillis()
+        val isCurrentReservation =
+            alarmPreferences.isAlarmSet() &&
+                targetTimeMillis > now &&
+                alarmPreferences.getScheduledTriggerTimeMillis() == targetTimeMillis
+
+        if (!isCurrentReservation) {
+            Log.w(TAG, "Ignoring stale Potch alarm monitor request: target=$targetTimeMillis")
+            dataLogger?.logDebug(
+                TAG,
+                "Ignoring stale Potch alarm monitor request: target=$targetTimeMillis",
+                "W"
+            )
+            if (!isSessionRunning() && !isAlarmMonitoringActive()) stopSelf()
+            return
+        }
+
+        val preferences = getSharedPreferences(SERVICE_PREFS, MODE_PRIVATE)
+        val isSameMonitor =
+            preferences.getBoolean(KEY_ALARM_MONITORING_ACTIVE, false) &&
+                preferences.getInt(KEY_MONITORED_ALARM_ID, 0) == alarmId &&
+                preferences.getLong(KEY_MONITORED_TARGET_TIME, 0L) == targetTimeMillis
+
+        if (!isSameMonitor) {
+            val ownsSession = !isSessionRunning()
+            preferences.edit {
+                putBoolean(KEY_ALARM_MONITORING_ACTIVE, true)
+                putInt(KEY_MONITORED_ALARM_ID, alarmId)
+                putLong(KEY_MONITORED_TARGET_TIME, targetTimeMillis)
+                putBoolean(KEY_ALARM_MONITOR_OWNS_SESSION, ownsSession)
+            }
+            if (ownsSession) markSessionRunning(true)
+        }
+
+        hasTriggeredCurrentAlarm = false
+        isStoppingService = false
+        startPotchReceiving()
+        updateNotification("Potch 각성점수 모니터링 중")
+        Log.i(TAG, "Potch alarm monitoring armed: alarmId=$alarmId target=$targetTimeMillis")
+    }
+
+    private fun stopAlarmMonitoring(expectedTargetTimeMillis: Long) {
+        val preferences = getSharedPreferences(SERVICE_PREFS, MODE_PRIVATE)
+        if (!preferences.getBoolean(KEY_ALARM_MONITORING_ACTIVE, false)) return
+
+        val monitoredTarget = preferences.getLong(KEY_MONITORED_TARGET_TIME, 0L)
+        if (expectedTargetTimeMillis > 0L && expectedTargetTimeMillis != monitoredTarget) return
+
+        val ownsSession = preferences.getBoolean(KEY_ALARM_MONITOR_OWNS_SESSION, false)
+        preferences.edit {
+            remove(KEY_ALARM_MONITORING_ACTIVE)
+            remove(KEY_MONITORED_ALARM_ID)
+            remove(KEY_MONITORED_TARGET_TIME)
+            remove(KEY_ALARM_MONITOR_OWNS_SESSION)
+        }
+        hasTriggeredCurrentAlarm = false
+
+        if (ownsSession) {
+            isStoppingService = true
+            markSessionRunning(false)
+            stopPotchReceivingAndSave()
+        } else {
+            updateNotification("Potch 데이터 수신 중")
+        }
+    }
+
+    private fun evaluatePotchAlarm(finalWakeScore: Double) {
+        if (hasTriggeredCurrentAlarm || !isAlarmMonitoringActive()) return
+
+        val preferences = getSharedPreferences(SERVICE_PREFS, MODE_PRIVATE)
+        val targetTimeMillis = preferences.getLong(KEY_MONITORED_TARGET_TIME, 0L)
+        val alarmPreferences = AlarmPreferences(this)
+
+        if (
+            alarmPreferences.getScheduledTriggerTimeMillis() != targetTimeMillis ||
+            !alarmPreferences.isAlarmSet()
+        ) {
+            stopAlarmMonitoring(targetTimeMillis)
+            return
+        }
+
+        if (
+            !PotchAlarmTriggerPolicy.shouldTrigger(
+                score = finalWakeScore,
+                nowMillis = System.currentTimeMillis(),
+                targetTimeMillis = targetTimeMillis
+            )
+        ) {
+            return
+        }
+
+        hasTriggeredCurrentAlarm = true
+        val alarm = alarmPreferences.loadAlarm()
+        Log.i(TAG, "Potch early alarm triggered: score=$finalWakeScore target=$targetTimeMillis")
+        dataLogger?.logDebug(
+            TAG,
+            "Potch early alarm triggered: score=$finalWakeScore target=$targetTimeMillis",
+            "I"
+        )
+        AlarmScheduler(this).triggerFromPotch(alarm, targetTimeMillis)
+    }
+
+    private fun isAlarmMonitoringActive(): Boolean =
+        getSharedPreferences(SERVICE_PREFS, MODE_PRIVATE)
+            .getBoolean(KEY_ALARM_MONITORING_ACTIVE, false)
 }
