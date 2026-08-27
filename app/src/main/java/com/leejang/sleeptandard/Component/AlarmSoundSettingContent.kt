@@ -15,6 +15,9 @@ import android.media.Ringtone
 import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Build
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -263,20 +266,30 @@ fun AlarmSoundSettingContent(
 
         Spacer(Modifier.weight(26f))
 
-        Box(
+        BoxWithConstraints(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = 16.dp)
                 .weight(620f) // ✅ 남은 공간을 전부 차지하게
 
         ) {
+            val hiddenListOffset = with(LocalDensity.current) { maxHeight.toPx() }
+            val listOffsetY by animateFloatAsState(
+                targetValue = if (soundEnabled) 0f else hiddenListOffset,
+                animationSpec = tween(
+                    durationMillis = 450,
+                    easing = FastOutSlowInEasing
+                ),
+                label = "soundListOffset"
+            )
 
-
-            if (soundEnabled) {
-                // ✅ 리스트가 토글 밑으로 쫙 깔리게
-                Surface(
-                    modifier = Modifier
-                        .fillMaxSize()
+            // 목록은 항상 구성해두고 위치만 이동시켜 토글 시 재구성 비용을 없앤다.
+            Surface(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        translationY = listOffsetY
+                    }
                         .drawBehind {
                             // 흰색 그림자
                             val highlightColor1 = Color(0xFFB9C8DF).copy(alpha = 0.1f)
@@ -302,9 +315,9 @@ fun AlarmSoundSettingContent(
                     ,
                     shape = RoundedCornerShape(40.dp),
                     color = card,
-                    tonalElevation = 0.dp
-                ) {
-                    LazyColumn(
+                tonalElevation = 0.dp
+            ) {
+                LazyColumn(
                         modifier = Modifier
                             .fillMaxSize()
                             .drawBehind {
@@ -332,31 +345,20 @@ fun AlarmSoundSettingContent(
                             bottom = sliderHeight + sliderPaddingBottom + 10.dp,
                         ),
                         verticalArrangement = Arrangement.spacedBy(20.dp)
-                    ) {
-                        items(tones) { tone ->
-
-                            ToneRow(
-                                title = tone.title,
-                                selected = (selectedUri == tone.uri),
-                                onClick = {
-                                    selectedUri = tone.uri
-                                    /** 실험중 **/
-                                    onSelectUriString(tone.uri.toString())
-                                    playPreview(tone.uri)
-                                }
-                            )
-                        }
-                    }
-                }
-            } else {
-                // OFF일 땐 리스트 자리는 유지 (필요하면 안내문구)
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color.Transparent),
-                    contentAlignment = Alignment.Center
                 ) {
+                    items(tones) { tone ->
 
+                        ToneRow(
+                            title = tone.title,
+                            selected = (selectedUri == tone.uri),
+                            onClick = {
+                                selectedUri = tone.uri
+                                /** 실험중 **/
+                                onSelectUriString(tone.uri.toString())
+                                playPreview(tone.uri)
+                            }
+                        )
+                    }
                 }
             }
 
