@@ -76,6 +76,8 @@ class PotchBleForegroundService : Service() {
 
         const val ACTION_START_HOME_CONNECTION =
             "com.leejang.sleeptandard.Potch.ACTION_START_HOME_CONNECTION"
+        const val ACTION_START_DEVICE_DISCOVERY =
+            "com.leejang.sleeptandard.Potch.ACTION_START_DEVICE_DISCOVERY"
         const val ACTION_SELECT_DEVICE =
             "com.leejang.sleeptandard.Potch.ACTION_SELECT_DEVICE"
         const val ACTION_CANCEL_DEVICE_DISCOVERY =
@@ -264,6 +266,13 @@ class PotchBleForegroundService : Service() {
                 registerDeviceWhenReady = false
                 markSessionRunning(true)
                 startPotchReceiving(useRegisteredDevice = true)
+            }
+
+            ACTION_START_DEVICE_DISCOVERY -> {
+                isStoppingService = false
+                registerDeviceWhenReady = false
+                markSessionRunning(true)
+                startPotchReceiving(forceDeviceDiscovery = true)
             }
 
             ACTION_SELECT_DEVICE -> {
@@ -512,7 +521,10 @@ class PotchBleForegroundService : Service() {
      *
      * startScan() 이후 Potch가 발견되면 BLE 연결과 notify 구독이 이어진다.
      */
-    private fun startPotchReceiving(useRegisteredDevice: Boolean = false) {
+    private fun startPotchReceiving(
+        useRegisteredDevice: Boolean = false,
+        forceDeviceDiscovery: Boolean = false
+    ) {
         Log.i(TAG, "startPotchReceiving() called")
 
         initializePotchObjects()
@@ -533,7 +545,9 @@ class PotchBleForegroundService : Service() {
         // 앱 프로세스가 START_STICKY로 재생성되어도 동일 수면 session id를 재사용한다.
         stabilityCalculator?.startSession(getOrCreateStabilitySessionId())
         dataProcessor?.refreshStabilityState()
-        if (useRegisteredDevice) {
+        if (forceDeviceDiscovery) {
+            bleManager?.startDeviceDiscovery()
+        } else if (useRegisteredDevice) {
             val registeredAddress = getRegisteredPotchAddress()
             if (!registeredAddress.isNullOrBlank()) {
                 val started = bleManager?.connectToAddress(registeredAddress) ?: false

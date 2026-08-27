@@ -876,7 +876,7 @@ fun WindowTutorial(
 
 @Composable
 fun Modifier.neumorphicBackground(
-    highlightColor: Color = Color(0x1AC2E4E9).copy(alpha = 0.15f),
+    highlightColor: Color = Color(0x1AC2E4E9).copy(alpha = 0.10f),
     blurRadius1: Dp = 20.dp,
     offsetX1: Dp = (-5).dp,
     offsetY1: Dp = (-5).dp,

@@ -87,6 +87,14 @@ class PotchBleViewModel(
         ContextCompat.startForegroundService(context, intent)
     }
 
+    fun startDeviceDiscovery() {
+        val context = getApplication<Application>().applicationContext
+        val intent = Intent(context, PotchBleForegroundService::class.java).apply {
+            action = PotchBleForegroundService.ACTION_START_DEVICE_DISCOVERY
+        }
+        ContextCompat.startForegroundService(context, intent)
+    }
+
     fun selectPotch(address: String) {
         val context = getApplication<Application>().applicationContext
         val intent = Intent(context, PotchBleForegroundService::class.java).apply {
