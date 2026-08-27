@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -99,6 +100,7 @@ fun OptionsSection(
         onCheckedChange: (Boolean) -> Unit,
         alarmName: String,
         isSystemVibrationOn: Boolean,
+        showBluetoothOffMessage: Boolean,
         potchState: PotchConnectionState,
         tryPotchConnecting: () -> Unit
 ) {
@@ -254,10 +256,14 @@ fun OptionsSection(
         Spacer(Modifier.width(12.dp))
 
         // 팟치 연결 버튼
-        Box(
-            modifier =
-                Modifier
-                    .weight(1f)
+        Column(
+            modifier = Modifier.weight(1f),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Box(
+                modifier =
+                    Modifier
+                    .fillMaxWidth()
                     .aspectRatio(1f)
                     .zIndex(3f)
                     .neumorphicBackground(
@@ -275,56 +281,70 @@ fun OptionsSection(
                                 offset = DpOffset(x = 5.dp, 6.dp)
                             )
                     )
-        ) {
-            Box(
-                modifier =
-                    Modifier.clip(RoundedCornerShape(28.dp)).fillMaxSize()
-                        .clickable {
-                            tryPotchConnecting()
-                        },
-                contentAlignment = Alignment.Center
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Icon(
-                            painter = painterResource(AppIcons.HomePotch),
-                            contentDescription = "팟치 아이콘",
-                            tint = Color.Unspecified
-                        )
-                        Text(
-                            text = "팟치 연결",
-                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp)
-                        )
-                    }
-
-                    when (potchState) {
-                        PotchConnectionState.CONNECTING ->
-                            Text(
-                                "연결 중...",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = SkyBlue
+                Box(
+                    modifier =
+                        Modifier.clip(RoundedCornerShape(28.dp)).fillMaxSize()
+                            .clickable {
+                                tryPotchConnecting()
+                            },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Icon(
+                                painter = painterResource(AppIcons.HomePotch),
+                                contentDescription = "팟치 아이콘",
+                                tint = Color.Unspecified
                             )
-
-                        PotchConnectionState.CONNECTED ->
                             Text(
-                                "연결 성공!",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = SkyBlue
+                                text = "팟치 연결",
+                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp)
                             )
-
-                        PotchConnectionState.FAILED ->
-                            Text(
-                                "연결 실패",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = WRed
-                            )
-
-                        PotchConnectionState.NOTHING -> Unit
                         }
+
+                        when (potchState) {
+                            PotchConnectionState.CONNECTING ->
+                                Text(
+                                    "연결 중...",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = SkyBlue
+                                )
+
+                            PotchConnectionState.CONNECTED ->
+                                Text(
+                                    "연결 성공!",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = SkyBlue
+                                )
+
+                            PotchConnectionState.FAILED ->
+                                Text(
+                                    "연결 실패",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = WRed
+                                )
+
+                            PotchConnectionState.NOTHING -> Unit
+                        }
+                    }
                 }
+            }
+
+            if (showBluetoothOffMessage) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "블루투스가 꺼져있어요",
+                    modifier = Modifier.wrapContentWidth(unbounded = true).zIndex(4f),
+                    maxLines = 1,
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        fontSize = 11.sp,
+                        color = Color.White
+                    )
+                )
             }
         }
     }

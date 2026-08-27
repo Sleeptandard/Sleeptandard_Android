@@ -65,6 +65,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.leejang.sleeptandard.ClassFile.Alarm
 
 import com.leejang.sleeptandard.ClassFile.AlarmScheduler
+import com.leejang.sleeptandard.Component.calculateWakeUpRangeText
 import com.leejang.sleeptandard.Component.neumorphicBackground
 import com.leejang.sleeptandard.Potch.PotchBleViewModel
 import com.leejang.sleeptandard.Prefs.AlarmPreferences
@@ -72,6 +73,7 @@ import com.leejang.sleeptandard.ViewModel.AlarmViewModel
 import com.leejang.sleeptandard.ui.theme.AppIcons
 import kotlinx.coroutines.delay
 import java.util.Locale
+import kotlin.math.roundToInt
 
 @Composable
 fun SettedAlarmScreen(
@@ -83,6 +85,12 @@ fun SettedAlarmScreen(
     val context = LocalContext.current
     val alarm = alarmViewModel.alarm
     val processorState by potchViewModel.processorState.collectAsState()
+    val isPotchBatteryLow = processorState.lastParsedData
+        ?.batteryVoltage
+        ?.takeIf { it.isFinite() }
+        ?.let(::voltageToBatteryPercent)
+        ?.let { it <= 40 }
+        ?: false
 
     val fontAnimatable = remember { Animatable(48f) }
     val fontSpaceAnimatable = remember { Animatable(8f) }
@@ -133,7 +141,12 @@ fun SettedAlarmScreen(
                         modifier= Modifier.fillMaxSize(),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        ShowWakeUpTime(alarm, fontAnimatable.value, fontSpaceAnimatable.value)
+                        ShowWakeUpTime(
+                            alarm = alarm,
+                            fontSize = fontAnimatable.value,
+                            space = fontSpaceAnimatable.value,
+                            showLowBatteryWarning = isPotchBatteryLow
+                        )
                         Spacer(Modifier.weight(1f))
                     }
                 }else{
@@ -141,7 +154,12 @@ fun SettedAlarmScreen(
                         modifier= Modifier.fillMaxSize(),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        ShowWakeUpTime(alarm, fontAnimatable.value, fontSpaceAnimatable.value)
+                        ShowWakeUpTime(
+                            alarm = alarm,
+                            fontSize = fontAnimatable.value,
+                            space = fontSpaceAnimatable.value,
+                            showLowBatteryWarning = isPotchBatteryLow
+                        )
                         Spacer(Modifier.weight(45f))
                         SensingStartInfo(
                             heartRateBpm = processorState.heartRateBpm,
@@ -166,7 +184,7 @@ fun SettedAlarmScreen(
                 .size(320.dp, 60.dp)
                 .clip(RoundedCornerShape(100.dp))
                 .background(color = Color.White)
-                .clickable{
+                .clickable {
                     // 1) 알람 스케줄 취소
                     scheduler.cancel(alarmViewModel.alarm)
 
@@ -223,13 +241,14 @@ fun SettedAlarmScreen(
 private fun ShowWakeUpTime(
     alarm: Alarm,
     fontSize: Float,
-    space: Float
+    space: Float,
+    showLowBatteryWarning: Boolean,
 ){
     Column(
         modifier = Modifier
     ) {
         Text(
-            text = earlyWakeUpText(alarm.hour, alarm.minute, alarm.isAm, alarm.earlyWakeUpMinutes),
+            text = earlyWakeUpText(alarm.hour, alarm.minute, alarm.isAm),
             style = MaterialTheme.typography.bodyMedium.copy(
                 fontSize = 16.sp,
                 color = Color(0xCCF1F4F9)
@@ -242,7 +261,7 @@ private fun ShowWakeUpTime(
             modifier = Modifier,
             verticalAlignment = Alignment.Bottom,
             horizontalArrangement = Arrangement.spacedBy(space.dp)
-        ){
+        ) {
             Text(
                 text = "~",
                 style = MaterialTheme.typography.bodyMedium.copy(
@@ -251,7 +270,7 @@ private fun ShowWakeUpTime(
                 )
             )
             Text(
-                text = String.format(Locale.getDefault(),"%d : %02d",alarm.hour,alarm.minute),
+                text = String.format(Locale.getDefault(), "%d : %02d", alarm.hour, alarm.minute),
                 style = MaterialTheme.typography.bodyMedium.copy(
                     fontSize = fontSize.sp,
                     color = Color(0xCCF1F4F9),
@@ -266,8 +285,29 @@ private fun ShowWakeUpTime(
                 )
             )
         }
+
+        if (showLowBatteryWarning) {
+            Spacer(Modifier.height(12.dp))
+            Box(
+                modifier = Modifier,
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "팟치 배터리가 꺼지면 정시에 알람이 울려요",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 12.sp,
+                        color = Color(0xFFCA4752)
+                    )
+                )
+            }
+        }
+
+
     }
 }
+
+private fun voltageToBatteryPercent(voltage: Double): Int =
+    (((voltage - 3.2) / (4.2 - 3.2)) * 100.0).roundToInt().coerceIn(0, 100)
 
 @Composable
 private fun SensingStartInfo(
@@ -525,7 +565,7 @@ fun getWakeUpTimeRange(hour:Int, minute: Int, isAm: Boolean, earlyWakeUpMinutes:
         ampm, earlyTotalMinute/60, earlyTotalMinute%60, hour, minute)
 }
 
-fun earlyWakeUpText(hour:Int, minute: Int, isAm: Boolean, earlyWakeUpMinutes: Int): String{
+fun earlyWakeUpText(hour:Int, minute: Int, isAm: Boolean, earlyWakeUpMinutes: Int = 15): String{
     var earlyTotalMinute: Int = (hour * 60 + minute) - earlyWakeUpMinutes
     val ampm = if(isAm) "오전" else "오후"
     if(earlyTotalMinute < 0) earlyTotalMinute += 12 * 60

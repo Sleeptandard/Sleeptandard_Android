@@ -2,7 +2,12 @@ package com.leejang.sleeptandard.Screen
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothManager
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.media.RingtoneManager
 import android.os.Build
@@ -120,6 +125,8 @@ fun HomeScreen(
     val bleState by potchViewModel.bleState.collectAsState()
     val processorState by potchViewModel.processorState.collectAsState()
     var potchPermissionDenied by remember { mutableStateOf(false) }
+    var bluetoothEnabled by remember { mutableStateOf(isPhoneBluetoothEnabled(context)) }
+    var showBluetoothOffMessage by remember { mutableStateOf(false) }
     var showLowBatteryWarning by remember { mutableStateOf(false) }
     var warningBattery by remember { mutableIntStateOf(0) }
 
@@ -133,13 +140,48 @@ fun HomeScreen(
         potchPermissionDenied = !allGranted
 
         if (allGranted) {
-            potchViewModel.startHomeConnection()
+            bluetoothEnabled = isPhoneBluetoothEnabled(context)
+            if (bluetoothEnabled) {
+                showBluetoothOffMessage = false
+                potchViewModel.startHomeConnection()
+            } else {
+                showBluetoothOffMessage = true
+            }
         } else {
             Toast.makeText(
                 context,
                 "팟치 연결을 위해 블루투스 권한이 필요합니다.",
                 Toast.LENGTH_SHORT
             ).show()
+        }
+    }
+
+    DisposableEffect(context) {
+        val bluetoothStateReceiver = object : BroadcastReceiver() {
+            override fun onReceive(receiverContext: Context?, intent: Intent?) {
+                if (intent?.action != BluetoothAdapter.ACTION_STATE_CHANGED) return
+                bluetoothEnabled = intent.getIntExtra(
+                    BluetoothAdapter.EXTRA_STATE,
+                    BluetoothAdapter.ERROR
+                ) == BluetoothAdapter.STATE_ON
+                if (bluetoothEnabled) showBluetoothOffMessage = false
+            }
+        }
+        val filter = IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            context.registerReceiver(
+                bluetoothStateReceiver,
+                filter,
+                Context.RECEIVER_NOT_EXPORTED
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            context.registerReceiver(bluetoothStateReceiver, filter)
+        }
+
+        onDispose {
+            runCatching { context.unregisterReceiver(bluetoothStateReceiver) }
         }
     }
 
@@ -189,6 +231,8 @@ fun HomeScreen(
             if (event == Lifecycle.Event.ON_RESUME) {
                 Log.d("VibrationSetting", "앱으로 돌아옴: 진동 세기 다시 체크")
                 isNotificationVibrationOn = getIsNotificationVibrationOn(context)
+                bluetoothEnabled = isPhoneBluetoothEnabled(context)
+                if (bluetoothEnabled) showBluetoothOffMessage = false
             }
         }
 
@@ -218,6 +262,8 @@ fun HomeScreen(
     }
 
     val potchState = when {
+        !bluetoothEnabled && showBluetoothOffMessage -> PotchConnectionState.FAILED
+        !bluetoothEnabled -> PotchConnectionState.NOTHING
         bleState.isNotificationReady -> PotchConnectionState.CONNECTED
         bleState.isScanning || bleState.isConnecting || bleState.isReconnecting ->
             PotchConnectionState.CONNECTING
@@ -402,11 +448,15 @@ fun HomeScreen(
                     onCheckedChange = { selectedVibrationEnabled = it },
                     alarmName = alarmName,
                     isSystemVibrationOn = isNotificationVibrationOn,
+                    showBluetoothOffMessage = showBluetoothOffMessage,
                     potchState = potchState,
                     tryPotchConnecting = {
-                        if (potchState == PotchConnectionState.NOTHING ||
+                        if (!bluetoothEnabled) {
+                            showBluetoothOffMessage = true
+                        } else if (potchState == PotchConnectionState.NOTHING ||
                             potchState == PotchConnectionState.FAILED
                         ) {
+                            showBluetoothOffMessage = false
                             potchPermissionDenied = false
                             val missingPermissions = requiredPotchPermissions().filter { permission ->
                                 ContextCompat.checkSelfPermission(context, permission) !=
@@ -711,6 +761,14 @@ private fun PotchLowBatteryWarningDialog(
 }
 
 private const val LOW_POTCH_BATTERY_PERCENT = 40
+
+@SuppressLint("MissingPermission")
+private fun isPhoneBluetoothEnabled(context: Context): Boolean =
+    runCatching {
+        val bluetoothManager =
+            context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+        bluetoothManager?.adapter?.isEnabled == true
+    }.getOrDefault(true)
 
 private fun voltageToPotchBatteryPercent(voltage: Double): Int =
     (((voltage - 3.2) / (4.2 - 3.2)) * 100.0).roundToInt().coerceIn(0, 100)
