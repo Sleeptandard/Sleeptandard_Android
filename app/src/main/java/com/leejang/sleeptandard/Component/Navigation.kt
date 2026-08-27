@@ -59,6 +59,7 @@ import com.leejang.sleeptandard.Screen.ExperimentScreen
 import com.leejang.sleeptandard.Screen.InquireScreen
 import com.leejang.sleeptandard.Screen.JournalScreen
 import com.leejang.sleeptandard.Screen.LoginDemoScreen
+import com.leejang.sleeptandard.Screen.PotchScreen
 import com.leejang.sleeptandard.Screen.QnAScreen
 import com.leejang.sleeptandard.Screen.QnADetailScreen
 import com.leejang.sleeptandard.Screen.ReviewAlarmScreen
@@ -72,6 +73,7 @@ import com.leejang.sleeptandard.ui.theme.AppIcons
 
 sealed class Screen(val route: String) {
     object Home : Screen("home")
+    object Potch : Screen("potch")
     object Journal : Screen("journal")
     object Settings : Screen("settings")
     object SendingData: Screen("sendingdata")
@@ -224,6 +226,10 @@ fun AppNav(
 
                 }
             )
+        }
+
+        composable(Screen.Potch.route){
+            PotchScreen()
         }
 
         composable(Screen.Journal.route) {
@@ -441,12 +447,14 @@ fun AppNav(
             // 지금 라우트가 홈, 일지, 설정, 알람설정완료화면, 데이터보내기  이면 바텀네비바를 띄우기 위한 Boolean값임.
             val showBottom = when (currentRoute) {
                 Screen.Home.route,
+                Screen.Potch.route,
                 Screen.Journal.route,
                 Screen.SettedAlarm.route,
                 Screen.Settings.route,
                 Screen.QnA.route,
                 Screen.QnADetail.route,
                 Screen.SendingData.route -> true
+
                 Screen.AccountManagement.route -> true
                 else -> false
             }
@@ -458,19 +466,21 @@ fun AppNav(
                     selectedIndex = when (currentRoute) {
                         Screen.Home.route -> 0
                         Screen.SettedAlarm.route -> 0
-                        Screen.Journal.route -> 1
-                        Screen.Settings.route -> 2
-                        Screen.QnA.route -> 2
-                        Screen.QnADetail.route -> 2
-                        Screen.SendingData.route -> 2
+                        Screen.Potch.route -> 1
+                        Screen.Journal.route -> 2
+                        Screen.Settings.route -> 3
+                        Screen.QnA.route -> 3
+                        Screen.QnADetail.route -> 3
+                        Screen.SendingData.route -> 3
 
-                        else -> 2
+                        else -> 3
                     },
                     onSelect = { idx ->
                         val target = when (idx) {
                             0 -> if(isAlarmSetted) Screen.SettedAlarm.route else Screen.Home.route
-                            1 -> Screen.Journal.route
-                            2 -> Screen.Settings.route
+                            1 -> Screen.Potch.route
+                            2 -> Screen.Journal.route
+                            3 -> Screen.Settings.route
                             else -> Screen.Home.route
                         }
                         rememberNavController.navigate(target) {
@@ -522,16 +532,22 @@ fun AlarmBottomNavBar(
                 onClick = { onSelect(0) }
             )
             StandaloneBottomItem(
-                selected = selectedIndex == 1,
-                iconRes = AppIcons.NavJournal,
-                label = "일지",
-                onClick = { onSelect(1) }
+                selectedIndex == 1,
+                iconRes = AppIcons.NavPotch,
+                label = "팟치",
+                onClick = { onSelect(1)}
             )
             StandaloneBottomItem(
                 selected = selectedIndex == 2,
+                iconRes = AppIcons.NavJournal,
+                label = "일지",
+                onClick = { onSelect(2) }
+            )
+            StandaloneBottomItem(
+                selected = selectedIndex == 3,
                 iconRes = AppIcons.NavSettings,
                 label = "설정",
-                onClick = { onSelect(2) }
+                onClick = { onSelect(3) }
             )
         }
     }
