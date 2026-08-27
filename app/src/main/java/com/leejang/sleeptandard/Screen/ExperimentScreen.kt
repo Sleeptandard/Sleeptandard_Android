@@ -136,7 +136,7 @@ fun ExperimentScreen(
             bleState = bleState,
             onConnect = viewModel::startScan,
             onDisconnect = viewModel::stopReconnectAndSaveLog,
-            onTrigger = viewModel::triggerLedFlash,
+            onRemoveRegisteredPotch = viewModel::removeRegisteredPotch,
             onReset = viewModel::resetProcessor
         )
 
@@ -213,7 +213,7 @@ private fun ConnectionSection(
     bleState: PotchBleState,
     onConnect: () -> Unit,
     onDisconnect: () -> Unit,
-    onTrigger: () -> Unit,
+    onRemoveRegisteredPotch: () -> Unit,
     onReset: () -> Unit
 ) {
     SectionCard("BLE 연결") {
@@ -249,10 +249,9 @@ private fun ConnectionSection(
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             ActionButton(
-                label = "LED/Vibe 미지원",
-                onClick = onTrigger,
-                modifier = Modifier.weight(1f),
-                enabled = bleState.isConnected && bleState.supportsLedTrigger
+                label = "저장된 팟치 제거",
+                onClick = onRemoveRegisteredPotch,
+                modifier = Modifier.weight(1f)
             )
             ActionButton("분석 초기화", onReset, Modifier.weight(1f))
         }
