@@ -119,10 +119,24 @@ fun AppNav(
                 rememberNavController.navigate(Screen.Experiment.route) {
                     launchSingleTop = true
                 }
-
-                onOpenScreenConsumed()
             }
+            Screen.ReviewAlarm.route -> {
+                Log.i("WTF", "알람 종료 명령 수신: ReviewAlarmScreen으로 이동")
+                rememberNavController.navigate(Screen.ReviewAlarm.route) {
+                    popUpTo(rememberNavController.graph.id) { inclusive = false }
+                    launchSingleTop = true
+                }
+            }
+            Screen.Home.route -> {
+                rememberNavController.navigate(Screen.Home.route) {
+                    popUpTo(rememberNavController.graph.id) { inclusive = false }
+                    launchSingleTop = true
+                }
+            }
+            null -> return@LaunchedEffect
+            else -> Log.w("WTF", "알 수 없는 화면 이동 명령: $openScreen")
         }
+        onOpenScreenConsumed()
     }
 
 
@@ -152,6 +166,14 @@ fun AppNav(
     // ✅ 1. 영구 저장소에서 초기 값을 가져와 세션 상태로 관리합니다.
     var showWindowTutorial by remember { mutableStateOf(alarmPrefs.getShowWindowTutorial()) }
 
+    LaunchedEffect(startDestination) {
+        Log.i(
+            "WTF",
+            "AppNav 초기화: startDestination=$startDestination, " +
+                "hasAlarmSnapshot=$isAlarmSetted, initialAlarm=${initialAlarm?.hour}:${initialAlarm?.minute}"
+        )
+    }
+
 
     val navGraph = rememberNavController.createGraph(startDestination = startDestination){
 
@@ -177,6 +199,11 @@ fun AppNav(
                 alarmViewModel = alarmViewModel,
                 scheduler = scheduler,
                 onClickConfirm = {
+                    Log.i(
+                        "WTF",
+                        "HomeScreen 알람 설정 완료 네비게이션 요청: " +
+                            "hasAlarm=${alarmPrefs.isAlarmSet()}"
+                    )
                     rememberNavController.navigate(Screen.SettedAlarm.route){
                         popUpTo(Screen.Home.route){inclusive = true}
                     }
@@ -207,6 +234,11 @@ fun AppNav(
                 alarmViewModel = alarmViewModel,
                 scheduler = scheduler,
                 onTurnAlarmOff = {
+                    Log.i(
+                        "WTF",
+                        "SettedAlarmScreen 알람 해제 네비게이션 요청: " +
+                            "hasAlarm=${alarmPrefs.isAlarmSet()}"
+                    )
                     rememberNavController.navigate(Screen.Home.route){
                         // 0번(루트)까지 모든 화면을 스택에서 제거(inclusive)합니다.
                         popUpTo(0) { inclusive = true }
@@ -219,9 +251,10 @@ fun AppNav(
         composable(Screen.ReviewAlarm.route){
             ReviewAlarmScreen(
                 onSubmit = {
+                    Log.i("WTF", "ReviewAlarmScreen 리뷰 완료: HomeScreen으로 이동")
                     rememberNavController.navigate(Screen.Home.route){
-                        // 네비 스택 초기화
-                        popUpTo(Screen.ReviewAlarm.route){inclusive = true}
+                        popUpTo(rememberNavController.graph.id) { inclusive = false }
+                        launchSingleTop = true
                     }
 
                 }
@@ -441,6 +474,16 @@ fun AppNav(
 
     val navBackStackEntry by rememberNavController.currentBackStackEntryAsState()   // 최신 스택을 가져옴 (현재 위치한 경로)
     val currentRoute = navBackStackEntry?.destination?.route    // 최신 스택의 route를 가져옴 (현재 위치한 경로)
+    var previousRouteForLog by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(currentRoute) {
+        val destination = currentRoute ?: return@LaunchedEffect
+        val previous = previousRouteForLog ?: "null"
+        if (previous != destination) {
+            Log.i("WTF", "네비게이션 되었음: from $previous to $destination")
+            previousRouteForLog = destination
+        }
+    }
 
     Scaffold(
         bottomBar = {
@@ -483,6 +526,11 @@ fun AppNav(
                             3 -> Screen.Settings.route
                             else -> Screen.Home.route
                         }
+                        Log.i(
+                            "WTF",
+                            "BottomNav 선택: idx=$idx, current=$currentRoute, target=$target, " +
+                                "hasAlarmSnapshot=$isAlarmSetted, hasAlarmNow=${alarmPrefs.isAlarmSet()}"
+                        )
                         rememberNavController.navigate(target) {
                             launchSingleTop = true  // 동일 화면이 스택 맨 위에 있다면 새로 만들지 않음
                             restoreState = true     // 이전에 입력한 정보 등이 있다면 복구

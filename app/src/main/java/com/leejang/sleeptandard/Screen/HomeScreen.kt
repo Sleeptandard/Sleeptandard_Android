@@ -18,6 +18,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -30,6 +31,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
@@ -86,12 +88,14 @@ import com.leejang.sleeptandard.Component.WakeUpWindow
 import com.leejang.sleeptandard.Component.WindowTutorial
 import com.leejang.sleeptandard.Component.calculateWakeUpRangeText
 import com.leejang.sleeptandard.Component.neumorphicBackground
+import com.leejang.sleeptandard.Component.rememberCustomTimePickerState
 import com.leejang.sleeptandard.Potch.PotchBleViewModel
 import com.leejang.sleeptandard.Prefs.AlarmPreferences
 import com.leejang.sleeptandard.ViewModel.AlarmViewModel
 import com.leejang.sleeptandard.ui.theme.DarkBackground
 import com.leejang.sleeptandard.utility.getIsNotificationVibrationOn
 import kotlin.math.roundToInt
+import kotlinx.coroutines.launch
 
 private fun requiredPotchPermissions(): Array<String> = buildList {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -196,8 +200,12 @@ fun HomeScreen(
     // 옵션섹션 - 알람음설정 컴포넌트에 띄울 알람음 이름
     var alarmName by remember { mutableStateOf("") }
 
-    // 타임피커가 돌아가던중 다른 컴포넌트를 클릭했을때의 타임피커 멈춤 트리거
-    var stopSignal by remember { mutableIntStateOf(0) }
+    val timePickerState = rememberCustomTimePickerState(
+        initialHour12 = selectedHour,
+        initialMinute = selectedMinute,
+        initialIsAm = selectedIsAm,
+    )
+    val coroutineScope = rememberCoroutineScope()
 
     /*
     /****** 상황선택 관련 녀석들 ******/
@@ -275,11 +283,15 @@ fun HomeScreen(
         ?.takeIf { it.isFinite() }
         ?.let(::voltageToPotchBatteryPercent)
 
-    fun saveAndScheduleAlarm() {
+    fun saveAndScheduleAlarm(
+        hour: Int = selectedHour,
+        minute: Int = selectedMinute,
+        isAm: Boolean = selectedIsAm,
+    ) {
         alarmViewModel.saveAlarm(
-            hour = selectedHour,
-            minute = selectedMinute,
-            isAm = selectedIsAm,
+            hour = hour,
+            minute = minute,
+            isAm = isAm,
             ringtoneUri = selectedRingtoneUri,
             vibrationEnabled = selectedVibrationEnabled,
             volume = selectedVolume,
@@ -349,7 +361,7 @@ fun HomeScreen(
                     defaultHour12 = selectedHour,
                     defaultMinute = selectedMinute,
                     defaultIsAm = selectedIsAm,
-                    stopSignal = stopSignal,
+                    state = timePickerState,
                     onTimeChange = { hour12, minute, isAm ->
                         selectedHour = hour12
                         selectedMinute = minute
@@ -364,17 +376,20 @@ fun HomeScreen(
 
         /********    타임피커 밑    ********/
 
-        // 밑을 전부 박스로 감싸서 버튼을 눌렀을때 타임피커 휠의 움직임을 멈추게 함
+        // 타임피커 밖을 누르면 진행 중인 휠을 멈추고 현재 중앙값을 확정한다.
         Box(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .pointerInput(Unit) {
-                    awaitPointerEventScope {
-                        while (true) {
-                            awaitPointerEvent()
-                            stopSignal++ // ✅ 외부 터치 발생 → 타임피커 멈춤 신호
+                .pointerInput(timePickerState) {
+                    while (true) {
+                        awaitPointerEventScope {
+                            awaitFirstDown(requireUnconsumed = false)
                         }
+                        val time = timePickerState.stopAndCommit()
+                        selectedHour = time.hour12
+                        selectedMinute = time.minute
+                        selectedIsAm = time.isAm
                     }
                 }
         )
@@ -469,15 +484,26 @@ fun HomeScreen(
                         .fillMaxWidth()
                         .height(56.dp),
                     onClick = {
-                        if (
-                            potchState == PotchConnectionState.CONNECTED &&
-                            currentBattery != null &&
-                            currentBattery <= LOW_POTCH_BATTERY_PERCENT
-                        ) {
-                            warningBattery = currentBattery
-                            showLowBatteryWarning = true
-                        } else {
-                            saveAndScheduleAlarm()
+                        coroutineScope.launch {
+                            val time = timePickerState.stopAndCommit()
+                            selectedHour = time.hour12
+                            selectedMinute = time.minute
+                            selectedIsAm = time.isAm
+
+                            if (
+                                potchState == PotchConnectionState.CONNECTED &&
+                                currentBattery != null &&
+                                currentBattery <= LOW_POTCH_BATTERY_PERCENT
+                            ) {
+                                warningBattery = currentBattery
+                                showLowBatteryWarning = true
+                            } else {
+                                saveAndScheduleAlarm(
+                                    hour = time.hour12,
+                                    minute = time.minute,
+                                    isAm = time.isAm,
+                                )
+                            }
                         }
                     }
                 )

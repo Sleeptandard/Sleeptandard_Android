@@ -4,6 +4,7 @@ import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.util.Log
 import com.leejang.sleeptandard.Potch.PotchBleForegroundService
 import com.leejang.sleeptandard.Prefs.AlarmPreferences
 import java.util.Calendar
@@ -33,6 +34,12 @@ class AlarmScheduler(private val context: Context) {
         val targetTime = calculateNextTriggerTime(alarm)
         preferences.saveAlarm(alarm, targetTime)
 
+        Log.i(
+            WTF_TAG,
+            "${alarm.hour}시 ${alarm.minute}분 알람설정 되었음. " +
+                "isAm=${alarm.isAm}, alarmId=${alarm.id}, targetTimeMillis=$targetTime"
+        )
+
         alarmManager.setExactAndAllowWhileIdle(
             AlarmManager.RTC_WAKEUP,
             targetTime,
@@ -40,6 +47,12 @@ class AlarmScheduler(private val context: Context) {
         )
 
         val monitoringStartTime = targetTime - MONITORING_WINDOW_MILLIS
+        Log.i(
+            WTF_TAG,
+            "알람 시스템 예약 시작: alarmId=${alarm.id}, " +
+                "monitoringStartTimeMillis=$monitoringStartTime, " +
+                "targetTimeMillis=$targetTime, now=${System.currentTimeMillis()}"
+        )
         if (monitoringStartTime <= System.currentTimeMillis()) {
             PotchAlarmMonitorReceiver.startMonitoring(
                 context = context,
@@ -81,6 +94,11 @@ class AlarmScheduler(private val context: Context) {
         cancelPendingIntents(alarm.id)
         preferences.clearScheduledTriggerTime()
         PotchBleForegroundService.requestStopAlarmMonitoring(context, targetTime)
+        Log.i(
+            WTF_TAG,
+            "알람 예약 취소: alarmId=${alarm.id}, targetTimeMillis=$targetTime, " +
+                "hasAlarm=${preferences.isAlarmSet()}"
+        )
     }
 
     /**
@@ -88,6 +106,10 @@ class AlarmScheduler(private val context: Context) {
      * The scheduled alarms are removed before the normal alarm receiver is invoked.
      */
     fun triggerFromPotch(alarm: Alarm, targetTimeMillis: Long) {
+        Log.i(
+            WTF_TAG,
+            "Potch 조기 알람 트리거: alarmId=${alarm.id}, targetTimeMillis=$targetTimeMillis"
+        )
         cancelPendingIntents(alarm.id)
         AlarmPreferences(context).clearScheduledTriggerTime()
         PotchBleForegroundService.requestStopAlarmMonitoring(context, targetTimeMillis)
@@ -96,6 +118,10 @@ class AlarmScheduler(private val context: Context) {
 
     /** Cleanup used when the target-time fallback alarm actually fires. */
     fun completeTriggeredAlarm(alarmId: Int, targetTimeMillis: Long) {
+        Log.i(
+            WTF_TAG,
+            "알람 수신 후 예약 정리: alarmId=$alarmId, targetTimeMillis=$targetTimeMillis"
+        )
         cancelPendingIntents(alarmId)
         AlarmPreferences(context).clearScheduledTriggerTime()
         PotchBleForegroundService.requestStopAlarmMonitoring(context, targetTimeMillis)
@@ -166,6 +192,7 @@ class AlarmScheduler(private val context: Context) {
 
         const val MONITORING_WINDOW_MILLIS = MONITORING_WINDOW_MINUTES * 60_000L
         private const val MONITOR_REQUEST_CODE_OFFSET = 100_000
+        private const val WTF_TAG = "WTF"
 
         fun createRingIntent(context: Context, alarm: Alarm): Intent =
             Intent(context, AlarmReceiver::class.java).apply {

@@ -59,12 +59,18 @@ import kotlin.math.roundToInt
 class AlarmRingActivity : ComponentActivity() {
 
     private var alarmId: Int = 0
+    private var isAlarmFinishInProgress = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         val alarmPrefs = AlarmPreferences(this)
         alarmId = intent.getIntExtra("alarmId", 0)
+        Log.i(
+            WTF_TAG,
+            "AlarmRingActivity.onCreate: alarmId=$alarmId, savedInstanceState=${savedInstanceState != null}, " +
+                "hasAlarm=${alarmPrefs.isAlarmSet()}, taskId=$taskId, pid=${android.os.Process.myPid()}"
+        )
         // label = intent.getStringExtra("label") ?: "알람"
 
         setContent {
@@ -72,13 +78,12 @@ class AlarmRingActivity : ComponentActivity() {
                 AlarmRingScreen(
                     // label = label,
                     onStop = {
+                        Log.i(
+                            WTF_TAG,
+                            "알람 종료 UI 입력: stopAlarmAndFinish 호출 전, " +
+                                "hasAlarm=${alarmPrefs.isAlarmSet()}"
+                        )
                         stopAlarmAndFinish()
-                        try {
-                            alarmPrefs.clearAlarm()
-                        }catch (e: Exception){
-                            Log.d("clearPrefs", "WTF: ${e}")
-                        }
-
                     }
                 )
             }
@@ -86,8 +91,19 @@ class AlarmRingActivity : ComponentActivity() {
     }
 
     private fun stopAlarmAndFinish() {
+        if (isAlarmFinishInProgress) return
+        isAlarmFinishInProgress = true
+
+        val alarmPrefs = AlarmPreferences(this)
+        Log.i(
+            WTF_TAG,
+            "stopAlarmAndFinish 시작: alarmId=$alarmId, hasAlarm=${alarmPrefs.isAlarmSet()}, " +
+                "activity=${System.identityHashCode(this)}"
+        )
+
         // 1) 소리/진동 정지
         AlarmPlayer.stop()
+        Log.i(WTF_TAG, "알람이 종료되었음.")
 
         // 2) 알림 제거
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -95,35 +111,59 @@ class AlarmRingActivity : ComponentActivity() {
 
         // 3) 정시 알람과 Potch 모니터링 시작 알람을 모두 정리
         try {
-            val alarmPrefs = AlarmPreferences(this)
             val currentAlarm = alarmPrefs.loadAlarm()
             AlarmScheduler(this).cancel(currentAlarm)
+            Log.i(
+                WTF_TAG,
+                "AlarmScheduler.cancel 완료: alarmId=${currentAlarm.id}, " +
+                    "hasAlarm=${alarmPrefs.isAlarmSet()}"
+            )
         } catch (e: Exception) {
             Log.e(TAG, "Failed to cancel Potch alarm reservations", e)
         }
 
+        // MainActivity가 새 Intent를 처리하기 전에 알람 상태를 먼저 확정한다.
+        alarmPrefs.setAlarmRinging(false)
+        alarmPrefs.clearAlarm()
+        Log.i(
+            WTF_TAG,
+            "리뷰 화면 이동 전 알람 상태 초기화 완료: " +
+                "hasAlarm=${alarmPrefs.isAlarmSet()}, ringing=${alarmPrefs.isAlarmRinging()}"
+        )
+
         // 4) MainActivity로 넘어가면서 알람 리뷰 화면에서 부터 시작하도록 요청
         val intent = Intent(this, MainActivity::class.java).apply {
-            putExtra("startDestination", "reviewAlarm") // Screen.AfterAlarm.route 값
+            putExtra("open_screen", "reviewAlarm")
+            putExtra("startDestination", "reviewAlarm") // 기존 버전 호환
             addFlags(
-                Intent.FLAG_ACTIVITY_NEW_TASK or
-                        Intent.FLAG_ACTIVITY_CLEAR_TOP
+                Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP
             )
         }
+        Log.i(
+            WTF_TAG,
+            "MainActivity 시작 요청: open_screen=${intent.getStringExtra("open_screen")}, " +
+                "flags=${intent.flags}, hasAlarm=${alarmPrefs.isAlarmSet()}, taskId=$taskId"
+        )
         startActivity(intent)
+        Log.i(WTF_TAG, "MainActivity startActivity 반환, AlarmRingActivity.finish 호출")
 
         // 5) 화면 닫기
         finish()
     }
 
     override fun onDestroy() {
+        Log.i(
+            WTF_TAG,
+            "AlarmRingActivity.onDestroy: alarmId=$alarmId, " +
+                "hasAlarm=${AlarmPreferences(this).isAlarmSet()}, isFinishing=$isFinishing"
+        )
         super.onDestroy()
-        // 혹시 남아있을지 모를 소리/진동 정리
-        AlarmPlayer.stop()
     }
     
     companion object {
         private const val TAG = "AlarmRingActivity"
+        private const val WTF_TAG = "WTF"
     }
 }
 

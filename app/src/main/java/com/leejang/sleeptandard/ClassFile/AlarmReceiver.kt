@@ -19,6 +19,7 @@ import android.os.VibratorManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.leejang.sleeptandard.AlarmRingActivity
+import com.leejang.sleeptandard.Prefs.AlarmPreferences
 import com.leejang.sleeptandard.R
 
 private const val ALARM_CHANNEL_ID = "alarm_channel"
@@ -120,12 +121,22 @@ class AlarmReceiver : BroadcastReceiver() {
         val targetTimeMillis =
             intent.getLongExtra(AlarmScheduler.EXTRA_TARGET_TIME_MILLIS, 0L)
 
+        Log.i(
+            "WTF",
+            "AlarmReceiver.onReceive: action=${intent.action}, alarmId=$alarmId, " +
+                "targetTimeMillis=$targetTimeMillis, hasAlarm=${AlarmPreferences(context).isAlarmSet()}, " +
+                "pid=${android.os.Process.myPid()}"
+        )
+
+        AlarmPreferences(context).setAlarmRinging(true)
+
         // Whether this is the target-time fallback or an early Potch trigger,
         // make both exact-alarm reservations disappear before ringing.
         AlarmScheduler(context).completeTriggeredAlarm(alarmId, targetTimeMillis)
 
         // 1) 소리/진동 시작 (Activity가 안 떠도 최소한 울리게)
         AlarmPlayer.start(context, ringtoneUriString, vibrationEnabled, volume)
+        Log.i("WTF", "AlarmPlayer.start 완료: alarmId=$alarmId, vibration=$vibrationEnabled, volume=$volume")
 
         // 2) 알람 채널 생성
         createAlarmChannel(context)
@@ -168,6 +179,11 @@ class AlarmReceiver : BroadcastReceiver() {
 
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         nm.notify(alarmId, notification)
+        Log.i(
+            "WTF",
+            "알람 full-screen notification 게시: alarmId=$alarmId, " +
+                "AlarmRingActivity intentFlags=${fullScreenIntent.flags}"
+        )
     }
 
     private fun createAlarmChannel(context: Context) {

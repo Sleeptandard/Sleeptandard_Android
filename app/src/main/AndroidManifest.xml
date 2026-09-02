@@ -97,7 +97,10 @@
         <activity
             android:name=".AlarmRingActivity"
             android:exported="false"
-            android:excludeFromRecents="true" />
+            android:excludeFromRecents="true"
+            android:launchMode="singleTop"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true" />
         
         <!-- FileProvider for sharing log files -->
         <provider

@@ -946,6 +946,12 @@ class PotchBleForegroundService : Service() {
                 alarmPreferences.getScheduledTriggerTimeMillis() == targetTimeMillis
 
         if (!isCurrentReservation) {
+            Log.w(
+                "WTF",
+                "Potch 모니터링 요청 거부: alarmId=$alarmId, target=$targetTimeMillis, " +
+                    "now=$now, hasAlarm=${alarmPreferences.isAlarmSet()}, " +
+                    "savedTarget=${alarmPreferences.getScheduledTriggerTimeMillis()}"
+            )
             Log.w(TAG, "Ignoring stale Potch alarm monitor request: target=$targetTimeMillis")
             dataLogger?.logDebug(
                 TAG,
@@ -978,6 +984,11 @@ class PotchBleForegroundService : Service() {
         startPotchReceiving()
         updateNotification("Potch 각성점수 모니터링 중")
         Log.i(TAG, "Potch alarm monitoring armed: alarmId=$alarmId target=$targetTimeMillis")
+        Log.i(
+            "WTF",
+            "Potch 각성점수 모니터링 시작: alarmId=$alarmId, " +
+                "targetTimeMillis=$targetTimeMillis, ownsSession=${preferences.getBoolean(KEY_ALARM_MONITOR_OWNS_SESSION, false)}"
+        )
     }
 
     private fun stopAlarmMonitoring(expectedTargetTimeMillis: Long) {
@@ -988,6 +999,11 @@ class PotchBleForegroundService : Service() {
         if (expectedTargetTimeMillis > 0L && expectedTargetTimeMillis != monitoredTarget) return
 
         val ownsSession = preferences.getBoolean(KEY_ALARM_MONITOR_OWNS_SESSION, false)
+        Log.i(
+            "WTF",
+            "Potch 각성점수 모니터링 종료: monitoredTarget=$monitoredTarget, " +
+                "expectedTarget=$expectedTargetTimeMillis, ownsSession=$ownsSession"
+        )
         preferences.edit {
             remove(KEY_ALARM_MONITORING_ACTIVE)
             remove(KEY_MONITORED_ALARM_ID)
@@ -1033,6 +1049,11 @@ class PotchBleForegroundService : Service() {
         hasTriggeredCurrentAlarm = true
         val alarm = alarmPreferences.loadAlarm()
         Log.i(TAG, "Potch early alarm triggered: score=$finalWakeScore target=$targetTimeMillis")
+        Log.i(
+            "WTF",
+            "Potch 조기 알람 조건 충족: finalWakeScore=$finalWakeScore, " +
+                "threshold=${AlarmScheduler.POTCH_SCORE_THRESHOLD}, targetTimeMillis=$targetTimeMillis"
+        )
         dataLogger?.logDebug(
             TAG,
             "Potch early alarm triggered: score=$finalWakeScore target=$targetTimeMillis",
