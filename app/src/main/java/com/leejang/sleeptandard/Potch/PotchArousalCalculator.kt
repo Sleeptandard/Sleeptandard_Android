@@ -220,13 +220,18 @@ data class EvidenceScoringConfig(
     val rrvArousalStartMultiplier: Double = 1.35,
     val rrvArousalFullMultiplier: Double = 1.35,
 
-    // 지표 내부 baseline/trend 증거 가중치.
-    val rrBaselineEvidenceWeight: Double = 0.30,
-    val rrTrendEvidenceWeight: Double = 0.70,
+    // RR/HR 개인 baseline 성분은 임시 비활성화하고 최근 상승량만 사용한다.
+    // 다시 활성화할 때는 아래 baseline/trend 가중치만 원래 비율로 복구하면 된다.
+    // val rrBaselineEvidenceWeight: Double = 0.30
+    // val rrTrendEvidenceWeight: Double = 0.70
+    val rrBaselineEvidenceWeight: Double = 0.00,
+    val rrTrendEvidenceWeight: Double = 1.00,
     val rrvBaselineEvidenceWeight: Double = 0.70,
     val rrvTrendEvidenceWeight: Double = 0.30,
-    val hrBaselineEvidenceWeight: Double = 0.60,
-    val hrTrendEvidenceWeight: Double = 0.40,
+    // val hrBaselineEvidenceWeight: Double = 0.60
+    // val hrTrendEvidenceWeight: Double = 0.40
+    val hrBaselineEvidenceWeight: Double = 0.00,
+    val hrTrendEvidenceWeight: Double = 1.00,
     val temperatureBaselineEvidenceWeight: Double = 0.70,
     val temperatureTrendEvidenceWeight: Double = 0.30,
 
@@ -2065,8 +2070,8 @@ class PotchArousalCalculator(
             signalQuality = signalQuality,
             reasons = reasons.takeIf { it.isNotEmpty() }?.joinToString("|"),
             log = "RR fixed score=${heldScore?.let { "%.3f".format(it) } ?: "N/A"}, " +
-                    "baseline30=${baselineScore?.let { "%.3f".format(it) } ?: "N/A"}, " +
-                    "trend70=${trend?.let { "%.3f".format(it) } ?: "N/A"}, hold=30s"
+                    "baseline0=${baselineScore?.let { "%.3f".format(it) } ?: "N/A"}, " +
+                    "trend100=${trend?.let { "%.3f".format(it) } ?: "N/A"}, hold=30s"
         )
     }
 
@@ -2151,6 +2156,8 @@ class PotchArousalCalculator(
             signalQuality = signalQuality,
             reasons = reasons.takeIf { it.isNotEmpty() }?.joinToString("|"),
             log = "HR fixed score=${heldScore?.let { "%.3f".format(it) } ?: "N/A"}, " +
+                    "baseline0=${baselineScore?.let { "%.3f".format(it) } ?: "N/A"}, " +
+                    "trend100=${trend?.let { "%.3f".format(it) } ?: "N/A"}, " +
                     "instant=${instantaneousScore?.let { "%.3f".format(it) } ?: "N/A"}, hold=30s"
         )
     }
