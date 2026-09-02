@@ -35,11 +35,13 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -66,13 +68,14 @@ import kotlin.math.roundToInt
 
 @Composable
 fun PotchScreen(
-    potchViewModel: PotchBleViewModel = viewModel()
+    potchViewModel: PotchBleViewModel = viewModel(),
+    openConnectionSheetInitially: Boolean = false,
 ) {
     val context = LocalContext.current
     val bleState by potchViewModel.bleState.collectAsState()
     val processorState by potchViewModel.processorState.collectAsState()
     val latestData = processorState.lastParsedData
-    var showConnectionSheet by remember { mutableStateOf(false) }
+    var showConnectionSheet by remember { mutableStateOf(openConnectionSheetInitially) }
     var selectedAddress by remember { mutableStateOf<String?>(null) }
     var displayedDevices by remember { mutableStateOf<List<DiscoveredPotch>>(emptyList()) }
     var permissionDenied by remember { mutableStateOf(false) }
@@ -91,9 +94,49 @@ fun PotchScreen(
         }
     }
 
+    LaunchedEffect(openConnectionSheetInitially) {
+        if (!openConnectionSheetInitially || isPotchConnected) return@LaunchedEffect
+
+        showConnectionSheet = true
+        selectedAddress = null
+        displayedDevices = emptyList()
+        permissionDenied = false
+
+        val missingPermissions = requiredPotchPermissions().filter { permission ->
+            ContextCompat.checkSelfPermission(context, permission) !=
+                    PackageManager.PERMISSION_GRANTED
+        }
+        if (missingPermissions.isEmpty()) {
+            // Home에서 시작한 검색이 이미 진행 중이면 목록을 초기화하지 않고 이어받는다.
+            if (!bleState.isDeviceSelectionRequired && !bleState.isScanning) {
+                potchViewModel.startDeviceDiscovery()
+            }
+        } else {
+            permissionLauncher.launch(missingPermissions.toTypedArray())
+        }
+    }
+
     LaunchedEffect(showConnectionSheet, selectedAddress, bleState.discoveredDevices) {
         if (showConnectionSheet && selectedAddress == null) {
             displayedDevices = bleState.discoveredDevices
+        }
+    }
+
+    val cleanupConnectionOnDispose by rememberUpdatedState<() -> Unit> {
+        if (showConnectionSheet && !bleState.isNotificationReady) {
+            if (selectedAddress != null || bleState.isConnecting ||
+                bleState.isConnected || bleState.isReconnecting
+            ) {
+                potchViewModel.disconnect()
+            } else {
+                potchViewModel.cancelDeviceDiscovery()
+            }
+        }
+    }
+
+    DisposableEffect(potchViewModel) {
+        onDispose {
+            cleanupConnectionOnDispose()
         }
     }
 

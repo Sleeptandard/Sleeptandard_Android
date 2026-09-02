@@ -79,7 +79,6 @@ import com.leejang.sleeptandard.Component.AlarmSoundSettingContent
 import com.leejang.sleeptandard.Component.ConfirmButton
 import com.leejang.sleeptandard.Component.CustomTimePicker
 import com.leejang.sleeptandard.Component.OptionsSection
-import com.leejang.sleeptandard.Component.PotchSelectionSheet
 import com.leejang.sleeptandard.Component.PotchConnectionState
 import com.leejang.sleeptandard.Component.ShowWakeUpRange
 import com.leejang.sleeptandard.Component.SituationContent
@@ -121,6 +120,7 @@ fun HomeScreen(
     showWindowTutorial: Boolean,
     onDismissTutorial: (Boolean) -> Unit, // ✅ Boolean 인자 추가
     goExperimentScreen: ()-> Unit = {},
+    goPotchConnectionScreen: () -> Unit = {},
     onBatteryWarningVisibilityChange: (Boolean) -> Unit = {},
     potchViewModel: PotchBleViewModel = viewModel(),
 ) {
@@ -131,6 +131,7 @@ fun HomeScreen(
     var potchPermissionDenied by remember { mutableStateOf(false) }
     var bluetoothEnabled by remember { mutableStateOf(isPhoneBluetoothEnabled(context)) }
     var showBluetoothOffMessage by remember { mutableStateOf(false) }
+    var homeConnectionRequested by remember { mutableStateOf(false) }
     var showLowBatteryWarning by remember { mutableStateOf(false) }
     var warningBattery by remember { mutableIntStateOf(0) }
 
@@ -147,11 +148,14 @@ fun HomeScreen(
             bluetoothEnabled = isPhoneBluetoothEnabled(context)
             if (bluetoothEnabled) {
                 showBluetoothOffMessage = false
+                homeConnectionRequested = true
                 potchViewModel.startHomeConnection()
             } else {
                 showBluetoothOffMessage = true
+                homeConnectionRequested = false
             }
         } else {
+            homeConnectionRequested = false
             Toast.makeText(
                 context,
                 "팟치 연결을 위해 블루투스 권한이 필요합니다.",
@@ -282,6 +286,19 @@ fun HomeScreen(
         ?.batteryVoltage
         ?.takeIf { it.isFinite() }
         ?.let(::voltageToPotchBatteryPercent)
+
+    LaunchedEffect(homeConnectionRequested, bleState.isDeviceSelectionRequired) {
+        if (homeConnectionRequested && bleState.isDeviceSelectionRequired) {
+            homeConnectionRequested = false
+            goPotchConnectionScreen()
+        }
+    }
+
+    LaunchedEffect(homeConnectionRequested, bleState.isNotificationReady) {
+        if (homeConnectionRequested && bleState.isNotificationReady) {
+            homeConnectionRequested = false
+        }
+    }
 
     fun saveAndScheduleAlarm(
         hour: Int = selectedHour,
@@ -469,6 +486,7 @@ fun HomeScreen(
                             }
 
                             if (missingPermissions.isEmpty()) {
+                                homeConnectionRequested = true
                                 potchViewModel.startHomeConnection()
                             } else {
                                 potchPermissionLauncher.launch(missingPermissions.toTypedArray())
@@ -523,17 +541,6 @@ fun HomeScreen(
     }
 
     /************************       이 밑으로 모달 창          *********************************/
-
-    if (bleState.isDeviceSelectionRequired) {
-        PotchSelectionSheet(
-            devices = bleState.discoveredDevices,
-            isScanning = bleState.isScanning,
-            errorMessage = bleState.lastError,
-            onSelect = potchViewModel::selectPotch,
-            onRetry = potchViewModel::startHomeConnection,
-            onDismiss = potchViewModel::cancelDeviceDiscovery
-        )
-    }
 
     if (showLowBatteryWarning) {
         PotchLowBatteryWarningDialog(

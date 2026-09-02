@@ -74,6 +74,7 @@ import com.leejang.sleeptandard.ui.theme.AppIcons
 sealed class Screen(val route: String) {
     object Home : Screen("home")
     object Potch : Screen("potch")
+    object PotchConnection : Screen("potch_connection")
     object Journal : Screen("journal")
     object Settings : Screen("settings")
     object SendingData: Screen("sendingdata")
@@ -213,6 +214,12 @@ fun AppNav(
                     rememberNavController.navigate(Screen.Experiment.route)
                 },
 
+                goPotchConnectionScreen = {
+                    rememberNavController.navigate(Screen.PotchConnection.route) {
+                        launchSingleTop = true
+                    }
+                },
+
                 onBatteryWarningVisibilityChange = { visible ->
                     isBlurred = visible
                 },
@@ -263,6 +270,10 @@ fun AppNav(
 
         composable(Screen.Potch.route){
             PotchScreen()
+        }
+
+        composable(Screen.PotchConnection.route) {
+            PotchScreen(openConnectionSheetInitially = true)
         }
 
         composable(Screen.Journal.route) {
@@ -491,6 +502,7 @@ fun AppNav(
             val showBottom = when (currentRoute) {
                 Screen.Home.route,
                 Screen.Potch.route,
+                Screen.PotchConnection.route,
                 Screen.Journal.route,
                 Screen.SettedAlarm.route,
                 Screen.Settings.route,
@@ -510,6 +522,7 @@ fun AppNav(
                         Screen.Home.route -> 0
                         Screen.SettedAlarm.route -> 0
                         Screen.Potch.route -> 1
+                        Screen.PotchConnection.route -> 1
                         Screen.Journal.route -> 2
                         Screen.Settings.route -> 3
                         Screen.QnA.route -> 3
@@ -533,10 +546,10 @@ fun AppNav(
                         )
                         rememberNavController.navigate(target) {
                             launchSingleTop = true  // 동일 화면이 스택 맨 위에 있다면 새로 만들지 않음
-                            restoreState = true     // 이전에 입력한 정보 등이 있다면 복구
-                            // 뒤로가기를 누르면 그래프에 설정되어 있는 startDestination으로 날아감
+                            // Home은 연결 모달 같은 하위 화면을 복원하지 않고 루트 자체로 돌아간다.
+                            restoreState = idx != 0
                             popUpTo(rememberNavController.graph.startDestinationId) {
-                                saveState = true
+                                saveState = idx != 0
                             }
                         }
                     }
