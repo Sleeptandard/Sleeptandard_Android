@@ -856,11 +856,6 @@ class PotchDataProcessor(
         ) ?: StabilityState()
         val greenMax = greenSamples.maxOrNull()?.toDouble() ?: 0.0
 
-        dataLogger?.logHeartRateDiagnostics(
-            now,
-            sensorData.timestamp,
-            diagnostics
-        )
         dataLogger?.logArousalState(
             phoneTimeMillis = now,
             timestamp = sensorData.timestamp,

@@ -45,7 +45,6 @@ class PotchDataLogger(context: Context) {
     private var packetRawOutput: BufferedOutputStream? = null
     private var workingDebugFile: File? = null
     private var workingArousalFile: File? = null
-    private var workingHeartRateFile: File? = null
     private var workingStabilityEpisodeFile: File? = null
 
     var lastSavedFilePath: String? = null
@@ -63,7 +62,6 @@ class PotchDataLogger(context: Context) {
 
         workingDebugFile = File(directory, "potch_debug_log_$timestamp.txt")
         workingArousalFile = File(directory, "potch_arousal_state_log_$timestamp.csv")
-        workingHeartRateFile = File(directory, "potch_hr_diagnostic_log_$timestamp.csv")
         workingStabilityEpisodeFile =
             File(directory, "potch_stability_episode_log_$timestamp.csv")
 
@@ -245,45 +243,6 @@ class PotchDataLogger(context: Context) {
             Charsets.UTF_8
         )
 
-        workingHeartRateFile?.writeText(
-            UTF8_BOM + listOf(
-                "phone_time",
-                "timestamp",
-                "analysis_segment_id",
-                "processing_state",
-                "underlying_failure_reason",
-                "message",
-                "heart_rate_fresh",
-                "heart_rate_age_ms",
-                "source",
-                "source_log",
-                "green_dc_mean",
-                "green_min",
-                "green_max",
-                "ac_robust_amplitude",
-                "selected_peak_threshold",
-                "selected_polarity",
-                "detected_peak_count",
-                "raw_ibi_count",
-                "valid_ibi_count",
-                "accepted_interval_ratio",
-                "raw_sdsd_ms",
-                "quality_score",
-                "calculated_bpm",
-                "displayed_bpm",
-                "window_sample_count",
-                "window_seconds",
-                "imu_max_delta_g",
-                "imu_p95_delta_g",
-                "imu_motion_exceedance_ratio",
-                "max_raw_sample_delta",
-                "crc_error_count",
-                "sequence_loss_count",
-                "estimated_lost_packet_count"
-            ).joinToString(",") + "\n",
-            Charsets.UTF_8
-        )
-
         workingStabilityEpisodeFile?.writeText(
             UTF8_BOM + listOf(
                 "logged_at",
@@ -454,51 +413,6 @@ class PotchDataLogger(context: Context) {
                 Charsets.UTF_8
             )
         }
-    }
-
-    @Synchronized
-    fun logHeartRateDiagnostics(
-        phoneTimeMillis: Long,
-        timestamp: Long,
-        diagnostics: HeartRateDiagnostics
-    ) {
-        if (!isLogging) return
-        appendCsv(
-            workingHeartRateFile,
-            phoneTime(phoneTimeMillis),
-            timestamp,
-            diagnostics.analysisSegmentId,
-            diagnostics.processingState,
-            diagnostics.underlyingFailureReason,
-            diagnostics.message,
-            diagnostics.heartRateFresh,
-            diagnostics.heartRateAgeMillis,
-            diagnostics.source,
-            diagnostics.sourceLog,
-            diagnostics.greenDcMean,
-            diagnostics.greenMin,
-            diagnostics.greenMax,
-            diagnostics.acRobustAmplitude,
-            diagnostics.selectedPeakThreshold,
-            diagnostics.selectedPolarity,
-            diagnostics.detectedPeakCount,
-            diagnostics.rawIbiCount,
-            diagnostics.validIbiCount,
-            diagnostics.acceptedIntervalRatio,
-            diagnostics.rawSdsdMs,
-            diagnostics.qualityScore,
-            diagnostics.calculatedBpm,
-            diagnostics.displayedBpm,
-            diagnostics.windowSampleCount,
-            diagnostics.windowSeconds,
-            diagnostics.imuMaxDeltaG,
-            diagnostics.imuP95DeltaG,
-            diagnostics.imuMotionExceedanceRatio,
-            diagnostics.maxRawSampleDelta,
-            diagnostics.crcErrorCount,
-            diagnostics.sequenceLossCount,
-            diagnostics.estimatedLostPacketCount
-        )
     }
 
     @Synchronized
@@ -736,7 +650,6 @@ class PotchDataLogger(context: Context) {
             workingPacketRawFile,
             workingDebugFile,
             workingArousalFile,
-            workingHeartRateFile,
             workingStabilityEpisodeFile
         ).filter { it.exists() }
 
@@ -749,7 +662,6 @@ class PotchDataLogger(context: Context) {
     fun getWorkingLogPath(): String? = workingPacketRawFile?.absolutePath
     fun getWorkingDebugLogPath(): String? = workingDebugFile?.absolutePath
     fun getWorkingArousalLogPath(): String? = workingArousalFile?.absolutePath
-    fun getWorkingHeartRateDiagnosticLogPath(): String? = workingHeartRateFile?.absolutePath
     fun getWorkingStabilityEpisodeLogPath(): String? =
         workingStabilityEpisodeFile?.absolutePath
 
@@ -761,7 +673,6 @@ class PotchDataLogger(context: Context) {
             workingPacketRawFile,
             workingDebugFile,
             workingArousalFile,
-            workingHeartRateFile,
             workingStabilityEpisodeFile
         ).forEach { runCatching { it.delete() } }
         clearWorkingReferences()
@@ -773,7 +684,6 @@ class PotchDataLogger(context: Context) {
         workingPacketRawFile = null
         workingDebugFile = null
         workingArousalFile = null
-        workingHeartRateFile = null
         workingStabilityEpisodeFile = null
     }
 
