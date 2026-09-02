@@ -856,15 +856,6 @@ class PotchDataProcessor(
         ) ?: StabilityState()
         val greenMax = greenSamples.maxOrNull()?.toDouble() ?: 0.0
 
-        dataLogger?.logArousalState(
-            phoneTimeMillis = now,
-            timestamp = sensorData.timestamp,
-            arousalState = arousalState,
-            complete = "true",
-            missPacketNum = counters.estimatedLostPacketCount.toString(),
-            errorLog = ""
-        )
-
         _state.update { current ->
             current.copy(
                 lastParsedData = sensorData,

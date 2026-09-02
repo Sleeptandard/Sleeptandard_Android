@@ -44,7 +44,6 @@ class PotchDataLogger(context: Context) {
     private var workingPacketRawFile: File? = null
     private var packetRawOutput: BufferedOutputStream? = null
     private var workingDebugFile: File? = null
-    private var workingArousalFile: File? = null
     private var workingStabilityEpisodeFile: File? = null
 
     var lastSavedFilePath: String? = null
@@ -61,185 +60,11 @@ class PotchDataLogger(context: Context) {
         packetRawOutput = FileOutputStream(workingPacketRawFile, false).buffered()
 
         workingDebugFile = File(directory, "potch_debug_log_$timestamp.txt")
-        workingArousalFile = File(directory, "potch_arousal_state_log_$timestamp.csv")
         workingStabilityEpisodeFile =
             File(directory, "potch_stability_episode_log_$timestamp.csv")
 
         workingDebugFile?.writeText(
             "Potch debug log started at $timestamp\n",
-            Charsets.UTF_8
-        )
-
-        workingArousalFile?.writeText(
-            UTF8_BOM + listOf(
-                "phone_time",
-                "timestamp",
-                "final_wake_score",
-                "final_wake_confidence",
-                "final_wake_coverage",
-                "used_arousal_domain_count",
-                "movement_domain_score",
-                "movement_domain_confidence",
-                "movement_domain_coverage",
-                "movement_domain_usable",
-                "movement_domain_composition",
-                "respiratory_domain_score",
-                "respiratory_domain_confidence",
-                "respiratory_domain_coverage",
-                "respiratory_domain_usable",
-                "respiratory_domain_composition",
-                "cardiac_domain_score",
-                "cardiac_domain_confidence",
-                "cardiac_domain_coverage",
-                "cardiac_domain_usable",
-                "cardiac_domain_composition",
-                "temperature_domain_score",
-                "temperature_domain_confidence",
-                "temperature_domain_coverage",
-                "temperature_domain_usable",
-                "temperature_domain_composition",
-                "wake_candidate_hold_seconds",
-                "wake_current_condition_passed",
-                "wake_persistence_window_seconds",
-                "wake_persistence_required_pass_seconds",
-                "wake_persistence_observed_seconds",
-                "wake_persistence_passed_seconds",
-                "wake_persistence_failed_seconds",
-                "wake_persistence_pass_ratio_percent",
-                "wake_decision_reason",
-                "is_wake_timing_candidate",
-                "micro_movement_variance",
-                "micro_movement_score",
-                "micro_movement_max_axis_delta_g",
-                "micro_movement_twitch_detected",
-                "rr_from_green_ppg",
-                "rr_from_imu",
-                "rr_final",
-                "rr_score",
-                "rr_raw_score",
-                "rr_source",
-                "rr_confidence",
-                "rr_log",
-                "rrv_rmssd_sec",
-                "rrv_score",
-                "rrv_source",
-                "hr_bpm",
-                "hr_gradient",
-                "hr_score",
-                "hrv_rmssd_sec",
-                "hrv_lf",
-                "hrv_hf",
-                "hrv_lf_hf",
-                "hrv_score",
-                "hrv_quality",
-                "hrv_score_composition",
-                "hrv_rmssd_score",
-                "hrv_rmssd_quality",
-                "hrv_rmssd_ibi_count",
-                "hrv_frequency_score",
-                "hrv_frequency_quality",
-                "hrv_frequency_ibi_count",
-                "hrv_frequency_usable",
-                "hrv_frequency_status",
-                "hrv_frequency_rejection_reasons",
-                "hrv_frequency_observed_seconds",
-                "hrv_frequency_raw_ibi_count",
-                "hrv_frequency_cleaned_ibi_count",
-                "hrv_frequency_resampled_count",
-                "hrv_frequency_ppg_signal_quality",
-                "hrv_frequency_rr_bpm",
-                "skin_temperature_celsius",
-                "skin_temperature_gradient",
-                "skin_temperature_score",
-                "micro_evidence_score",
-                "micro_evidence_confidence",
-                "micro_evidence_coverage",
-                "micro_evidence_usable",
-                "micro_baseline_source",
-                "micro_baseline_center",
-                "micro_baseline_spread",
-                "micro_signed_distance",
-                "micro_normalized_distance",
-                "micro_baseline_score",
-                "micro_trend_score",
-                "micro_signal_quality",
-                "micro_evidence_reasons",
-                "micro_evidence_log",
-                "rr_evidence_score",
-                "rr_evidence_confidence",
-                "rr_evidence_coverage",
-                "rr_evidence_usable",
-                "rr_baseline_source",
-                "rr_baseline_center",
-                "rr_baseline_spread",
-                "rr_signed_distance",
-                "rr_normalized_distance",
-                "rr_baseline_score",
-                "rr_trend_score",
-                "rr_signal_quality",
-                "rr_evidence_reasons",
-                "rr_evidence_log",
-                "rrv_evidence_score",
-                "rrv_evidence_confidence",
-                "rrv_evidence_coverage",
-                "rrv_evidence_usable",
-                "rrv_baseline_source",
-                "rrv_baseline_center",
-                "rrv_baseline_spread",
-                "rrv_signed_distance",
-                "rrv_normalized_distance",
-                "rrv_baseline_score",
-                "rrv_trend_score",
-                "rrv_signal_quality",
-                "rrv_evidence_reasons",
-                "rrv_evidence_log",
-                "hr_evidence_score",
-                "hr_evidence_confidence",
-                "hr_evidence_coverage",
-                "hr_evidence_usable",
-                "hr_baseline_source",
-                "hr_baseline_center",
-                "hr_baseline_spread",
-                "hr_signed_distance",
-                "hr_normalized_distance",
-                "hr_baseline_score",
-                "hr_trend_score",
-                "hr_signal_quality",
-                "hr_evidence_reasons",
-                "hr_evidence_log",
-                "hrv_evidence_score",
-                "hrv_evidence_confidence",
-                "hrv_evidence_coverage",
-                "hrv_evidence_usable",
-                "hrv_baseline_source",
-                "hrv_baseline_center",
-                "hrv_baseline_spread",
-                "hrv_signed_distance",
-                "hrv_normalized_distance",
-                "hrv_baseline_score",
-                "hrv_trend_score",
-                "hrv_signal_quality",
-                "hrv_evidence_reasons",
-                "hrv_evidence_log",
-                "temperature_evidence_score",
-                "temperature_evidence_confidence",
-                "temperature_evidence_coverage",
-                "temperature_evidence_usable",
-                "temperature_baseline_source",
-                "temperature_baseline_center",
-                "temperature_baseline_spread",
-                "temperature_signed_distance",
-                "temperature_normalized_distance",
-                "temperature_baseline_score",
-                "temperature_trend_score",
-                "temperature_signal_quality",
-                "temperature_evidence_reasons",
-                "temperature_evidence_log",
-                "complete",
-                "miss_packet_num",
-                "error_log",
-                "last_log"
-            ).joinToString(",") + "\n",
             Charsets.UTF_8
         )
 
@@ -415,95 +240,6 @@ class PotchDataLogger(context: Context) {
         }
     }
 
-    @Synchronized
-    fun logArousalState(
-        phoneTimeMillis: Long,
-        timestamp: Long,
-        arousalState: ArousalState,
-        complete: String,
-        missPacketNum: String,
-        errorLog: String
-    ) {
-        if (!isLogging) return
-        appendCsv(
-            workingArousalFile,
-            phoneTime(phoneTimeMillis),
-            timestamp,
-            arousalState.finalWakeScore,
-            arousalState.finalWakeConfidence,
-            arousalState.finalWakeCoverage,
-            arousalState.usedArousalDomainCount,
-            *arousalState.movementDomainEvidence.toCsvValues(),
-            *arousalState.respiratoryDomainEvidence.toCsvValues(),
-            *arousalState.cardiacDomainEvidence.toCsvValues(),
-            *arousalState.temperatureDomainEvidence.toCsvValues(),
-            arousalState.wakeCandidateHoldSeconds,
-            arousalState.wakeCurrentConditionPassed,
-            arousalState.wakePersistenceWindowSeconds,
-            arousalState.wakePersistenceRequiredPassSeconds,
-            arousalState.wakePersistenceObservedSeconds,
-            arousalState.wakePersistencePassedSeconds,
-            arousalState.wakePersistenceFailedSeconds,
-            arousalState.wakePersistencePassRatio,
-            arousalState.wakeDecisionReason,
-            arousalState.isWakeTimingCandidate,
-            arousalState.microMovementVariance,
-            arousalState.microMovementScore,
-            arousalState.microMovementMaxAxisDeltaG,
-            arousalState.microMovementTwitchDetected,
-            arousalState.rrFromPpg,
-            arousalState.rrFromImu,
-            arousalState.rrFinal,
-            arousalState.rrScore,
-            arousalState.rrRawScore,
-            arousalState.rrFusionSource,
-            arousalState.rrFusionConfidence,
-            arousalState.rrFusionLog,
-            arousalState.rrvRmssd,
-            arousalState.rrvScore,
-            arousalState.rrvSource,
-            arousalState.hrBpm,
-            arousalState.hrGradient,
-            arousalState.hrScore,
-            arousalState.hrvRmssd,
-            arousalState.hrvLf,
-            arousalState.hrvHf,
-            arousalState.hrvLfHf,
-            arousalState.hrvScore,
-            arousalState.hrvQuality,
-            arousalState.hrvScoreComposition,
-            arousalState.hrvRmssdScore,
-            arousalState.hrvRmssdQuality,
-            arousalState.hrvRmssdIbiCount,
-            arousalState.hrvFrequencyScore,
-            arousalState.hrvFrequencyQuality,
-            arousalState.hrvFrequencyIbiCount,
-            arousalState.hrvFrequencyUsable,
-            arousalState.hrvFrequencyStatus.state,
-            arousalState.hrvFrequencyRejectionReasons,
-            arousalState.hrvFrequencyObservedSeconds,
-            arousalState.hrvFrequencyRawIbiCount,
-            arousalState.hrvFrequencyCleanedIbiCount,
-            arousalState.hrvFrequencyResampledCount,
-            arousalState.hrvFrequencyPpgSignalQuality,
-            arousalState.hrvFrequencyRespiratoryRateBpm,
-            arousalState.skinTemperatureCelsius,
-            arousalState.skinTemperatureGradient,
-            arousalState.skinTemperatureScore,
-            *arousalState.microEvidence.toCsvValues(),
-            *arousalState.rrEvidence.toCsvValues(),
-            *arousalState.rrvEvidence.toCsvValues(),
-            *arousalState.hrEvidence.toCsvValues(),
-            *arousalState.hrvEvidence.toCsvValues(),
-            *arousalState.temperatureEvidence.toCsvValues(),
-            complete,
-            missPacketNum,
-            errorLog,
-            arousalState.lastLog
-        )
-    }
-
-
     /**
      * 검출된 안정 episode의 대표값과 후보 선별 결과를 새 CSV에 기록한다.
      *
@@ -649,7 +385,6 @@ class PotchDataLogger(context: Context) {
         val files = listOfNotNull(
             workingPacketRawFile,
             workingDebugFile,
-            workingArousalFile,
             workingStabilityEpisodeFile
         ).filter { it.exists() }
 
@@ -661,7 +396,6 @@ class PotchDataLogger(context: Context) {
 
     fun getWorkingLogPath(): String? = workingPacketRawFile?.absolutePath
     fun getWorkingDebugLogPath(): String? = workingDebugFile?.absolutePath
-    fun getWorkingArousalLogPath(): String? = workingArousalFile?.absolutePath
     fun getWorkingStabilityEpisodeLogPath(): String? =
         workingStabilityEpisodeFile?.absolutePath
 
@@ -672,7 +406,6 @@ class PotchDataLogger(context: Context) {
         listOfNotNull(
             workingPacketRawFile,
             workingDebugFile,
-            workingArousalFile,
             workingStabilityEpisodeFile
         ).forEach { runCatching { it.delete() } }
         clearWorkingReferences()
@@ -683,7 +416,6 @@ class PotchDataLogger(context: Context) {
         closePacketRawOutput()
         workingPacketRawFile = null
         workingDebugFile = null
-        workingArousalFile = null
         workingStabilityEpisodeFile = null
     }
 
@@ -692,31 +424,6 @@ class PotchDataLogger(context: Context) {
         runCatching { packetRawOutput?.close() }
         packetRawOutput = null
     }
-
-    private fun DomainEvidence.toCsvValues(): Array<Any?> = arrayOf(
-        score,
-        confidence,
-        coverage,
-        usable,
-        composition
-    )
-
-    private fun MetricEvidence.toCsvValues(): Array<Any?> = arrayOf(
-        score,
-        confidence,
-        coverage,
-        usable,
-        baselineSource,
-        baselineCenter,
-        baselineSpread,
-        signedDistance,
-        normalizedDistance,
-        baselineScore,
-        trendScore,
-        signalQuality,
-        reasons,
-        log
-    )
 
     private fun appendCsv(file: File?, vararg values: Any?) {
         file?.appendText(values.joinToString(",") { csv(it) } + "\n", Charsets.UTF_8)
