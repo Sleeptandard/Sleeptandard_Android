@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -49,12 +50,12 @@ fun PotchSelectionSheet(
         containerColor = Color(0xFF07111E),
         scrimColor = Color.Black.copy(alpha = 0.6f),
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
-        contentWindowInsets = { WindowInsets(0, 0, 0, 0) }
+        contentWindowInsets = { WindowInsets(0,0,0,0)}
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 20.dp),
+                .padding(horizontal = 20.dp, vertical = 30.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(

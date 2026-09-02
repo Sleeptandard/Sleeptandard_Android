@@ -405,7 +405,7 @@ private fun PotchConnectionSheet(
         containerColor = Color(0xFF07111E),
         scrimColor = Color.Black.copy(alpha = 0.6f),
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
-        contentWindowInsets = { WindowInsets(0, 0, 0, 0) }
+        contentWindowInsets = { WindowInsets(0, 0, 0, 100) }
     ) {
         Column(
             modifier = Modifier

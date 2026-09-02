@@ -110,6 +110,7 @@ fun SettingsScreen(
             )
         )
 
+        /*
         Spacer(Modifier.height(30.dp))
 
         SettingSection(
@@ -118,6 +119,8 @@ fun SettingsScreen(
                 SettingElements(id = 1, name = "수면데이터 보내기", iconID = AppIcons.SettingsDataSending, onClick = onClickSendingData)
             )
         )
+
+         */
     }
 }
 
