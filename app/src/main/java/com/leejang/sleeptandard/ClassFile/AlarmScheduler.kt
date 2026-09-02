@@ -112,7 +112,7 @@ class AlarmScheduler(private val context: Context) {
         )
         cancelPendingIntents(alarm.id)
         AlarmPreferences(context).clearScheduledTriggerTime()
-        PotchBleForegroundService.requestStopAlarmMonitoring(context, targetTimeMillis)
+        PotchBleForegroundService.requestDisarmAlarmMonitoring(context, targetTimeMillis)
         context.sendBroadcast(createRingIntent(context, alarm))
     }
 
@@ -124,7 +124,16 @@ class AlarmScheduler(private val context: Context) {
         )
         cancelPendingIntents(alarmId)
         AlarmPreferences(context).clearScheduledTriggerTime()
-        PotchBleForegroundService.requestStopAlarmMonitoring(context, targetTimeMillis)
+        PotchBleForegroundService.requestDisarmAlarmMonitoring(context, targetTimeMillis)
+    }
+
+    /** RingActivity에서 알람을 해제할 때 예약만 정리하고 Potch 수집 세션은 유지한다. */
+    fun finishTriggeredAlarm(alarmId: Int) {
+        val preferences = AlarmPreferences(context)
+        val targetTimeMillis = preferences.getScheduledTriggerTimeMillis()
+        cancelPendingIntents(alarmId)
+        preferences.clearScheduledTriggerTime()
+        PotchBleForegroundService.requestDisarmAlarmMonitoring(context, targetTimeMillis)
     }
 
     private fun cancelPendingIntents(alarmId: Int) {

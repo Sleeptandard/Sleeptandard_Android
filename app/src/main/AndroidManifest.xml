@@ -94,6 +94,10 @@
             android:name=".ClassFile.PotchAlarmMonitorReceiver"
             android:exported="false" />
 
+        <receiver
+            android:name=".ClassFile.PotchPostAlarmStopReceiver"
+            android:exported="false" />
+
         <activity
             android:name=".AlarmRingActivity"
             android:exported="false"

@@ -14,6 +14,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.leejang.sleeptandard.ClassFile.AlarmScheduler
+import com.leejang.sleeptandard.ClassFile.PotchPostAlarmStopReceiver
 import com.leejang.sleeptandard.ClassFile.PotchAlarmTriggerPolicy
 import com.leejang.sleeptandard.MainActivity
 import com.leejang.sleeptandard.Prefs.AlarmPreferences
@@ -94,6 +95,8 @@ class PotchBleForegroundService : Service() {
             "com.leejang.sleeptandard.Potch.ACTION_START_ALARM_MONITORING"
         const val ACTION_STOP_ALARM_MONITORING =
             "com.leejang.sleeptandard.Potch.ACTION_STOP_ALARM_MONITORING"
+        const val ACTION_DISARM_ALARM_MONITORING =
+            "com.leejang.sleeptandard.Potch.ACTION_DISARM_ALARM_MONITORING"
 
         /**
          * Potch 수신 종료 및 로그 저장 명령.
@@ -137,6 +140,24 @@ class PotchBleForegroundService : Service() {
 
             val intent = Intent(context, PotchBleForegroundService::class.java).apply {
                 action = ACTION_STOP_ALARM_MONITORING
+                putExtra(AlarmScheduler.EXTRA_TARGET_TIME_MILLIS, targetTimeMillis)
+            }
+            ContextCompat.startForegroundService(context, intent)
+        }
+
+        /** 알람은 더 평가하지 않되, 해제 후 추가 수집을 위해 Potch 세션은 유지한다. */
+        fun requestDisarmAlarmMonitoring(
+            context: android.content.Context,
+            targetTimeMillis: Long,
+        ) {
+            val preferences = context.getSharedPreferences(SERVICE_PREFS, MODE_PRIVATE)
+            if (!preferences.getBoolean(KEY_ALARM_MONITORING_ACTIVE, false)) return
+
+            val monitoredTarget = preferences.getLong(KEY_MONITORED_TARGET_TIME, 0L)
+            if (targetTimeMillis > 0L && monitoredTarget != targetTimeMillis) return
+
+            val intent = Intent(context, PotchBleForegroundService::class.java).apply {
+                action = ACTION_DISARM_ALARM_MONITORING
                 putExtra(AlarmScheduler.EXTRA_TARGET_TIME_MILLIS, targetTimeMillis)
             }
             ContextCompat.startForegroundService(context, intent)
@@ -280,6 +301,7 @@ class PotchBleForegroundService : Service() {
                 }
             }
             ACTION_START -> {
+                PotchPostAlarmStopReceiver.cancelScheduledStop(this)
                 isStoppingService = false
 
                 Log.i(TAG, "ACTION_START received")
@@ -293,6 +315,7 @@ class PotchBleForegroundService : Service() {
             }
 
             ACTION_START_HOME_CONNECTION -> {
+                PotchPostAlarmStopReceiver.cancelScheduledStop(this)
                 isStoppingService = false
                 registerDeviceWhenReady = false
                 markSessionRunning(true)
@@ -300,6 +323,7 @@ class PotchBleForegroundService : Service() {
             }
 
             ACTION_START_DEVICE_DISCOVERY -> {
+                PotchPostAlarmStopReceiver.cancelScheduledStop(this)
                 isStoppingService = false
                 registerDeviceWhenReady = false
                 markSessionRunning(true)
@@ -338,6 +362,7 @@ class PotchBleForegroundService : Service() {
             }
 
             ACTION_START_ALARM_MONITORING -> {
+                PotchPostAlarmStopReceiver.cancelScheduledStop(this)
                 val alarmId = intent.getIntExtra(AlarmScheduler.EXTRA_ALARM_ID, 0)
                 val targetTimeMillis =
                     intent.getLongExtra(AlarmScheduler.EXTRA_TARGET_TIME_MILLIS, 0L)
@@ -350,7 +375,14 @@ class PotchBleForegroundService : Service() {
                 stopAlarmMonitoring(targetTimeMillis)
             }
 
+            ACTION_DISARM_ALARM_MONITORING -> {
+                val targetTimeMillis =
+                    intent.getLongExtra(AlarmScheduler.EXTRA_TARGET_TIME_MILLIS, 0L)
+                disarmAlarmMonitoring(targetTimeMillis)
+            }
+
             ACTION_STOP_AND_SAVE -> {
+                PotchPostAlarmStopReceiver.cancelScheduledStop(this)
                 isStoppingService = true
 
                 Log.i(TAG, "ACTION_STOP_AND_SAVE received")
@@ -1019,6 +1051,28 @@ class PotchBleForegroundService : Service() {
         } else {
             updateNotification("Potch 데이터 수신 중")
         }
+    }
+
+    private fun disarmAlarmMonitoring(expectedTargetTimeMillis: Long) {
+        val preferences = getSharedPreferences(SERVICE_PREFS, MODE_PRIVATE)
+        if (!preferences.getBoolean(KEY_ALARM_MONITORING_ACTIVE, false)) return
+
+        val monitoredTarget = preferences.getLong(KEY_MONITORED_TARGET_TIME, 0L)
+        if (expectedTargetTimeMillis > 0L && expectedTargetTimeMillis != monitoredTarget) return
+
+        Log.i(
+            "WTF",
+            "Potch 각성점수 모니터링만 해제: monitoredTarget=$monitoredTarget, " +
+                "추가 데이터 수집을 위해 연결 유지"
+        )
+        preferences.edit {
+            remove(KEY_ALARM_MONITORING_ACTIVE)
+            remove(KEY_MONITORED_ALARM_ID)
+            remove(KEY_MONITORED_TARGET_TIME)
+            remove(KEY_ALARM_MONITOR_OWNS_SESSION)
+        }
+        hasTriggeredCurrentAlarm = false
+        updateNotification("알람 후 Potch 데이터 수집 중")
     }
 
     private fun evaluatePotchAlarm(finalWakeScore: Double) {

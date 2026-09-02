@@ -48,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.leejang.sleeptandard.ClassFile.AlarmPlayer
 import com.leejang.sleeptandard.ClassFile.AlarmScheduler
+import com.leejang.sleeptandard.ClassFile.PotchPostAlarmStopReceiver
 import com.leejang.sleeptandard.Prefs.AlarmPreferences
 import com.leejang.sleeptandard.ui.theme.Sleeptandard_MVP_DemoTheme
 import java.time.LocalTime
@@ -109,18 +110,21 @@ class AlarmRingActivity : ComponentActivity() {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         nm.cancel(alarmId)
 
-        // 3) 정시 알람과 Potch 모니터링 시작 알람을 모두 정리
+        // 3) 알람 예약은 정리하되 Potch 수집은 유지한다.
         try {
             val currentAlarm = alarmPrefs.loadAlarm()
-            AlarmScheduler(this).cancel(currentAlarm)
+            AlarmScheduler(this).finishTriggeredAlarm(currentAlarm.id)
             Log.i(
                 WTF_TAG,
-                "AlarmScheduler.cancel 완료: alarmId=${currentAlarm.id}, " +
+                "AlarmScheduler.finishTriggeredAlarm 완료: alarmId=${currentAlarm.id}, " +
                     "hasAlarm=${alarmPrefs.isAlarmSet()}"
             )
         } catch (e: Exception) {
             Log.e(TAG, "Failed to cancel Potch alarm reservations", e)
         }
+
+        // 해제 시점부터 5분간 데이터를 더 받은 뒤 로그 저장과 연결 종료를 수행한다.
+        PotchPostAlarmStopReceiver.schedule(this, alarmId)
 
         // MainActivity가 새 Intent를 처리하기 전에 알람 상태를 먼저 확정한다.
         alarmPrefs.setAlarmRinging(false)
