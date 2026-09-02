@@ -19,6 +19,7 @@ import android.os.VibratorManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.leejang.sleeptandard.AlarmRingActivity
+import com.leejang.sleeptandard.Potch.PotchDataLogger
 import com.leejang.sleeptandard.Prefs.AlarmPreferences
 import com.leejang.sleeptandard.R
 import java.io.File
@@ -31,22 +32,34 @@ private const val WTF_TAG = "WTF"
 
 private object AlarmRingFileLogger {
     private const val LOG_DIRECTORY = "PotchLogs"
-    private const val LOG_FILE_NAME = "alarm_ring_log.txt"
 
     @Synchronized
-    fun append(context: Context, ringTimeMillis: Long, alarmType: String) {
+    fun writeNewAndExport(context: Context, ringTimeMillis: Long, alarmType: String) {
         runCatching {
             val directory = File(context.applicationContext.filesDir, LOG_DIRECTORY).apply {
                 mkdirs()
             }
+            val fileTimestamp = SimpleDateFormat(
+                "yyyyMMdd_HHmmss_SSS",
+                Locale.KOREA
+            ).format(Date(ringTimeMillis))
             val phoneTime = SimpleDateFormat(
                 "yyyy-MM-dd HH:mm:ss.SSS",
                 Locale.KOREA
             ).format(Date(ringTimeMillis))
-            File(directory, LOG_FILE_NAME).appendText(
+            val logFile = File(directory, "alarm_ring_log_$fileTimestamp.txt")
+            logFile.writeText(
                 "$phoneTime : $alarmType\n",
                 Charsets.UTF_8
             )
+
+            val exportedPaths = PotchDataLogger.exportInternalLogFilesToDownloads(
+                context = context.applicationContext,
+                fileNames = listOf(logFile.name)
+            )
+            check(exportedPaths.isNotEmpty()) {
+                "Downloads/PotchLogs 내보내기에 실패했습니다."
+            }
         }.onFailure { error ->
             Log.e(WTF_TAG, "알람 울림 TXT 로그 저장 실패: ${error.message}", error)
         }
@@ -175,7 +188,7 @@ class AlarmReceiver : BroadcastReceiver() {
             // 앱 업데이트 전에 예약된 정시 PendingIntent와의 호환 처리.
             else -> if (targetTimeMillis > 0L) "정시 알람" else "각성 알람"
         }
-        AlarmRingFileLogger.append(
+        AlarmRingFileLogger.writeNewAndExport(
             context = context,
             ringTimeMillis = actualRingTimeMillis,
             alarmType = alarmType
