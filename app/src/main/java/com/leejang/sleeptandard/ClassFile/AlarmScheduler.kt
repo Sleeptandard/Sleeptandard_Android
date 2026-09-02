@@ -113,7 +113,12 @@ class AlarmScheduler(private val context: Context) {
         cancelPendingIntents(alarm.id)
         AlarmPreferences(context).clearScheduledTriggerTime()
         PotchBleForegroundService.requestDisarmAlarmMonitoring(context, targetTimeMillis)
-        context.sendBroadcast(createRingIntent(context, alarm))
+        context.sendBroadcast(
+            createRingIntent(context, alarm).apply {
+                putExtra(EXTRA_TARGET_TIME_MILLIS, targetTimeMillis)
+                putExtra(EXTRA_TRIGGER_SOURCE, TRIGGER_SOURCE_POTCH_EARLY)
+            }
+        )
     }
 
     /** Cleanup used when the target-time fallback alarm actually fires. */
@@ -153,6 +158,7 @@ class AlarmScheduler(private val context: Context) {
             alarm.id,
             createRingIntent(context, alarm).apply {
                 putExtra(EXTRA_TARGET_TIME_MILLIS, triggerTime)
+                putExtra(EXTRA_TRIGGER_SOURCE, TRIGGER_SOURCE_TARGET_TIME)
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
@@ -198,6 +204,9 @@ class AlarmScheduler(private val context: Context) {
         const val EXTRA_RINGTONE_URI = "ringtoneUri"
         const val EXTRA_VOLUME = "volume"
         const val EXTRA_VIBRATION_ENABLED = "vibrationEnabled"
+        const val EXTRA_TRIGGER_SOURCE = "triggerSource"
+        const val TRIGGER_SOURCE_POTCH_EARLY = "POTCH_EARLY"
+        const val TRIGGER_SOURCE_TARGET_TIME = "TARGET_TIME"
 
         const val MONITORING_WINDOW_MILLIS = MONITORING_WINDOW_MINUTES * 60_000L
         private const val MONITOR_REQUEST_CODE_OFFSET = 100_000

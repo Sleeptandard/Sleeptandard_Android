@@ -21,8 +21,37 @@ import androidx.core.app.NotificationCompat
 import com.leejang.sleeptandard.AlarmRingActivity
 import com.leejang.sleeptandard.Prefs.AlarmPreferences
 import com.leejang.sleeptandard.R
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 private const val ALARM_CHANNEL_ID = "alarm_channel"
+private const val WTF_TAG = "WTF"
+
+private object AlarmRingFileLogger {
+    private const val LOG_DIRECTORY = "PotchLogs"
+    private const val LOG_FILE_NAME = "alarm_ring_log.txt"
+
+    @Synchronized
+    fun append(context: Context, ringTimeMillis: Long, alarmType: String) {
+        runCatching {
+            val directory = File(context.applicationContext.filesDir, LOG_DIRECTORY).apply {
+                mkdirs()
+            }
+            val phoneTime = SimpleDateFormat(
+                "yyyy-MM-dd HH:mm:ss.SSS",
+                Locale.KOREA
+            ).format(Date(ringTimeMillis))
+            File(directory, LOG_FILE_NAME).appendText(
+                "$phoneTime : $alarmType\n",
+                Charsets.UTF_8
+            )
+        }.onFailure { error ->
+            Log.e(WTF_TAG, "알람 울림 TXT 로그 저장 실패: ${error.message}", error)
+        }
+    }
+}
 
 // 소리/진동을 Activity에서도 끌 수 있도록 전역으로 관리하는 객체
 object AlarmPlayer {
@@ -120,11 +149,14 @@ class AlarmReceiver : BroadcastReceiver() {
         val volume = intent.getIntExtra(AlarmScheduler.EXTRA_VOLUME, 10)
         val targetTimeMillis =
             intent.getLongExtra(AlarmScheduler.EXTRA_TARGET_TIME_MILLIS, 0L)
+        val triggerSource =
+            intent.getStringExtra(AlarmScheduler.EXTRA_TRIGGER_SOURCE) ?: "UNKNOWN"
 
         Log.i(
-            "WTF",
+            WTF_TAG,
             "AlarmReceiver.onReceive: action=${intent.action}, alarmId=$alarmId, " +
-                "targetTimeMillis=$targetTimeMillis, hasAlarm=${AlarmPreferences(context).isAlarmSet()}, " +
+                "triggerSource=$triggerSource, targetTimeMillis=$targetTimeMillis, " +
+                "hasAlarm=${AlarmPreferences(context).isAlarmSet()}, " +
                 "pid=${android.os.Process.myPid()}"
         )
 
@@ -136,7 +168,18 @@ class AlarmReceiver : BroadcastReceiver() {
 
         // 1) 소리/진동 시작 (Activity가 안 떠도 최소한 울리게)
         AlarmPlayer.start(context, ringtoneUriString, vibrationEnabled, volume)
-        Log.i("WTF", "AlarmPlayer.start 완료: alarmId=$alarmId, vibration=$vibrationEnabled, volume=$volume")
+        val actualRingTimeMillis = System.currentTimeMillis()
+        val alarmType = when (triggerSource) {
+            AlarmScheduler.TRIGGER_SOURCE_POTCH_EARLY -> "각성 알람"
+            AlarmScheduler.TRIGGER_SOURCE_TARGET_TIME -> "정시 알람"
+            // 앱 업데이트 전에 예약된 정시 PendingIntent와의 호환 처리.
+            else -> if (targetTimeMillis > 0L) "정시 알람" else "각성 알람"
+        }
+        AlarmRingFileLogger.append(
+            context = context,
+            ringTimeMillis = actualRingTimeMillis,
+            alarmType = alarmType
+        )
 
         // 2) 알람 채널 생성
         createAlarmChannel(context)
@@ -180,7 +223,7 @@ class AlarmReceiver : BroadcastReceiver() {
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         nm.notify(alarmId, notification)
         Log.i(
-            "WTF",
+            WTF_TAG,
             "알람 full-screen notification 게시: alarmId=$alarmId, " +
                 "AlarmRingActivity intentFlags=${fullScreenIntent.flags}"
         )
