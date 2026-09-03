@@ -7,6 +7,7 @@ import kotlin.math.PI
 import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.floor
+import kotlin.math.ln
 import kotlin.math.sin
 import kotlin.math.max
 import kotlin.math.pow
@@ -173,7 +174,7 @@ data class ArousalState(
     val temperatureDomainEvidence: DomainEvidence = DomainEvidence(),
 
     // Final
-    val finalWakeScore: Double = 0.0,       // confidence로 감산하지 않은 0~100 점수
+    val finalWakeScore: Double = 0.0,       // Python과 동일하게 최대 138점인 최종 점수
     val finalWakeConfidence: Double = 0.0,  // legacy: 새 판정에서는 사용하지 않음
     val finalWakeCoverage: Double = 0.0,    // legacy: 새 판정에서는 사용하지 않음
     val usedArousalDomainCount: Int = 0,
@@ -212,13 +213,18 @@ data class EvidenceScoringConfig(
     val hrvLfHfEvidenceMinimumScaleLogRatio: Double = 0.15,
     val temperatureEvidenceMinimumScaleCelsius: Double = 0.05,
 
-    // lower-tail 개인 기준선 대비 각성 점수 구간.
-    val hrvRmssdArousalStartMultiplier: Double = 1.50,
-    val hrvRmssdArousalFullMultiplier: Double = 2.00,
+    // Python analyzer와 같은 HRV 점수 구간. 개인 baseline 형성 방식은 변경하지 않는다.
+    // RMSSD는 baseline 130%부터 시작하고 약 173.33%에서 95점이 되도록 보정한다.
+    val hrvRmssdArousalStartMultiplier: Double = 1.30,
+    val hrvRmssdArousalTargetMultiplier: Double = 1.30 * (100.0 / 75.0),
+    val hrvRmssdFallbackStartSec: Double = 0.075,
+    val hrvRmssdFallbackTargetSec: Double = 0.100,
     val hrvLfHfArousalStartMultiplier: Double = 3.00,
-    val hrvLfHfArousalFullMultiplier: Double = 4.00,
+    val hrvLfHfArousalTargetMultiplier: Double = 4.00,
+    val hrvLfHfFallbackStart: Double = 1.50,
+    val hrvLfHfFallbackTarget: Double = 2.00,
+    val hrvTargetScore: Double = 0.95,
     val rrvArousalStartMultiplier: Double = 1.35,
-    val rrvArousalFullMultiplier: Double = 1.35,
 
     // RR/HR 개인 baseline 성분은 임시 비활성화하고 최근 상승량만 사용한다.
     // 다시 활성화할 때는 아래 baseline/trend 가중치만 원래 비율로 복구하면 된다.
@@ -419,13 +425,20 @@ data class ArousalConfig(
     val rrvMinUsableQuality: Double = 0.35,
 
     // HR
-    val hrGradientThreshold: Double = 3.0,
     val hrScoreHoldMillis: Long = 30 * 1000L,
 
     // HR 각성지표 계산용
     val hrGradientWindowMillis: Long = 3 * 60 * 1000L,   // 최근 3분
     val hrGradientMinWindowMillis: Long = 60 * 1000L,    // 최소 1분 이상 쌓여야 계산
+    val hrBaselineWindowMillis: Long = 60 * 1000L,       // 가장 오래된 60초
+    val hrRecentWindowMillis: Long = 30 * 1000L,         // 현재 기준 최근 30초
     val hrMinSampleCount: Int = 5,
+
+    // Python HR Hill 곡선 보정점.
+    val hrScoreFirstRiseBpm: Double = 1.5,
+    val hrScoreAtFirstRise: Double = 0.40,
+    val hrScoreSecondRiseBpm: Double = 3.0,
+    val hrScoreAtSecondRise: Double = 0.85,
 
     // 비정상 튐 제거용
     val hrMaxReasonableBpm: Int = 220,
@@ -750,24 +763,83 @@ private data class GapAwarePpgRespirationWindow(
     val longGapCount: Int
 )
 
-/** 개인 기준선 배수 구간을 0~1 각성점수로 바꾸는 공통 규칙. */
-internal object BaselineMultiplierScorePolicy {
+/** Python analyzer의 shifted cubic Hill 점수와 동일한 규칙. */
+internal object ShiftedHillScorePolicy {
     fun score(
         value: Double,
-        baseline: Double,
-        startMultiplier: Double,
-        fullMultiplier: Double
+        start: Double,
+        target: Double,
+        targetScore: Double = 0.95,
+        fullAtTarget: Boolean = false,
+        exponent: Double = 3.0
     ): Double {
-        if (!value.isFinite() || !baseline.isFinite() || baseline <= 0.0) return 0.0
-        if (!startMultiplier.isFinite() || !fullMultiplier.isFinite()) return 0.0
-        if (startMultiplier <= 0.0 || fullMultiplier < startMultiplier) return 0.0
+        if (!value.isFinite() || !start.isFinite() || !target.isFinite()) return 0.0
+        if (!targetScore.isFinite() || !exponent.isFinite() || exponent <= 0.0) return 0.0
+        if (target <= start) return if (value > start) 1.0 else 0.0
+        if (value <= start) return 0.0
+        if (fullAtTarget && value >= target) return 1.0
 
-        val ratio = value / baseline
-        if (fullMultiplier == startMultiplier) {
-            return if (ratio >= startMultiplier) 1.0 else 0.0
+        val calibration = targetScore.coerceIn(1e-9, 1.0 - 1e-9)
+        val span = target - start
+        val half = span / (calibration / (1.0 - calibration)).pow(1.0 / exponent)
+        val shifted = value - start
+        val numerator = shifted.pow(exponent)
+        val denominator = half.pow(exponent) + numerator
+        return if (denominator > 0.0) {
+            (numerator / denominator).coerceIn(0.0, 1.0)
+        } else {
+            0.0
         }
-        return ((ratio - startMultiplier) / (fullMultiplier - startMultiplier))
-            .coerceIn(0.0, 1.0)
+    }
+}
+
+/** Python analyzer의 두 보정점을 통과하는 HR 상승량 Hill 곡선. */
+internal object HeartRateRiseHillScorePolicy {
+    fun score(
+        riseBpm: Double,
+        firstRiseBpm: Double,
+        firstScore: Double,
+        secondRiseBpm: Double,
+        secondScore: Double
+    ): Double {
+        if (!riseBpm.isFinite() || riseBpm <= 0.0) return 0.0
+        if (
+            !firstRiseBpm.isFinite() || !secondRiseBpm.isFinite() ||
+            firstRiseBpm <= 0.0 || secondRiseBpm <= firstRiseBpm
+        ) return 0.0
+        if (
+            !firstScore.isFinite() || !secondScore.isFinite() ||
+            firstScore <= 0.0 || firstScore >= 1.0 ||
+            secondScore <= firstScore || secondScore >= 1.0
+        ) return 0.0
+
+        val firstOdds = firstScore / (1.0 - firstScore)
+        val secondOdds = secondScore / (1.0 - secondScore)
+        val exponent = ln(secondOdds / firstOdds) / ln(secondRiseBpm / firstRiseBpm)
+        if (!exponent.isFinite() || exponent <= 0.0) return 0.0
+        val half = firstRiseBpm / firstOdds.pow(1.0 / exponent)
+        val numerator = riseBpm.pow(exponent)
+        val denominator = half.pow(exponent) + numerator
+        return if (denominator > 0.0) {
+            (numerator / denominator).coerceIn(0.0, 1.0)
+        } else {
+            0.0
+        }
+    }
+}
+
+/** Python analyzer처럼 RRV 임계치는 2000ms와 개인 baseline 135% 중 큰 값이다. */
+internal object RrvWakeThresholdPolicy {
+    fun threshold(
+        personalBaselineSec: Double?,
+        fallbackThresholdSec: Double,
+        baselineMultiplier: Double
+    ): Double {
+        val fallback = fallbackThresholdSec.takeIf { it.isFinite() && it > 0.0 } ?: 2.0
+        val personal = personalBaselineSec
+            ?.takeIf { it.isFinite() && it > 0.0 && baselineMultiplier.isFinite() }
+            ?.times(baselineMultiplier)
+        return max(fallback, personal ?: fallback)
     }
 }
 
@@ -852,6 +924,8 @@ private fun safeExpiry(nowMillis: Long, durationMillis: Long): Long {
 
 /** confidence/domain 보정 없이 고정 지표 가중치와 온도 multiplier만 적용한다. */
 internal object FinalWakeScorePolicy {
+    private const val BASE_WEIGHT_SUM = 1.15
+
     fun score(
         microScore: Double?,
         hrScore: Double?,
@@ -868,7 +942,8 @@ internal object FinalWakeScorePolicy {
                     normalize(rrScore) * 0.20 +
                     normalize(rrvScore) * 0.20
         val multiplier = if (temperatureActive) temperatureMultiplier.coerceAtLeast(0.0) else 1.0
-        return (base * multiplier).coerceIn(0.0, 1.0)
+        val maximum = BASE_WEIGHT_SUM * temperatureMultiplier.coerceAtLeast(0.0)
+        return (base * multiplier).coerceIn(0.0, maximum)
     }
 
     private fun normalize(score: Double?): Double =
@@ -1467,7 +1542,7 @@ class PotchArousalCalculator(
         )
 
         val hrResult = if (heartRateIsFresh) {
-            calculateHeartRateArousal()
+            calculateHeartRateArousal(nowMillis)
         } else {
             null
         }
@@ -2077,39 +2152,37 @@ class PotchArousalCalculator(
 
     private fun buildRrvEvidence(result: RrvResult?, nowMillis: Long): MetricEvidence {
         val signalQuality = result?.qualityScore?.coerceIn(0.0, 1.0) ?: 0.0
-        val fallback = result?.let {
-            BaselineMultiplierScorePolicy.score(
-                value = it.rmssdSec,
-                baseline = 1.0,
-                startMultiplier = config.rrvFallbackWakeThresholdSec,
-                fullMultiplier = config.rrvFallbackWakeThresholdSec
-            )
-        }
-        val baseline = buildMultiplierBaselineEvidence(
-            metricType = BaselineMetricType.RRV,
-            value = result?.rmssdSec,
-            fallbackScore = fallback,
-            startMultiplier = config.evidenceScoring.rrvArousalStartMultiplier,
-            fullMultiplier = config.evidenceScoring.rrvArousalFullMultiplier
+        val personalBaseline = personalBaselines[BaselineMetricType.RRV]
+            ?.takeIf { it.isUsable && it.center?.isFinite() == true && it.center > 0.0 }
+        val baselineCenter = personalBaseline?.center
+        val thresholdSec = RrvWakeThresholdPolicy.threshold(
+            personalBaselineSec = baselineCenter,
+            fallbackThresholdSec = config.rrvFallbackWakeThresholdSec,
+            baselineMultiplier = config.evidenceScoring.rrvArousalStartMultiplier
         )
-        val triggered = baseline.component?.score?.let { it >= 1.0 } ?: false
+        val value = result?.rmssdSec
+        val triggered = value?.let { it.isFinite() && it >= thresholdSec } ?: false
         val heldScore = rrvScoreHold.update(triggered, nowMillis)
         return MetricEvidence(
             score = heldScore * 100.0,
             usable = result != null || heldScore > 0.0,
-            baselineSource = baseline.source,
-            baselineCenter = baseline.center,
-            baselineSpread = baseline.spread,
-            signedDistance = baseline.signedDistance,
-            normalizedDistance = baseline.normalizedDistance,
-            baselineScore = baseline.component?.score?.times(100.0),
+            baselineSource = if (personalBaseline != null) {
+                "PERSONAL_RATIO_WITH_2S_FLOOR"
+            } else {
+                "FALLBACK_2S"
+            },
+            baselineCenter = baselineCenter,
+            baselineSpread = personalBaseline?.spread,
+            signedDistance = if (value != null && baselineCenter != null) value - baselineCenter else null,
+            normalizedDistance = if (value != null && baselineCenter != null) value / baselineCenter else null,
+            baselineScore = if (result != null) if (triggered) 100.0 else 0.0 else null,
             signalQuality = signalQuality,
             reasons = listOfNotNull(
-                baseline.reason,
+                if (personalBaseline == null) "PERSONAL_BASELINE_UNAVAILABLE" else null,
                 if (result == null) "RRV_UNAVAILABLE" else null
             ).distinct().takeIf { it.isNotEmpty() }?.joinToString("|"),
             log = "RRV binary score=${"%.3f".format(heldScore)}, triggered=$triggered, " +
-                    "threshold=${baseline.center?.let { "%.3f".format(it * 1.35) + "s" } ?: "2.000s fallback"}, hold=90s"
+                    "threshold=${"%.3f".format(thresholdSec)}s, hold=90s"
         )
     }
 
@@ -2164,12 +2237,15 @@ class PotchArousalCalculator(
 
     private fun Double?.orZero(): Double = this?.takeIf { it.isFinite() }?.coerceIn(0.0, 1.0) ?: 0.0
 
-    private fun buildMultiplierBaselineEvidence(
+    private fun buildPythonHrvBaselineEvidence(
         metricType: BaselineMetricType,
         value: Double?,
-        fallbackScore: Double?,
-        startMultiplier: Double,
-        fullMultiplier: Double
+        fallbackStart: Double,
+        fallbackTarget: Double,
+        personalStartMultiplier: Double,
+        personalTargetMultiplier: Double,
+        targetScore: Double,
+        fullAtTarget: Boolean
     ): BaselineEvidenceDetail {
         if (value == null || !value.isFinite() || value <= 0.0) {
             return BaselineEvidenceDetail(
@@ -2184,50 +2260,25 @@ class PotchArousalCalculator(
         }
 
         val baseline = personalBaselines[metricType]
-            ?.takeIf {
-                it.isUsable &&
-                        it.center?.isFinite() == true &&
-                        it.center > 0.0
-            }
-
-        if (baseline == null) {
-            val fallback = fallbackScore
-                ?.takeIf { it.isFinite() }
-                ?.coerceIn(0.0, 1.0)
-                ?: return BaselineEvidenceDetail(
-                    null, "NONE", null, null, null, null,
-                    "PERSONAL_BASELINE_UNAVAILABLE"
-                )
-            return BaselineEvidenceDetail(
-                component = EvidenceComponent(score = fallback),
-                source = "FALLBACK",
-                center = null,
-                spread = null,
-                signedDistance = null,
-                normalizedDistance = null,
-                reason = "PERSONAL_BASELINE_UNAVAILABLE"
-            )
-        }
-
-        val center = baseline.center ?: return BaselineEvidenceDetail(
-            null, "NONE", null, null, null, null, "${metricType.name}_BASELINE_INVALID"
-        )
-        val spread = baseline.spread ?: 0.0
-        val ratio = value / center
-        val score = BaselineMultiplierScorePolicy.score(
+            ?.takeIf { it.isUsable && it.center?.isFinite() == true && it.center > 0.0 }
+        val center = baseline?.center
+        val start = max(fallbackStart, center?.times(personalStartMultiplier) ?: fallbackStart)
+        val target = max(fallbackTarget, center?.times(personalTargetMultiplier) ?: fallbackTarget)
+        val score = ShiftedHillScorePolicy.score(
             value = value,
-            baseline = center,
-            startMultiplier = startMultiplier,
-            fullMultiplier = fullMultiplier
+            start = start,
+            target = target,
+            targetScore = targetScore,
+            fullAtTarget = fullAtTarget
         )
         return BaselineEvidenceDetail(
             component = EvidenceComponent(score = score),
-            source = "PERSONAL_RATIO",
+            source = if (baseline != null) "PERSONAL_PYTHON_HILL" else "FALLBACK_PYTHON_HILL",
             center = center,
-            spread = spread,
-            signedDistance = value - center,
-            normalizedDistance = ratio,
-            reason = null
+            spread = baseline?.spread,
+            signedDistance = center?.let { value - it },
+            normalizedDistance = center?.let { value / it },
+            reason = if (baseline == null) "PERSONAL_BASELINE_UNAVAILABLE" else null
         )
     }
 
@@ -2238,18 +2289,15 @@ class PotchArousalCalculator(
         nowMillis: Long
     ): HrvEvidenceBundle {
         val frequencyDetail = if (assessment.usable && frequencyResult != null) {
-            val fallback = BaselineMultiplierScorePolicy.score(
-                value = frequencyResult.lfHfRatio,
-                baseline = 1.0,
-                startMultiplier = 1.5,
-                fullMultiplier = 2.0
-            )
-            buildMultiplierBaselineEvidence(
+            buildPythonHrvBaselineEvidence(
                 metricType = BaselineMetricType.HRV_LF_HF,
                 value = frequencyResult.lfHfRatio,
-                fallbackScore = fallback,
-                startMultiplier = config.evidenceScoring.hrvLfHfArousalStartMultiplier,
-                fullMultiplier = config.evidenceScoring.hrvLfHfArousalFullMultiplier
+                fallbackStart = config.evidenceScoring.hrvLfHfFallbackStart,
+                fallbackTarget = config.evidenceScoring.hrvLfHfFallbackTarget,
+                personalStartMultiplier = config.evidenceScoring.hrvLfHfArousalStartMultiplier,
+                personalTargetMultiplier = config.evidenceScoring.hrvLfHfArousalTargetMultiplier,
+                targetScore = config.evidenceScoring.hrvTargetScore,
+                fullAtTarget = true
             )
         } else {
             BaselineEvidenceDetail(
@@ -2263,21 +2311,15 @@ class PotchArousalCalculator(
             )
         }
 
-        // 개인 기준선이 없을 때도 새 방향(높은 RMSSD)을 유지하는 절대 fallback을 사용한다.
-        val rmssdFallback = rmssdResult?.let {
-            BaselineMultiplierScorePolicy.score(
-                value = it.rmssdSec,
-                baseline = 1.0,
-                startMultiplier = 0.075,
-                fullMultiplier = 0.100
-            )
-        }
-        val rmssdDetail = buildMultiplierBaselineEvidence(
+        val rmssdDetail = buildPythonHrvBaselineEvidence(
             metricType = BaselineMetricType.HRV_RMSSD,
             value = rmssdResult?.rmssdSec,
-            fallbackScore = rmssdFallback,
-            startMultiplier = config.evidenceScoring.hrvRmssdArousalStartMultiplier,
-            fullMultiplier = config.evidenceScoring.hrvRmssdArousalFullMultiplier
+            fallbackStart = config.evidenceScoring.hrvRmssdFallbackStartSec,
+            fallbackTarget = config.evidenceScoring.hrvRmssdFallbackTargetSec,
+            personalStartMultiplier = config.evidenceScoring.hrvRmssdArousalStartMultiplier,
+            personalTargetMultiplier = config.evidenceScoring.hrvRmssdArousalTargetMultiplier,
+            targetScore = config.evidenceScoring.hrvTargetScore,
+            fullAtTarget = false
         )
 
         val heldFrequencyScore = hrvLfHfScoreHold.update(
@@ -2376,7 +2418,7 @@ class PotchArousalCalculator(
         }
 
         return FinalArousalResult(
-            score = score.coerceIn(0.0, 1.0),
+            score = score,
             currentConditionPassed = candidate,
             candidate = candidate,
             reason = reason,
@@ -5973,16 +6015,16 @@ class PotchArousalCalculator(
      * 최근 HR window를 초반/후반 구간으로 나누어 평균 BPM 차이를 구하고,
      * 심박 상승량을 score로 변환한다.
      */
-    fun calculateHeartRateArousal(): HeartRateArousalResult? {
+    fun calculateHeartRateArousal(
+        nowMillis: Long = System.currentTimeMillis()
+    ): HeartRateArousalResult? {
         if (heartRateBuffer.size < config.hrMinSampleCount) {
             return null
         }
 
-        val latestTime = heartRateBuffer.last().first
-
         val windowValues = heartRateBuffer
             .filter { (timestamp, bpm) ->
-                latestTime - timestamp <= config.hrGradientWindowMillis &&
+                nowMillis - timestamp in 0..config.hrGradientWindowMillis &&
                         bpm in config.hrMinReasonableBpm..config.hrMaxReasonableBpm
             }
 
@@ -6003,10 +6045,17 @@ class PotchArousalCalculator(
             return null
         }
 
-        val splitSize = (cleanedValues.size / 3).coerceAtLeast(1)
-
-        val baselinePart = cleanedValues.take(splitSize)
-        val recentPart = cleanedValues.takeLast(splitSize)
+        val baselineEndMillis = cleanedValues.first().first + config.hrBaselineWindowMillis
+        val recentStartMillis = nowMillis - config.hrRecentWindowMillis
+        val baselinePart = cleanedValues.filter { (timestamp, _) ->
+            timestamp <= baselineEndMillis
+        }
+        val recentPart = cleanedValues.filter { (timestamp, _) ->
+            timestamp >= recentStartMillis
+        }
+        if (baselinePart.isEmpty() || recentPart.isEmpty()) {
+            return null
+        }
 
         val baselineBpm = baselinePart.map { it.second }.average()
         val recentBpm = recentPart.map { it.second }.average()
@@ -6074,11 +6123,7 @@ class PotchArousalCalculator(
         }
     }
 
-    /**
-     * HR 상승량을 0~1 각성 점수로 변환한다.
-     *
-     * 상승량이 threshold 이상이면 HR 관점에서는 강한 각성 후보로 본다.
-     */
+    /** Python analyzer와 동일한 두 점 보정 Hill 곡선으로 HR 상승량을 점수화한다. */
     private fun scoreHeartRateGradient(
         gradientBpm: Double
     ): Double {
@@ -6086,12 +6131,13 @@ class PotchArousalCalculator(
             return 0.0
         }
 
-        if (config.hrGradientThreshold <= 0.0) {
-            return 0.0
-        }
-
-        return (gradientBpm / config.hrGradientThreshold)
-            .coerceIn(0.0, 1.0)
+        return HeartRateRiseHillScorePolicy.score(
+            riseBpm = gradientBpm,
+            firstRiseBpm = config.hrScoreFirstRiseBpm,
+            firstScore = config.hrScoreAtFirstRise,
+            secondRiseBpm = config.hrScoreSecondRiseBpm,
+            secondScore = config.hrScoreAtSecondRise
+        )
     }
 
     /********************* //HR Arousal ********************/

@@ -48,18 +48,19 @@ class LowerTailBaselinePolicyTest {
     }
 
     @Test
-    fun arousalMultiplierRangesMatchRequestedBoundaries() {
-        assertEquals(0.0, score(1.49, 1.50, 2.00), 0.0)
-        assertEquals(0.5, score(1.75, 1.50, 2.00), 1e-12)
-        assertEquals(1.0, score(2.00, 1.50, 2.00), 0.0)
+    fun hrvShiftedHillMatchesPythonTargets() {
+        assertEquals(0.0, shiftedScore(1.30, 1.30, 1.30 * 100.0 / 75.0), 0.0)
+        assertEquals(0.95, shiftedScore(1.30 * 100.0 / 75.0, 1.30, 1.30 * 100.0 / 75.0), 1e-12)
 
-        assertEquals(0.0, score(2.99, 3.00, 4.00), 0.0)
-        assertEquals(0.5, score(3.50, 3.00, 4.00), 1e-12)
-        assertEquals(1.0, score(4.00, 3.00, 4.00), 0.0)
+        assertEquals(0.0, shiftedScore(3.00, 3.00, 4.00, fullAtTarget = true), 0.0)
+        assertEquals(1.0, shiftedScore(4.00, 3.00, 4.00, fullAtTarget = true), 0.0)
+    }
 
-        assertEquals(0.0, score(1.349, 1.35, 1.35), 0.0)
-        assertEquals(1.0, score(1.35, 1.35, 1.35), 0.0)
-        assertEquals(1.0, score(2.00, 1.35, 1.35), 0.0)
+    @Test
+    fun rrvThresholdKeepsTwoSecondFloor() {
+        assertEquals(2.0, RrvWakeThresholdPolicy.threshold(0.8, 2.0, 1.35), 0.0)
+        assertEquals(2.7, RrvWakeThresholdPolicy.threshold(2.0, 2.0, 1.35), 1e-12)
+        assertEquals(2.0, RrvWakeThresholdPolicy.threshold(null, 2.0, 1.35), 0.0)
     }
 
     private fun sample(timestamp: Long, value: Double) = TimedMetricValue(
@@ -68,14 +69,15 @@ class LowerTailBaselinePolicyTest {
         quality = 1.0
     )
 
-    private fun score(
-        ratio: Double,
+    private fun shiftedScore(
+        value: Double,
         start: Double,
-        full: Double
-    ): Double = BaselineMultiplierScorePolicy.score(
-        value = ratio,
-        baseline = 1.0,
-        startMultiplier = start,
-        fullMultiplier = full
+        target: Double,
+        fullAtTarget: Boolean = false
+    ): Double = ShiftedHillScorePolicy.score(
+        value = value,
+        start = start,
+        target = target,
+        fullAtTarget = fullAtTarget
     )
 }

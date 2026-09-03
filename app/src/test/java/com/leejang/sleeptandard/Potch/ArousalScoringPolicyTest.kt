@@ -20,6 +20,21 @@ class ArousalScoringPolicyTest {
     }
 
     @Test
+    fun hrRiseHillMatchesPythonCalibrationPoints() {
+        fun score(rise: Double) = HeartRateRiseHillScorePolicy.score(
+            riseBpm = rise,
+            firstRiseBpm = 1.5,
+            firstScore = 0.40,
+            secondRiseBpm = 3.0,
+            secondScore = 0.85
+        )
+
+        assertEquals(0.0, score(0.0), 0.0)
+        assertEquals(0.40, score(1.5), 1e-12)
+        assertEquals(0.85, score(3.0), 1e-12)
+    }
+
+    @Test
     fun peakHoldKeepsAndExtendsOnlyWhenMaximumIncreases() {
         val hold = PeakScoreHold(durationMillis = 30_000L)
 
@@ -62,5 +77,19 @@ class ArousalScoringPolicyTest {
 
         assertEquals(0.575, withoutTemperature, 1e-12)
         assertEquals(0.69, withTemperature, 1e-12)
+    }
+
+    @Test
+    fun finalScoreKeepsPythonMaximumAboveOneHundred() {
+        val maximum = FinalWakeScorePolicy.score(
+            microScore = 1.0,
+            hrScore = 1.0,
+            hrvScore = 1.0,
+            rrScore = 1.0,
+            rrvScore = 1.0,
+            temperatureActive = true
+        )
+
+        assertEquals(1.38, maximum, 1e-12)
     }
 }
