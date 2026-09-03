@@ -5,16 +5,24 @@ import android.net.Uri
 import android.provider.Settings
 import android.util.Log
 import android.widget.Toast
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
@@ -441,19 +449,7 @@ fun AppNav(
 
                      */
                 }
-                /*
-                onFinish = {
-                    alarmPrefs.setFirstRunCompleted()
-                    rememberNavController.popBackStack()
-                    when{
-                        // TODO: 로그인 정보가 없는경우 -> Screen.LoginDemo.route
-                        alarmPrefs.isFirstRun() -> Screen.Tutorial.route
-                        else -> Screen.Home.route
-                    }
-                    rememberNavController.navigate(Screen.Home.route)
-                }
 
-                 */
             )
         }
         composable(Screen.SendingData.route) {
@@ -589,34 +585,88 @@ fun AlarmBottomNavBar(
         containerColor = MaterialTheme.colorScheme.background,
         windowInsets = NavigationBarDefaults.windowInsets
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().blur(blurRadius),
-            horizontalArrangement = Arrangement.SpaceAround
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(BOTTOM_NAV_CONTENT_HEIGHT)
+                .blur(blurRadius)
         ) {
-            StandaloneBottomItem(
-                selected = selectedIndex == 0,
-                iconRes = AppIcons.NavAlarm,
-                label = "알람",
-                onClick = { onSelect(0) }
+            val itemWidth = maxWidth / BOTTOM_NAV_ITEM_COUNT
+            val indicatorOffsetX by animateDpAsState(
+                targetValue = itemWidth * selectedIndex.coerceIn(0, BOTTOM_NAV_ITEM_COUNT - 1),
+                animationSpec = tween(
+                    durationMillis = BOTTOM_NAV_TRANSITION_DURATION_MILLIS,
+                    easing = FastOutSlowInEasing
+                ),
+                label = "bottomNavIndicatorOffset"
             )
-            StandaloneBottomItem(
-                selectedIndex == 1,
-                iconRes = AppIcons.NavPotch,
-                label = "팟치",
-                onClick = { onSelect(1)}
-            )
-            StandaloneBottomItem(
-                selected = selectedIndex == 2,
-                iconRes = AppIcons.NavJournal,
-                label = "일지",
-                onClick = { onSelect(2) }
-            )
-            StandaloneBottomItem(
-                selected = selectedIndex == 3,
-                iconRes = AppIcons.NavSettings,
-                label = "설정",
-                onClick = { onSelect(3) }
-            )
+
+            Row(modifier = Modifier.fillMaxSize()) {
+                StandaloneBottomItem(
+                    selected = selectedIndex == 0,
+                    iconRes = AppIcons.NavAlarm,
+                    label = "알람",
+                    onClick = { onSelect(0) },
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                )
+                StandaloneBottomItem(
+                    selected = selectedIndex == 1,
+                    iconRes = AppIcons.NavPotch,
+                    label = "팟치",
+                    onClick = { onSelect(1) },
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                )
+                StandaloneBottomItem(
+                    selected = selectedIndex == 2,
+                    iconRes = AppIcons.NavJournal,
+                    label = "일지",
+                    onClick = { onSelect(2) },
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                )
+                StandaloneBottomItem(
+                    selected = selectedIndex == 3,
+                    iconRes = AppIcons.NavSettings,
+                    label = "설정",
+                    onClick = { onSelect(3) },
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                )
+            }
+
+            // 선택 점은 메뉴마다 새로 그리지 않고, 하나의 점을 선택 위치까지 이동한다.
+            Column(
+                modifier = Modifier
+                    .offset(x = indicatorOffsetX)
+                    .width(itemWidth)
+                    .fillMaxHeight(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center
+            ) {
+                Spacer(Modifier.size(24.dp))
+                Spacer(Modifier.height(7.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(BOTTOM_NAV_LOWER_SLOT_HEIGHT),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .background(
+                                color = Color(0xFFE0F5FD),
+                                shape = CircleShape
+                            )
+                    )
+                }
+            }
         }
     }
 }
@@ -638,6 +688,7 @@ fun StandaloneBottomItem(
             )
             .padding(0.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
     ) {
         Icon(
             painter = painterResource(iconRes),
@@ -647,24 +698,28 @@ fun StandaloneBottomItem(
             else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
         )
 
-        if (selected) {
-            Spacer(Modifier.height(7.dp))
-            // ✅ 점 표시
-            Box(
-                modifier = Modifier
-                    .size(8.dp)
-                    .background(
-                        color = Color(0xFFE0F5FD),
-                        shape = CircleShape
-                    )
-            )
-        } else {
-            // ✅ 텍스트 표시
-            Text(
-                text = label,
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
-            )
+        Spacer(Modifier.height(7.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(BOTTOM_NAV_LOWER_SLOT_HEIGHT),
+            contentAlignment = Alignment.Center
+        ) {
+            if (!selected) {
+                Text(
+                    text = label,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+                )
+            }
         }
     }
 }
+
+private const val BOTTOM_NAV_ITEM_COUNT = 4
+
+// Navigation Compose 2.9.6 기본 화면 전환 시간과 맞춘다.
+private const val BOTTOM_NAV_TRANSITION_DURATION_MILLIS = 300
+
+private val BOTTOM_NAV_CONTENT_HEIGHT = 80.dp
+private val BOTTOM_NAV_LOWER_SLOT_HEIGHT = 15.dp
