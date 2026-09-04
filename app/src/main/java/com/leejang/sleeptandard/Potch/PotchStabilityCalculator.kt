@@ -304,6 +304,8 @@ class PotchStabilityCalculator(
     private val enteringSamples = mutableListOf<StabilityFrameSample>()
     private var activeEpisode: EpisodeAccumulator? = null
     private val sessionCandidates = mutableListOf<StableCandidateRecord>()
+    private var logWindowId: String? = null
+    private val logWindowCandidates = mutableListOf<StableCandidateRecord>()
 
     private var lastAnalysisSegmentId: Long? = null
     private var lastFrameTimestampMillis: Long? = null
@@ -619,6 +621,34 @@ class PotchStabilityCalculator(
      * 현재 수면 세션을 종료하고 안정 후보를 저장한 뒤 개인 기준선을 갱신한다.
      * 같은 세션 도중에는 frozenBaselines를 바꾸지 않으므로 자기참조 학습이 발생하지 않는다.
      */
+    /** Close the log window without ending baseline collection or recalculating baselines. */
+    @Synchronized
+    fun checkpointLogWindow(nowMillis: Long = System.currentTimeMillis(), baselineSessionEnded: Boolean = false) {
+        if (!sessionActive) return
+        refreshLogWindow()
+        if (logWindowId == null) return
+        val candidates = logWindowCandidates.toMutableList()
+        activeEpisode?.let { episode ->
+            buildLogCandidate(episode, minOf(nowMillis, lastFrameTimestampMillis ?: nowMillis))?.let(candidates::add)
+        }
+        val storedIds = candidates.map { it.sleepSessionId }.distinct()
+            .flatMap { stableCandidateTable.loadEpisodeIds(it) }.toSet()
+        candidates.groupBy { it.sleepSessionId }.values.flatMap(::selectSessionCandidateDecisions).forEach { decision ->
+            dataLogger?.logStabilityEpisode(StabilityEpisodeLogRecord(
+                candidate = decision.candidate,
+                detectedIndex = decision.detectedIndex,
+                detectedEpisodeCount = candidates.size,
+                selectedForCandidateTable = decision.selectedForCandidateTable,
+                storedInCandidateTable = decision.candidate.episodeId in storedIds,
+                selectionRank = decision.selectionRank,
+                selectionReason = "${decision.selectionReason}; " +
+                    if (baselineSessionEnded) "BASELINE_SESSION_ENDED" else "LOG_SNAPSHOT_BASELINE_SESSION_CONTINUES",
+                candidateAverageQuality = candidateAverageQuality(decision.candidate),
+                activeBaselines = frozenBaselines
+            ))
+        }
+    }
+
     @Synchronized
     fun endSession(nowMillis: Long = System.currentTimeMillis()): StabilitySessionSummary {
         if (!sessionActive) {
@@ -661,27 +691,7 @@ class PotchStabilityCalculator(
             ?.let(stableCandidateTable::loadEpisodeIds)
             .orEmpty()
 
-        decisions.forEach { decision ->
-            val stored = decision.candidate.episodeId in storedEpisodeIds
-            val finalReason = when {
-                !decision.selectedForCandidateTable -> decision.selectionReason
-                stored -> decision.selectionReason
-                else -> "${decision.selectionReason}; DB_NOT_RETAINED_OR_INSERT_CONFLICT"
-            }
-            dataLogger?.logStabilityEpisode(
-                StabilityEpisodeLogRecord(
-                    candidate = decision.candidate,
-                    detectedIndex = decision.detectedIndex,
-                    detectedEpisodeCount = sessionCandidates.size,
-                    selectedForCandidateTable = decision.selectedForCandidateTable,
-                    storedInCandidateTable = stored,
-                    selectionRank = decision.selectionRank,
-                    selectionReason = finalReason,
-                    candidateAverageQuality = candidateAverageQuality(decision.candidate),
-                    activeBaselines = frozenBaselines
-                )
-            )
-        }
+        checkpointLogWindow(nowMillis, baselineSessionEnded = true)
 
         val updatedBaselineCount = recalculatePersonalBaselines(nowMillis)
         val totalStored = stableCandidateTable.countAll()
@@ -1037,10 +1047,35 @@ class PotchStabilityCalculator(
 
         val candidate = buildCandidate(episode, endTimeMillis) ?: return
         sessionCandidates += candidate
+        refreshLogWindow()
+        buildLogCandidate(episode, endTimeMillis)?.let(logWindowCandidates::add)
+        checkpointLogWindow(endTimeMillis)
         log(
             "stable episode finalized: reason=$reason, duration=${candidate.durationSec}s, " +
                     "score=${"%.1f".format(candidate.overallStabilityScore)}, domains=${candidate.usedDomainCount}"
         )
+    }
+
+    private fun refreshLogWindow() {
+        val currentId = dataLogger?.stabilitySessionId
+        if (logWindowId != currentId) {
+            logWindowId = currentId
+            logWindowCandidates.clear()
+        }
+    }
+
+    /** Clip only the CSV snapshot. The baseline accumulator and its samples remain untouched. */
+    private fun buildLogCandidate(episode: EpisodeAccumulator, end: Long): StableCandidateRecord? {
+        val start = dataLogger?.stabilityStartedAtMillis ?: return null
+        val samples = episode.samples.filter { it.timestampMillis >= start && it.timestampMillis <= end }
+        val first = samples.firstOrNull() ?: return null
+        return buildCandidate(episode.copy(
+            startedAt = maxOf(episode.startedAt, start),
+            startReconnectCount = first.reconnectCount,
+            startContinuityBreakCount = first.continuityBreakCount,
+            startPacketLossCount = first.packetLossCount,
+            samples = samples.toMutableList()
+        ), end)
     }
 
     private fun buildCandidate(

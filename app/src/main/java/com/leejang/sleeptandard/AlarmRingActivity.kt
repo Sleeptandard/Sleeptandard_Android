@@ -124,7 +124,7 @@ class AlarmRingActivity : ComponentActivity() {
         }
 
         // 해제 시점부터 5분간 데이터를 더 받은 뒤 로그 저장과 연결 종료를 수행한다.
-        PotchPostAlarmStopReceiver.schedule(this, alarmId)
+        PotchPostAlarmStopReceiver.schedule(this, alarmId, intent.getStringExtra("logSessionId"))
 
         // MainActivity가 새 Intent를 처리하기 전에 알람 상태를 먼저 확정한다.
         alarmPrefs.setAlarmRinging(false)

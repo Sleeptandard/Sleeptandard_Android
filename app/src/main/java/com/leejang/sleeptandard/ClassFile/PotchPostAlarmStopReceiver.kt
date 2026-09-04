@@ -5,126 +5,62 @@ import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.SystemClock
-import android.util.Log
 import androidx.core.content.ContextCompat
-import androidx.core.content.edit
+import com.leejang.sleeptandard.Potch.AlarmLogPhase
+import com.leejang.sleeptandard.Potch.AlarmLogSession
+import com.leejang.sleeptandard.Potch.AlarmLogSessionStore
 import com.leejang.sleeptandard.Potch.PotchBleForegroundService
 
-/** 알람 해제 후 5분간 데이터를 더 수집한 뒤 로그를 저장하고 Potch 연결을 종료한다. */
+/** Each dismissed alarm owns its deadline; an old alarm cannot close a new alarm's files. */
 class PotchPostAlarmStopReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        val token = intent.getLongExtra(EXTRA_STOP_TOKEN, 0L)
-        val preferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val scheduledToken = preferences.getLong(KEY_STOP_TOKEN, 0L)
-
-        if (token <= 0L || token != scheduledToken) {
-            Log.w(
-                WTF_TAG,
-                "알람 후 Potch 종료 요청 무시: token=$token, scheduledToken=$scheduledToken"
-            )
+        val id = intent.getStringExtra(EXTRA_LOG_SESSION_ID) ?: return
+        val session = AlarmLogSessionStore(context).load().find { it.id == id } ?: return
+        if (session.phase != AlarmLogPhase.POST_ALARM) return
+        if (System.currentTimeMillis() < session.rawStopAtMillis) {
+            arm(context, session)
             return
         }
-
-        preferences.edit {
-            remove(KEY_STOP_TOKEN)
-            remove(KEY_STOP_AT_MILLIS)
-        }
-
-        Log.i(WTF_TAG, "알람 해제 후 5분 경과: Potch 로그 저장 및 연결 종료 요청")
-        val serviceIntent = Intent(context, PotchBleForegroundService::class.java).apply {
-            action = PotchBleForegroundService.ACTION_STOP_AND_SAVE
-        }
-        ContextCompat.startForegroundService(context, serviceIntent)
+        ContextCompat.startForegroundService(context, Intent(context, PotchBleForegroundService::class.java).apply {
+            action = PotchBleForegroundService.ACTION_FINISH_POST_ALARM_LOGGING
+            putExtra(EXTRA_LOG_SESSION_ID, id)
+        })
     }
 
     companion object {
-        const val POST_ALARM_COLLECTION_MILLIS = 5 * 60_000L
+        const val EXTRA_LOG_SESSION_ID = "extra_log_session_id"
+        const val POST_ALARM_COLLECTION_MILLIS = AlarmLogSession.POST_ALARM_MILLIS
 
-        private const val ACTION_STOP_AFTER_ALARM =
-            "com.leejang.sleeptandard.action.STOP_POTCH_AFTER_ALARM"
-        private const val EXTRA_STOP_TOKEN = "extra_stop_token"
-        private const val PREFS_NAME = "potch_post_alarm_stop"
-        private const val KEY_STOP_TOKEN = "stop_token"
-        private const val KEY_STOP_AT_MILLIS = "stop_at_millis"
-        private const val REQUEST_CODE = 200_001
-        private const val WTF_TAG = "WTF"
+        fun schedule(context: Context, alarmId: Int, sessionId: String?) {
+            val store = AlarmLogSessionStore(context)
+            val id = sessionId ?: store.load().lastOrNull {
+                it.alarmId == alarmId && it.phase == AlarmLogPhase.RINGING
+            }?.id ?: return
+            val session = store.dismiss(id) ?: return
+            if (session.phase != AlarmLogPhase.POST_ALARM) return
+            PotchBleForegroundService.requestSyncAlarmLogging(context)
+            arm(context, session)
+        }
 
-        fun schedule(context: Context, alarmId: Int) {
-            val appContext = context.applicationContext
-            val alarmManager = appContext.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-            val token = System.currentTimeMillis()
-            val stopAtMillis = token + POST_ALARM_COLLECTION_MILLIS
-            val triggerAtElapsed = SystemClock.elapsedRealtime() + POST_ALARM_COLLECTION_MILLIS
-
-            appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit {
-                putLong(KEY_STOP_TOKEN, token)
-                putLong(KEY_STOP_AT_MILLIS, stopAtMillis)
+        fun arm(context: Context, session: AlarmLogSession) {
+            val manager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+            val intent = Intent(context, PotchPostAlarmStopReceiver::class.java).apply {
+                action = "com.leejang.sleeptandard.action.STOP_POTCH_AFTER_ALARM"
+                data = Uri.parse("potch-log://post-alarm/${session.id}")
+                putExtra(EXTRA_LOG_SESSION_ID, session.id)
             }
-
-            val pendingIntent = requireNotNull(
-                pendingIntent(
-                    context = appContext,
-                    token = token,
-                    flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                )
-            )
-
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
-                alarmManager.canScheduleExactAlarms()
-            ) {
-                alarmManager.setExactAndAllowWhileIdle(
-                    AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                    triggerAtElapsed,
-                    pendingIntent
-                )
+            val pending = PendingIntent.getBroadcast(context, 200_001, intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+            val trigger = SystemClock.elapsedRealtime() +
+                (session.rawStopAtMillis - System.currentTimeMillis()).coerceAtLeast(0L)
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || manager.canScheduleExactAlarms()) {
+                manager.setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, trigger, pending)
             } else {
-                alarmManager.setAndAllowWhileIdle(
-                    AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                    triggerAtElapsed,
-                    pendingIntent
-                )
-            }
-
-            Log.i(
-                WTF_TAG,
-                "알람 해제 후 Potch 종료 예약: alarmId=$alarmId, " +
-                    "delayMillis=$POST_ALARM_COLLECTION_MILLIS, stopAtMillis=$stopAtMillis"
-            )
-        }
-
-        fun cancelScheduledStop(context: Context) {
-            val appContext = context.applicationContext
-            val existing = pendingIntent(
-                context = appContext,
-                token = 0L,
-                flags = PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
-            )
-            if (existing != null) {
-                val alarmManager =
-                    appContext.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-                alarmManager.cancel(existing)
-                existing.cancel()
-            }
-            appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit {
-                remove(KEY_STOP_TOKEN)
-                remove(KEY_STOP_AT_MILLIS)
+                manager.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, trigger, pending)
             }
         }
-
-        private fun pendingIntent(
-            context: Context,
-            token: Long,
-            flags: Int,
-        ): PendingIntent? = PendingIntent.getBroadcast(
-            context,
-            REQUEST_CODE,
-            Intent(context, PotchPostAlarmStopReceiver::class.java).apply {
-                action = ACTION_STOP_AFTER_ALARM
-                putExtra(EXTRA_STOP_TOKEN, token)
-            },
-            flags
-        )
     }
 }

@@ -20,6 +20,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.leejang.sleeptandard.AlarmRingActivity
 import com.leejang.sleeptandard.Potch.PotchDataLogger
+import com.leejang.sleeptandard.Potch.AlarmLogSessionStore
 import com.leejang.sleeptandard.Prefs.AlarmPreferences
 import com.leejang.sleeptandard.R
 import java.io.File
@@ -174,6 +175,7 @@ class AlarmReceiver : BroadcastReceiver() {
         )
 
         AlarmPreferences(context).setAlarmRinging(true)
+        val logSessionId = AlarmLogSessionStore(context).ring(alarmId, targetTimeMillis)
 
         // Whether this is the target-time fallback or an early Potch trigger,
         // make both exact-alarm reservations disappear before ringing.
@@ -200,6 +202,7 @@ class AlarmReceiver : BroadcastReceiver() {
         // 3) 전체화면으로 띄울 Activity 인텐트
         val fullScreenIntent = Intent(context, AlarmRingActivity::class.java).apply {
             putExtra("alarmId", alarmId)
+            putExtra("logSessionId", logSessionId)
             // putExtra("label", label)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         }

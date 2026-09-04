@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.util.Log
 import com.leejang.sleeptandard.Potch.PotchBleForegroundService
+import com.leejang.sleeptandard.Potch.AlarmLogSessionStore
 import com.leejang.sleeptandard.Prefs.AlarmPreferences
 import java.util.Calendar
 
@@ -66,6 +67,8 @@ class AlarmScheduler(private val context: Context) {
                 monitoringPendingIntent(alarm.id, targetTime)
             )
         }
+        AlarmLogSessionStore(context).schedule(alarm.id, targetTime)
+        PotchBleForegroundService.requestSyncAlarmLogging(context)
     }
 
     fun calculateNextTriggerTime(alarm: Alarm): Long {
@@ -94,6 +97,8 @@ class AlarmScheduler(private val context: Context) {
         cancelPendingIntents(alarm.id)
         preferences.clearScheduledTriggerTime()
         PotchBleForegroundService.requestStopAlarmMonitoring(context, targetTime)
+        AlarmLogSessionStore(context).cancel(targetTime)
+        PotchBleForegroundService.requestSyncAlarmLogging(context)
         Log.i(
             WTF_TAG,
             "알람 예약 취소: alarmId=${alarm.id}, targetTimeMillis=$targetTime, " +

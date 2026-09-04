@@ -5,13 +5,17 @@ import android.content.Context
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import android.util.Log
 import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.io.RandomAccessFile
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 
 data class InternalPotchLogFile(
     val name: String,
@@ -38,36 +42,65 @@ data class StabilityEpisodeLogRecord(
 )
 
 /** Potch510 Green PPG/IMU 수신 및 분석 로그를 관리한다. */
-class PotchDataLogger(context: Context) {
+class PotchDataLogger(context: Context, private val closedFileExporter: ((File) -> Unit)? = null) {
     private val appContext = context.applicationContext
-    private var isLogging = false
-    private var workingPacketRawFile: File? = null
-    private var packetRawOutput: BufferedOutputStream? = null
+    private data class RawOutput(val session: AlarmLogSession, val file: File, val output: BufferedOutputStream)
+    private val rawOutputs = mutableMapOf<String, RawOutput>()
+    private val preferences = appContext.getSharedPreferences("potch_log_files", Context.MODE_PRIVATE)
     private var workingDebugFile: File? = null
     private var workingStabilityEpisodeFile: File? = null
+    private var stabilityLogSession: AlarmLogSession? = null
+    private val stabilityRows = linkedMapOf<String, String>()
+
+    val stabilitySessionId: String? get() = stabilityLogSession?.id
+    val stabilityStartedAtMillis: Long? get() = stabilityLogSession?.startedAtMillis
+
+    init {
+        preferences.getString("ble_file", null)?.let { name ->
+            workingDebugFile = File(logDirectory(), name).takeIf {
+                it.exists() && !PotchLogExporter.isClosed(appContext, name)
+            }
+        }
+        val stabilityId = preferences.getString("stability_id", null)
+        AlarmLogSessionStore(appContext).load().find { it.id == stabilityId }?.let {
+            val file = alarmFile(it, "potch_stability_episode_log", "csv")
+            if (file.exists() && !PotchLogExporter.isClosed(appContext, file.name)) openStability(it)
+        }
+        if (closedFileExporter == null) PotchLogExporter.retryPending(appContext)
+    }
 
     var lastSavedFilePath: String? = null
         private set
 
     @Synchronized
-    fun start() {
-        val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
-        val directory = File(appContext.filesDir, INTERNAL_LOG_DIR_NAME).apply { mkdirs() }
+    fun startBleLogging() {
+        if (workingDebugFile != null) return
+        val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.getDefault()).format(Date())
+        workingDebugFile = uniqueTarget(logDirectory(), "potch_debug_log_$timestamp.txt")
+        workingDebugFile?.writeText("Potch BLE debug log started at $timestamp\n", Charsets.UTF_8)
+        check(preferences.edit().putString("ble_file", workingDebugFile!!.name).commit())
+    }
 
-        closePacketRawOutput()
-        workingPacketRawFile =
-            File(directory, "potch_packet_raw_data_$timestamp.bin")
-        packetRawOutput = FileOutputStream(workingPacketRawFile, false).buffered()
+    private fun logDirectory() = File(appContext.filesDir, INTERNAL_LOG_DIR_NAME).apply { mkdirs() }
 
-        workingDebugFile = File(directory, "potch_debug_log_$timestamp.txt")
-        workingStabilityEpisodeFile =
-            File(directory, "potch_stability_episode_log_$timestamp.csv")
+    private fun alarmFile(session: AlarmLogSession, prefix: String, extension: String): File {
+        val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.getDefault()).format(Date(session.startedAtMillis))
+        return File(logDirectory(), "${prefix}_${timestamp}_${session.id}.$extension")
+    }
 
-        workingDebugFile?.writeText(
-            "Potch debug log started at $timestamp\n",
-            Charsets.UTF_8
-        )
-
+    private fun openStability(session: AlarmLogSession) {
+        stabilityLogSession = session
+        workingStabilityEpisodeFile = alarmFile(session, "potch_stability_episode_log", "csv")
+        check(preferences.edit().putString("stability_id", session.id).commit())
+        stabilityRows.clear()
+        if (workingStabilityEpisodeFile!!.length() > 0L) {
+            workingStabilityEpisodeFile!!.useLines { lines ->
+                lines.drop(1).forEach { line ->
+                    line.split(',', limit = 4).getOrNull(2)?.let { stabilityRows[it] = line }
+                }
+            }
+            return
+        }
         workingStabilityEpisodeFile?.writeText(
             UTF8_BOM + listOf(
                 "logged_at",
@@ -180,20 +213,53 @@ class PotchDataLogger(context: Context) {
             Charsets.UTF_8
         )
 
-        isLogging = true
-        lastSavedFilePath = null
     }
 
+    /** Called only for alarm lifecycle changes, never for BLE reconnect or monitoring start. */
     @Synchronized
-    fun startIfNeeded() {
-        if (!isLogging || workingPacketRawFile == null || packetRawOutput == null) start()
+    fun syncAlarmFiles(sessions: List<AlarmLogSession>, nowMillis: Long = System.currentTimeMillis()) {
+        val desiredRaw = sessions.filter { it.recordsRaw(nowMillis) }.associateBy { it.id }
+        rawOutputs.keys.toList().filter { it !in desiredRaw }.forEach { id ->
+            rawOutputs.remove(id)?.let { it.output.close(); exportClosed(it.file) }
+        }
+        desiredRaw.forEach { (id, session) ->
+            val existing = rawOutputs[id]
+            if (existing != null) {
+                rawOutputs[id] = existing.copy(session = session)
+            } else {
+                val file = alarmFile(session, "potch_packet_raw_data", "bin")
+                // Append to the recovered session; each record retains its original phone timestamp.
+                // A killed process can leave a partial final record; retain every complete 150-byte record.
+                if (file.exists() && file.length() % RAW_RECORD_SIZE_BYTES != 0L) {
+                    RandomAccessFile(file, "rw").use { raw ->
+                        raw.setLength(raw.length() / RAW_RECORD_SIZE_BYTES * RAW_RECORD_SIZE_BYTES)
+                    }
+                }
+                rawOutputs[id] = RawOutput(session, file, FileOutputStream(file, true).buffered())
+            }
+        }
+        val desiredStability = sessions.lastOrNull { it.recordsStability }
+        if (stabilityLogSession?.id != desiredStability?.id) {
+            workingStabilityEpisodeFile?.let(::exportClosed)
+            workingStabilityEpisodeFile = null
+            stabilityLogSession = null
+            stabilityRows.clear()
+            check(preferences.edit().remove("stability_id").commit())
+            desiredStability?.let(::openStability)
+        }
+        // Closed/expired sessions may have been restored with no in-memory file handles.
+        sessions.forEach { session ->
+            if (!session.recordsRaw(nowMillis)) exportClosed(alarmFile(session, "potch_packet_raw_data", "bin"))
+            if (!session.recordsStability) exportClosed(alarmFile(session, "potch_stability_episode_log", "csv"))
+        }
     }
 
     @Synchronized
     fun logDebug(tag: String, message: String, level: String = "D") {
-        if (!isLogging) return
+        if (workingDebugFile == null) return
         val time = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.getDefault()).format(Date())
-        workingDebugFile?.appendText("$time $level/$tag: $message\n", Charsets.UTF_8)
+        runCatching { workingDebugFile?.appendText("$time $level/$tag: $message\n", Charsets.UTF_8) }
+            .onFailure { Log.e("PotchDataLogger", "BLE debug log write failed", it) }
     }
 
     /**
@@ -207,7 +273,7 @@ class PotchDataLogger(context: Context) {
      */
     @Synchronized
     fun logRawPacket(phoneTimeMillis: Long, rawPacket: ByteArray) {
-        if (!isLogging) return
+        if (rawOutputs.isEmpty()) return
         if (rawPacket.size != PACKET_SIZE_BYTES) {
             workingDebugFile?.appendText(
                 "${phoneTime(phoneTimeMillis)} W/PotchDataLogger: " +
@@ -226,10 +292,11 @@ class PotchDataLogger(context: Context) {
             }
             rawPacket.copyInto(record, destinationOffset = PHONE_TIME_SIZE_BYTES)
 
-            packetRawOutput?.apply {
-                write(record)
-                // 최근 패킷이 프로세스 종료로 유실되지 않도록 즉시 flush한다.
-                flush()
+            rawOutputs.values.forEach { raw ->
+                if (raw.session.recordsRaw(phoneTimeMillis)) {
+                    raw.output.write(record)
+                    raw.output.flush()
+                }
             }
         }.onFailure { error ->
             workingDebugFile?.appendText(
@@ -247,9 +314,9 @@ class PotchDataLogger(context: Context) {
      */
     @Synchronized
     fun logStabilityEpisode(record: StabilityEpisodeLogRecord) {
-        if (!isLogging) return
-
         val candidate = record.candidate
+        val session = stabilityLogSession ?: return
+        if (candidate.startedAt < session.startedAtMillis) return
         val rrBaseline = record.activeBaselines[BaselineMetricType.RR]
         val rrvBaseline = record.activeBaselines[BaselineMetricType.RRV]
         val hrBaseline = record.activeBaselines[BaselineMetricType.HR]
@@ -377,56 +444,44 @@ class PotchDataLogger(context: Context) {
     }
 
     @Synchronized
-    fun stopAndSave(): String? {
-        if (!isLogging) return lastSavedFilePath
-        isLogging = false
-        closePacketRawOutput()
-
-        val files = listOfNotNull(
-            workingPacketRawFile,
-            workingDebugFile,
-            workingStabilityEpisodeFile
-        ).filter { it.exists() }
-
-        val exported = files.mapNotNull { exportFileToDownloads(appContext, it) }
-        lastSavedFilePath = exported.firstOrNull()
-        clearWorkingReferences()
+    fun stopBleAndSave(reason: String): String? {
+        logConnectionEvent("finished", reason)
+        val file = workingDebugFile
+        workingDebugFile = null
+        file?.let(::exportClosed)
+        check(preferences.edit().remove("ble_file").commit())
         return lastSavedFilePath
     }
 
-    fun getWorkingLogPath(): String? = workingPacketRawFile?.absolutePath
+    fun getWorkingLogPath(): String? = rawOutputs.values.lastOrNull()?.file?.absolutePath
     fun getWorkingDebugLogPath(): String? = workingDebugFile?.absolutePath
     fun getWorkingStabilityEpisodeLogPath(): String? =
         workingStabilityEpisodeFile?.absolutePath
 
     @Synchronized
-    fun clear() {
-        isLogging = false
-        closePacketRawOutput()
-        listOfNotNull(
-            workingPacketRawFile,
-            workingDebugFile,
-            workingStabilityEpisodeFile
-        ).forEach { runCatching { it.delete() } }
-        clearWorkingReferences()
-        lastSavedFilePath = null
+    fun closeHandlesForRecovery() {
+        rawOutputs.values.forEach { runCatching { it.output.close() } }
+        rawOutputs.clear()
+        // Persistent identities remain: a service restart appends to these same files.
     }
 
-    private fun clearWorkingReferences() {
-        closePacketRawOutput()
-        workingPacketRawFile = null
-        workingDebugFile = null
-        workingStabilityEpisodeFile = null
-    }
-
-    private fun closePacketRawOutput() {
-        runCatching { packetRawOutput?.flush() }
-        runCatching { packetRawOutput?.close() }
-        packetRawOutput = null
+    private fun exportClosed(file: File) {
+        if (!file.exists()) return
+        lastSavedFilePath = file.absolutePath
+        closedFileExporter?.invoke(file) ?: PotchLogExporter.enqueue(appContext, file.name)
     }
 
     private fun appendCsv(file: File?, vararg values: Any?) {
-        file?.appendText(values.joinToString(",") { csv(it) } + "\n", Charsets.UTF_8)
+        if (file == null) return
+        // Upsert episode snapshots so process death does not lose all completed episodes,
+        // while later candidate selection updates still leave one row per episode.
+        stabilityRows[values[2].toString()] = values.joinToString(",") { csv(it) }
+        runCatching {
+            val header = file.bufferedReader(Charsets.UTF_8).use { it.readLine() }
+            val temporary = File(file.parentFile, "${file.name}.pending")
+            temporary.writeText(header + "\n" + stabilityRows.values.joinToString("\n", postfix = "\n"), Charsets.UTF_8)
+            Files.move(temporary.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+        }.onFailure { Log.e("PotchDataLogger", "Stability snapshot write failed; previous CSV retained", it) }
     }
 
     private fun csv(value: Any?): String {
