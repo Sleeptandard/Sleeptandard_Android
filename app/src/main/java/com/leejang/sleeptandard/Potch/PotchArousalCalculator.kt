@@ -289,9 +289,10 @@ data class ArousalConfig(
     val microScoreHoldMillis: Long = 60 * 1000L,
 
     // Respiration
-    val respLowCutHz: Double = 0.1,
+    // Python analyzer와 동일하게 분당 4회(4 / 60Hz)까지 호흡 대역으로 허용한다.
+    val respLowCutHz: Double = 4.0 / 60.0,
     val respHighCutHz: Double = 0.5,
-    val rrMinBpm: Double = 6.0,
+    val rrMinBpm: Double = 4.0,
     val rrMaxBpm: Double = 30.0,
 
     // PPG 기반 RR 계산용
@@ -300,7 +301,8 @@ data class ArousalConfig(
 
     // BPF 후 peak-to-peak amplitude가 너무 작으면 호흡 파형이 약하다고 판단
     // 실제 로그 보고 조정 필요
-    val ppgRespMinPeakToPeakAmplitude: Double = 30.0,
+    // Python lower-envelope RR 경로와 동일한 최소 prominence 하한.
+    val ppgRespMinPeakToPeakAmplitude: Double = 75.0,
 
     // interval 튄 값 제거 기준
     val ppgRespIntervalOutlierTolerance: Double = 0.40,
@@ -651,7 +653,7 @@ enum class RespirationPeakPolarity {
 /**
  * ExperimentScreen에 노출하는 PPG 기반 RR 분석 파형 snapshot.
  *
- * samples는 실제 RR 계산과 동일하게 DC 제거 -> 0.1~0.5Hz BPF -> 2초 warm-up 제거를
+ * samples는 실제 RR 계산과 동일하게 DC 제거 -> 약 0.067~0.5Hz BPF -> 2초 warm-up 제거를
  * 적용한 뒤, 선택된 polarity가 위쪽 peak가 되도록 정렬한 파형이다.
  */
 data class PpgRespirationGraphData(
@@ -962,7 +964,7 @@ private data class PpgLowerEnvelopeGrid(
 /**
  * PPG에서 추출한 호흡수 계산 결과.
  *
- * 원본 PPG에서 호흡 대역(0.1~0.5Hz)을 남긴 뒤 peak 간격을 계산하여
+ * 원본 PPG에서 호흡 대역(약 0.067~0.5Hz)을 남긴 뒤 peak 간격을 계산하여
  * RR bpm, interval 목록, 품질 점수를 함께 보관한다.
  */
 data class PpgRespirationResult(
@@ -3923,7 +3925,7 @@ class PotchArousalCalculator(
 
     /**
      * 지정 채널의 최근 45초 raw PPG에서 contact/gap-aware segment를 만들고,
-     * segment별로 DC 제거 -> 0.1~0.5Hz BPF -> 2초 warm-up 제거를 적용한다.
+     * segment별로 DC 제거 -> 약 0.067~0.5Hz BPF -> 2초 warm-up 제거를 적용한다.
      */
     private fun calculatePpgRespirationCandidatesFromBuffer(
         channel: PpgRespirationChannel,
@@ -4792,7 +4794,7 @@ class PotchArousalCalculator(
     /**
      * IMU 기반 호흡수를 계산한다.
      *
-     * g-magnitude에서 DC/자세 성분을 제거한 뒤 0.1~0.5Hz 호흡 대역만 남기고,
+     * g-magnitude에서 DC/자세 성분을 제거한 뒤 약 0.067~0.5Hz 호흡 대역만 남기고,
      * peak 간격으로 RR bpm을 추정한다.
      */
     fun calculateImuRespiration(): ImuRespirationResult? {
@@ -4827,8 +4829,8 @@ class PotchArousalCalculator(
             rawWindow[i] - mean
         }
 
-        // 2. 호흡 대역 BPF: 0.1~0.5Hz
-        // 6~30 breaths/min 정도만 남긴다.
+        // 2. 호흡 대역 BPF: 약 0.067~0.5Hz
+        // 4~30 breaths/min 정도만 남긴다.
         val respBpf = SimpleBandPassFilter(
             sampleRateHz = config.imuSampleRateHz,
             lowCutHz = config.respLowCutHz,

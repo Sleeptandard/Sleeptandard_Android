@@ -5,6 +5,15 @@ import org.junit.Test
 
 class ArousalScoringPolicyTest {
     @Test
+    fun rrExtractionDefaultsMatchPythonAnalyzer() {
+        val config = ArousalConfig()
+
+        assertEquals(4.0 / 60.0, config.respLowCutHz, 1e-12)
+        assertEquals(4.0, config.rrMinBpm, 0.0)
+        assertEquals(75.0, config.ppgRespMinPeakToPeakAmplitude, 0.0)
+    }
+
+    @Test
     fun rrRiseHillStartsAtOneAndReachesNinetyFiveAtOnePointFive() {
         fun score(rise: Double) = RrRiseHillScorePolicy.score(
             riseBpm = rise,
