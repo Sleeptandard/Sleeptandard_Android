@@ -305,6 +305,11 @@ fun AppNav(
                 }
                     context.startActivity(intent)},
                 onClickSendingData = {rememberNavController.navigate(Screen.SendingData.route)},
+                onClickLogin = {
+                    rememberNavController.navigate(Screen.LoginDemo.route) {
+                        launchSingleTop = true
+                    }
+                },
             )
         }
 
@@ -437,8 +442,8 @@ fun AppNav(
                     rememberNavController.navigate(Screen.Home.route) {
                         popUpTo(Screen.Tutorial.route) { inclusive = true }
                     }
-                    // 일단 로그인 기능 닫아놓음
-                    /*
+
+
                     if(userPrefs.isLogined()) {
                         rememberNavController.navigate(Screen.Home.route) {
                             popUpTo(Screen.Tutorial.route) { inclusive = true }
@@ -447,7 +452,7 @@ fun AppNav(
                         rememberNavController.navigate(Screen.LoginDemo.route)
                     }
 
-                     */
+
                 }
 
             )

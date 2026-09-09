@@ -120,6 +120,13 @@ class AuthViewModel : ViewModel() {
         currentStep = AuthStep.EmailInput
     }
 
+    fun goToSignupPassword(inputEmail: String) {
+        updateEmail(inputEmail)
+        if (!isEmailValid) return
+
+        currentStep = AuthStep.SignupPassword(email)
+    }
+
     // 이메일 확인 API 호출 로직
     // 1단계: 이메일 확인 로직
     fun checkEmail() {
