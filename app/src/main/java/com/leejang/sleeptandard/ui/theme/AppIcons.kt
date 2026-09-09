@@ -9,6 +9,7 @@ object AppIcons {
 
     // 네비게이션 바 아이콘
     @DrawableRes val NavAlarm = R.drawable.ic_nav_alarm
+    @DrawableRes val NavPotch = R.drawable.ic_nav_potch
     @DrawableRes val NavJournal = R.drawable.ic_nav_journal
     @DrawableRes val NavSettings = R.drawable.ic_nav_settings
 
@@ -26,6 +27,8 @@ object AppIcons {
 
     @DrawableRes val RingBar = R.drawable.ic_ring_bar
     @DrawableRes val ArrowRight = R.drawable.ic_ring_arrowright
+
+    @DrawableRes val HomePotch = R.drawable.ic_home_potch
 
 
     // 피드백 리뷰 화면
@@ -88,6 +91,10 @@ object AppIcons {
     @DrawableRes val TutorialPowerSaving1 = R.drawable.image_tutorial_power_saving1
     @DrawableRes val TutorialPowerSaving2 = R.drawable.image_tutorial_power_saving2
 
+    // 튜토리얼2
+    @DrawableRes val TutorialMM = R.drawable.ic_tutorial_mm
+    @DrawableRes val TutorialPotch = R.drawable.ic_tutorial_potch
+    @DrawableRes val TutorialPotchBound = R.drawable.ic_tutorial_potch_bound
 
     // 로그인/회원가입 화면
     @DrawableRes val RegisterClock = R.drawable.image_register_clock
@@ -99,4 +106,11 @@ object AppIcons {
     @DrawableRes val RegisterOK = R.drawable.ic_nickname_ok
     @DrawableRes val RegisterMail = R.drawable.ic_login_mail
 
+    // Potch 화면
+    @DrawableRes val PotchBattery = R.drawable.ic_potch_battery
+    @DrawableRes val PotchBattery2 = R.drawable.ic_potch_battery2
+    @DrawableRes val PotchBattery2Charging = R.drawable.ic_potch_battery2_charging
+    @DrawableRes val PotchHeartBeat = R.drawable.ic_potch_heartbeat
+    @DrawableRes val PotchTemp = R.drawable.ic_potch_temp
+    @DrawableRes val PotchPotch = R.drawable.image_potch_potch
 }

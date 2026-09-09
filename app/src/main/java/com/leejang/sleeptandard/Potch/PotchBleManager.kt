@@ -36,6 +36,12 @@ import java.util.UUID
  * Compose 화면에서는 이 값을 collectAsState()로 관찰해서
  * "스캔 중", "연결됨", "오류 메시지", "MTU 값" 등을 표시할 수 있다.
  */
+data class DiscoveredPotch(
+    val address: String,
+    val name: String,
+    val rssi: Int
+)
+
 data class PotchBleState(
     // 현재 BLE 스캔을 진행 중인지 여부
     val isScanning: Boolean = false,
@@ -43,10 +49,20 @@ data class PotchBleState(
     // Potch 기기와 GATT 연결이 완료되었는지 여부
     val isConnected: Boolean = false,
 
+    // 스캔으로 기기를 찾은 뒤 GATT 연결 결과를 기다리는 중인지 여부
+    val isConnecting: Boolean = false,
+
     val isReconnecting: Boolean = false,
 
     // 연결된 BLE 기기의 이름
     val deviceName: String? = null,
+
+    // 현재 연결을 시도하거나 연결된 기기의 BLE 주소
+    val deviceAddress: String? = null,
+
+    // 홈 화면에서 최초 등록을 위해 사용자가 기기를 선택해야 하는 상태
+    val isDeviceSelectionRequired: Boolean = false,
+    val discoveredDevices: List<DiscoveredPotch> = emptyList(),
 
     // 스마트폰 블루투스가 켜져 있는지 여부
     val bluetoothEnabled: Boolean = false,
@@ -97,7 +113,8 @@ class PotchBleManager(
 
     // BLE characteristic으로 들어온 raw byte 데이터를 실제 센서 데이터로 파싱하는 클래스
     private val dataProcessor: PotchDataProcessor,
-    private val dataLogger: PotchDataLogger
+    private val dataLogger: PotchDataLogger,
+    private val onConnectionSessionEnded: () -> Unit = {}
 ) {
     private val TAG = "PotchBleManager"
 
@@ -145,6 +162,7 @@ class PotchBleManager(
         // 펌웨어가 향후 204B notification까지 고려하므로 Android에서는 247을 요청한다.
         private const val TARGET_MTU = 247
         private const val MIN_REQUIRED_MTU = 145
+        private const val SCAN_TIMEOUT_MS = 15_000L
     }
 
     // 메인 스레드에서 재연결 딜레이 작업을 실행하기 위한 Handler
@@ -158,6 +176,7 @@ class PotchBleManager(
 
     // 재연결 시도 횟수
     private var reconnectAttempt = 0
+    private var reconnectScanFallbackUsed = false
 
     // 최대 재연결 시도 횟수
     private val maxReconnectAttempts = 3
@@ -285,6 +304,9 @@ class PotchBleManager(
      */
     private var targetDevice: BluetoothDevice? = null
 
+    private val discoveredDeviceObjects = linkedMapOf<String, BluetoothDevice>()
+    private var isSelectionScan = false
+
     /**
      * notify를 구독할 Characteristic.
      *
@@ -313,7 +335,7 @@ class PotchBleManager(
      * startScan()을 호출하면 Android 시스템이 주변 BLE 기기를 찾고,
      * 발견된 기기마다 onScanResult()가 호출된다.
      */
-    private val scanCallback = object : ScanCallback() {
+    private val scanCallback: ScanCallback = object : ScanCallback() {
 
         /**
          * BLE 기기가 하나 발견될 때마다 호출된다.
@@ -343,6 +365,13 @@ class PotchBleManager(
             val hasTargetService = advertisedServices.any { it.uuid == SERVICE_UUID }
             val nameMatches = name.contains(TARGET_NAME, ignoreCase = true)
 
+            val reconnectTargetAddress = targetDevice?.address
+            if (isReconnecting && reconnectTargetAddress != null &&
+                device.address != reconnectTargetAddress
+            ) {
+                return
+            }
+
             Log.d(
                 TAG,
                 "Scan result: name=$name, targetService=$hasTargetService, rssi=${result.rssi}"
@@ -351,6 +380,25 @@ class PotchBleManager(
             // 최신 펌웨어는 Service UUID를 광고하고, 일부 빌드는 기기 이름을 Scan Response에 둔다.
             // 따라서 UUID를 1순위로 사용하고 이름은 구형/캐시 호환 fallback으로만 사용한다.
             if (hasTargetService || nameMatches) {
+                if (isSelectionScan) {
+                    val address = device.address
+                    discoveredDeviceObjects[address] = device
+
+                    val updatedDevice = DiscoveredPotch(
+                        address = address,
+                        name = name,
+                        rssi = result.rssi
+                    )
+                    _state.update { current ->
+                        val updatedList = current.discoveredDevices
+                            .filterNot { it.address == address }
+                            .plus(updatedDevice)
+                            .sortedByDescending { it.rssi }
+                        current.copy(discoveredDevices = updatedList)
+                    }
+                    return
+                }
+
                 val foundMsg =
                     if (isReconnecting) {
                         "Found Potch during reconnect scan: name=$name, rssi=${result.rssi}"
@@ -375,7 +423,44 @@ class PotchBleManager(
          * BLE 스캔 자체가 실패했을 때 호출된다.
          */
         override fun onScanFailed(errorCode: Int) {
-            error("Scan failed: $errorCode")
+            reconnectHandler.removeCallbacks(scanTimeoutRunnable)
+            isReconnecting = false
+            val message = "Scan failed: $errorCode"
+            finishBleLogging(message)
+            _state.update {
+                it.copy(
+                    isScanning = false,
+                    isConnecting = false,
+                    isReconnecting = false,
+                    lastError = message,
+                    lastLog = message
+                )
+            }
+        }
+    }
+
+    private val scanTimeoutRunnable: Runnable = Runnable {
+        if (!_state.value.isScanning) return@Runnable
+
+        if (hasBlePermissions()) {
+            scanner?.stopScan(scanCallback)
+        }
+
+        isReconnecting = false
+        val message = "Potch를 찾지 못했습니다. 다시 시도해 주세요."
+        dataLogger.logConnectionEvent(
+            event = "scan_timeout",
+            message = "BLE scan timed out after ${SCAN_TIMEOUT_MS}ms"
+        )
+        finishBleLogging("BLE scan timed out after ${SCAN_TIMEOUT_MS}ms; reconnect abandoned")
+        _state.update {
+            it.copy(
+                isScanning = false,
+                isConnecting = false,
+                isReconnecting = false,
+                lastError = message,
+                lastLog = message
+            )
         }
     }
 
@@ -402,6 +487,11 @@ class PotchBleManager(
             status: Int,
             newState: Int
         ) {
+            if (manualDisconnect && newState == BluetoothProfile.STATE_CONNECTED) {
+                // A late successful callback must not reopen a terminally closed BLE log.
+                gatt.disconnect()
+                return
+            }
             Log.e(
                 TAG,
                 "onConnectionStateChange: status=$status, newState=$newState, manualDisconnect=$manualDisconnect, isReconnecting=$isReconnecting, attempt=$reconnectAttempt"
@@ -425,6 +515,14 @@ class PotchBleManager(
                 // 오류 연결의 분석 상태를 다음 연결로 넘기지 않는다.
                 dataProcessor.reset()
                 closeGatt()
+                _state.update {
+                    it.copy(
+                        isConnected = false,
+                        isConnecting = false,
+                        isScanning = false,
+                        isNotificationReady = false
+                    )
+                }
 
                 if (!manualDisconnect) {
                     // 이전 재연결 시도가 실패했으므로 다음 시도를 예약할 수 있게 풀어준다.
@@ -446,18 +544,24 @@ class PotchBleManager(
                     manualDisconnect = false
                     isReconnecting = false
                     reconnectAttempt = 0
+                    reconnectScanFallbackUsed = false
                     reconnectHandler.removeCallbacksAndMessages(null)
 
-                    // 팟치 연결 성공 시 raw data 로깅 시작
-                    dataLogger.startIfNeeded()
+                    // BLE diagnostics alone start on successful connection. Alarm files are independent.
+                    dataLogger.startBleLogging()
+                    dataLogger.logConnectionEvent("connected", "Connected to ${name ?: TARGET_NAME}")
 
                     // UI 상태를 "연결됨"으로 갱신한다.
                     _state.update {
                         it.copy(
                             isConnected = true,
+                            isConnecting = false,
                             isScanning = false,
                             isReconnecting = false,
                             deviceName = name,
+                            deviceAddress = gatt.device.address,
+                            isDeviceSelectionRequired = false,
+                            discoveredDevices = emptyList(),
                             lastError = null,
                             lastLog = "Connected to ${name ?: TARGET_NAME}"
                         )
@@ -495,6 +599,7 @@ class PotchBleManager(
                         _state.update {
                             it.copy(
                                 isConnected = false,
+                                isConnecting = false,
                                 isScanning = false,
                                 isReconnecting = true,
                                 deviceName = name,
@@ -503,11 +608,13 @@ class PotchBleManager(
                             )
                         }
 
+                        isReconnecting = false
                         scheduleReconnect()
                     } else {
                         _state.update {
                             it.copy(
                                 isConnected = false,
+                                isConnecting = false,
                                 isScanning = false,
                                 isReconnecting = false,
                                 deviceName = null,
@@ -772,22 +879,36 @@ class PotchBleManager(
      */
     @SuppressLint("MissingPermission")
     fun startScan() {
+        startScanInternal(selectionRequired = false)
+    }
+
+    fun startDeviceDiscovery() {
+        startScanInternal(selectionRequired = true)
+    }
+
+    private fun startScanInternal(selectionRequired: Boolean) {
 
         Log.d(TAG, "startScan() called")
         dataLogger.logDebug(TAG, "startScan() called")
 
         manualDisconnect = false
+        isSelectionScan = selectionRequired
+        reconnectAttempt = 0
+        reconnectScanFallbackUsed = false
+        discoveredDeviceObjects.clear()
 
         val adapter = bluetoothAdapter
 
         // 블루투스 기능이 없는 기기이거나 adapter를 얻지 못한 경우
         if (adapter == null) {
             error("Bluetooth adapter not available")
+            finishBleLogging("Bluetooth adapter unavailable; connection stopped")
             return
         }
 
         // 스마트폰 블루투스가 꺼져 있는 경우
         if (!adapter.isEnabled) {
+            finishBleLogging("Bluetooth is off; connection stopped")
             _state.update {
                 it.copy(
                     bluetoothEnabled = false,
@@ -803,6 +924,7 @@ class PotchBleManager(
             Log.e(TAG, "startScan blocked: missing BLE permissions")
             dataLogger.logDebug(TAG, "startScan blocked: missing BLE permissions","E")
             error("Missing Bluetooth permissions")
+            finishBleLogging("Missing Bluetooth permissions; connection stopped")
             return
         }
 
@@ -814,6 +936,9 @@ class PotchBleManager(
             it.copy(
                 bluetoothEnabled = true,
                 isScanning = true,
+                isConnecting = false,
+                isDeviceSelectionRequired = selectionRequired,
+                discoveredDevices = emptyList(),
                 lastError = null,
                 lastLog = "Started scanning for Potch..."
             )
@@ -831,6 +956,8 @@ class PotchBleManager(
                 .build(),
             scanCallback
         )
+        reconnectHandler.removeCallbacks(scanTimeoutRunnable)
+        reconnectHandler.postDelayed(scanTimeoutRunnable, SCAN_TIMEOUT_MS)
     }
 
     /**
@@ -839,6 +966,7 @@ class PotchBleManager(
     @SuppressLint("MissingPermission")
     fun stopScan() {
         // 권한이 없으면 stopScan 호출도 보안 예외가 날 수 있으므로 중단
+        reconnectHandler.removeCallbacks(scanTimeoutRunnable)
         if (!hasBlePermissions()) return
 
         Log.d(TAG, "stopScan() Called.")
@@ -872,6 +1000,74 @@ class PotchBleManager(
         connect(device)
     }
 
+    @SuppressLint("MissingPermission")
+    fun selectDiscoveredDevice(address: String): Boolean {
+        val device = discoveredDeviceObjects[address]
+        if (device == null) {
+            error("선택한 Potch를 더 이상 찾을 수 없습니다. 다시 검색해 주세요.")
+            return false
+        }
+
+        manualDisconnect = false
+        targetDevice = device
+        isSelectionScan = false
+        stopScan()
+        connect(device)
+        return true
+    }
+
+    @SuppressLint("MissingPermission")
+    fun connectToAddress(address: String): Boolean {
+        val adapter = bluetoothAdapter
+        if (adapter == null) {
+            error("Bluetooth adapter not available")
+            return false
+        }
+        if (!adapter.isEnabled) {
+            error("Bluetooth is off")
+            return false
+        }
+        if (!hasBlePermissions()) {
+            error("Missing Bluetooth permissions")
+            return false
+        }
+
+        val device = try {
+            adapter.getRemoteDevice(address)
+        } catch (_: IllegalArgumentException) {
+            error("저장된 Potch 식별자가 올바르지 않습니다.")
+            return false
+        }
+
+        manualDisconnect = false
+        isSelectionScan = false
+        targetDevice = device
+        connect(device)
+        return true
+    }
+
+    fun cancelDeviceDiscovery() {
+        if (!isSelectionScan) return
+
+        isSelectionScan = false
+        stopScan()
+        discoveredDeviceObjects.clear()
+        _state.update {
+            it.copy(
+                isDeviceSelectionRequired = false,
+                discoveredDevices = emptyList(),
+                lastError = null,
+                lastLog = "Potch 선택을 취소했습니다."
+            )
+        }
+    }
+
+    fun reportRegisteredDeviceRemoved() {
+        _state.update {
+            it.copy(lastLog = "저장된 Potch를 제거했습니다.")
+        }
+    }
+
     /**
      * 특정 BluetoothDevice에 GATT 연결을 시작한다.
      *
@@ -896,6 +1092,17 @@ class PotchBleManager(
 
         log(msg)
 
+        _state.update {
+            it.copy(
+                isConnecting = true,
+                deviceName = getDeviceName(device) ?: TARGET_NAME,
+                deviceAddress = device.address,
+                isDeviceSelectionRequired = false,
+                discoveredDevices = emptyList(),
+                lastError = null
+            )
+        }
+
         dataLogger.logConnectionEvent(
             event = if (isReconnecting) "reconnect_connecting" else "connecting",
             message = msg
@@ -907,6 +1114,7 @@ class PotchBleManager(
         } else {
             device.connectGatt(appContext, false, gattCallback)
         }
+        scheduleConnectionTimeout()
     }
 
     /**
@@ -915,8 +1123,6 @@ class PotchBleManager(
     @SuppressLint("MissingPermission")
     fun disconnect() {
         if (!hasBlePermissions()) return
-
-        val savedPath = dataLogger.stopAndSave()
 
         manualDisconnect = true
         reconnectHandler.removeCallbacksAndMessages(null)
@@ -929,13 +1135,18 @@ class PotchBleManager(
 
         Log.d(TAG,"disconnec() Called.")
         dataLogger.logDebug(TAG, "disconnec() Called.")
+        val savedPath = dataLogger.stopBleAndSave("User disconnected Potch")
 
         _state.update {
             it.copy(
                 isConnected = false,
+                isConnecting = false,
                 isScanning = false,
                 isReconnecting = false,
                 deviceName = null,
+                deviceAddress = null,
+                isDeviceSelectionRequired = false,
+                discoveredDevices = emptyList(),
                 isNotificationReady = false,
                 lastSavedLogPath = savedPath,
                 lastLog = if (savedPath != null) {
@@ -1055,7 +1266,9 @@ class PotchBleManager(
         manualDisconnect = true
         reconnectHandler.removeCallbacksAndMessages(null)
         stopScan()
-        disconnect()
+        // Service teardown is not a user-requested end of the persistent log sessions.
+        runCatching { gatt?.disconnect() }
+        closeGatt()
         unregisterBondStateReceiver()
     }
 
@@ -1299,6 +1512,7 @@ class PotchBleManager(
     private fun scheduleReconnect() {
         if (!hasBlePermissions()) {
             error("Missing Bluetooth permissions")
+            finishBleLogging("Missing Bluetooth permissions; reconnect abandoned")
             return
         }
 
@@ -1323,6 +1537,7 @@ class PotchBleManager(
                 event = "direct_reconnect_no_target",
                 message = msg
             )
+            finishBleLogging(msg)
 
             _state.update {
                 it.copy(
@@ -1337,7 +1552,11 @@ class PotchBleManager(
         }
 
         if (reconnectAttempt >= maxReconnectAttempts) {
-            reconnectAttempt = 0
+            if (reconnectScanFallbackUsed) {
+                finishBleLogging("Direct reconnect and fallback connection failed; reconnect abandoned")
+                return
+            }
+            reconnectScanFallbackUsed = true
             isReconnecting = true
 
             val fallbackMsg =
@@ -1434,6 +1653,7 @@ class PotchBleManager(
             } else {
                 device.connectGatt(appContext, false, gattCallback)
             }
+            scheduleConnectionTimeout()
 
         }, reconnectDelayMs)
     }
@@ -1444,13 +1664,16 @@ class PotchBleManager(
 
         if (adapter == null) {
             error("Bluetooth adapter not available during reconnect scan")
+            finishBleLogging("Bluetooth adapter unavailable; reconnect abandoned")
             return
         }
 
         Log.d(TAG, "startScanForReconnect() Called")
         dataLogger.logDebug(TAG, "startScanForReconnect() Called")
+        isSelectionScan = false
 
         if (!adapter.isEnabled) {
+            finishBleLogging("Bluetooth is off; reconnect abandoned")
             _state.update {
                 it.copy(
                     bluetoothEnabled = false,
@@ -1465,6 +1688,7 @@ class PotchBleManager(
 
         if (!hasBlePermissions()) {
             error("Missing Bluetooth permissions during reconnect scan")
+            finishBleLogging("Missing Bluetooth permissions during reconnect scan")
             return
         }
 
@@ -1478,6 +1702,7 @@ class PotchBleManager(
             it.copy(
                 bluetoothEnabled = true,
                 isScanning = true,
+                isConnecting = false,
                 isReconnecting = true,
                 lastError = null,
                 lastLog = "Scanning again for Potch..."
@@ -1500,6 +1725,8 @@ class PotchBleManager(
                 .build(),
             scanCallback
         )
+        reconnectHandler.removeCallbacks(scanTimeoutRunnable)
+        reconnectHandler.postDelayed(scanTimeoutRunnable, SCAN_TIMEOUT_MS)
     }
 
     @SuppressLint("MissingPermission")
@@ -1520,11 +1747,12 @@ class PotchBleManager(
             message = "User stopped reconnect. Saving log."
         )
 
-        val savedPath = dataLogger.stopAndSave()
+        val savedPath = dataLogger.stopBleAndSave("User stopped reconnect")
 
         _state.update {
             it.copy(
                 isConnected = false,
+                isConnecting = false,
                 isScanning = false,
                 isReconnecting = false,
                 deviceName = null,
@@ -1562,6 +1790,7 @@ class PotchBleManager(
         _state.update {
             it.copy(
                 isConnected = false,
+                isConnecting = false,
                 isScanning = false,
                 isReconnecting = false,
                 deviceName = null,
@@ -1571,12 +1800,38 @@ class PotchBleManager(
         }
     }
     fun saveCurrentLog(): String? {
-        return dataLogger.stopAndSave()
+        return dataLogger.stopBleAndSave("BLE session finished")
+    }
+
+    private fun scheduleConnectionTimeout() {
+        val pendingGatt = gatt
+        reconnectHandler.postDelayed({
+            if (!manualDisconnect && gatt === pendingGatt && !_state.value.isConnected) {
+                dataLogger.logConnectionEvent("connect_timeout", "GATT connection callback timed out after 15000ms")
+                closeGatt()
+                isReconnecting = false
+                scheduleReconnect()
+            }
+        }, 15_000L)
+    }
+
+    private fun finishBleLogging(reason: String) {
+        manualDisconnect = true // Late callbacks must not restart an abandoned reconnect cycle.
+        isReconnecting = false
+        reconnectAttempt = 0
+        reconnectScanFallbackUsed = false
+        reconnectHandler.removeCallbacksAndMessages(null)
+        val savedPath = dataLogger.stopBleAndSave(reason)
+        _state.update { it.copy(isConnected = false, isConnecting = false, isScanning = false,
+            isReconnecting = false, isNotificationReady = false, lastError = reason,
+            lastLog = reason, lastSavedLogPath = savedPath) }
+        onConnectionSessionEnded()
     }
     fun updateLogSavedState(savedPath: String?) {
         _state.update {
             it.copy(
                 isConnected = false,
+                isConnecting = false,
                 isScanning = false,
                 isReconnecting = false,
                 deviceName = null,

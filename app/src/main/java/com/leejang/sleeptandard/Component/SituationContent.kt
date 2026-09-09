@@ -47,12 +47,10 @@ import androidx.compose.ui.unit.sp
 import com.leejang.sleeptandard.ClassFile.AlarmScheduler
 import com.leejang.sleeptandard.Permission.isAllEssentialPermissionsGranted
 import com.leejang.sleeptandard.Permission.openAppSettings
-import com.leejang.sleeptandard.Prefs.AlarmPreferences
 import com.leejang.sleeptandard.ViewModel.AlarmViewModel
 import com.leejang.sleeptandard.ui.theme.AppIcons
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlin.text.ifEmpty
 
 
 data class SituationOption(
@@ -64,7 +62,6 @@ data class SituationOption(
 fun SituationContent(
     modifier: Modifier = Modifier,
 
-    alarmPrefs: AlarmPreferences,
     alarmViewModel: AlarmViewModel,
     scheduler: AlarmScheduler,
 
@@ -74,8 +71,6 @@ fun SituationContent(
     selectedRingtoneUri: String,
     selectedVibrationEnabled: Boolean,
     selectedVolume: Int,
-    earlyWakeUpMinutes: Int,
-    isRem: Boolean,
     isCustomMode: Boolean,
     situationOptions: List<SituationOption>,
     customText: String,
@@ -89,8 +84,6 @@ fun SituationContent(
     var selectedSituation by remember { mutableStateOf(setOf<String>()) }    // 메모 모달창에서 선택한 상태(여러 개 토글 가능)
     val context = LocalContext.current
     val scope = rememberCoroutineScope() // 코루틴 스코프 선언
-    val allOptions = situationOptions
-
 
     // 내용
     Column(
@@ -257,34 +250,9 @@ fun SituationContent(
                             selectedIsAm,
                             selectedRingtoneUri,
                             selectedVibrationEnabled,
-                            selectedVolume,
-                            earlyWakeUpMinutes,
-                            isRem,
+                            selectedVolume
                         )
                         scheduler.schedule(alarmViewModel.alarm)
-
-                        val triggerTime = scheduler.getTriggerTime()
-
-                        // [추가] 선택된 상황을 라벨 문자열로 변환
-                        val situationLabel =
-                            selectedSituation.mapNotNull { id ->
-                                allOptions.find { it.id == id }?.label
-                            }.joinToString("_").ifEmpty { "normal" }
-
-                        // 2. 워치 깨우기 (전선 연결! + 상황 라벨 전달)
-                        alarmViewModel.startSleepTracking(
-                            triggerTime,
-                            situationLabel
-                        )
-                        // 3. 눈으로 확인하기 위한 토스트 메시지 (추가)
-                        android.widget.Toast.makeText(
-                            context,
-                            "워치 연결 시도 중...",
-                            android.widget.Toast.LENGTH_SHORT
-                        ).show()
-
-                        // 여기서 알람 정보를 디스크에 저장
-                        alarmPrefs.saveAlarm(alarmViewModel.alarm)
 
                         onClickConfirm()
                     },
@@ -346,34 +314,9 @@ fun SituationContent(
                             selectedIsAm,
                             selectedRingtoneUri,
                             selectedVibrationEnabled,
-                            selectedVolume,
-                            earlyWakeUpMinutes = earlyWakeUpMinutes,
-                            isRem = isRem,
+                            selectedVolume
                         )
                         scheduler.schedule(alarmViewModel.alarm)
-
-                        val triggerTime = scheduler.getTriggerTime()
-
-                        // [추가] 선택된 상황을 라벨 문자열로 변환
-                        val situationLabel =
-                            selectedSituation.mapNotNull { id ->
-                                allOptions.find { it.id == id }?.label
-                            }.joinToString("_").ifEmpty { "normal" }
-
-                        // 2. 워치 깨우기 (전선 연결! + 상황 라벨 전달)
-                        alarmViewModel.startSleepTracking(
-                            triggerTime,
-                            situationLabel
-                        )
-                        // 3. 눈으로 확인하기 위한 토스트 메시지 (추가)
-                        android.widget.Toast.makeText(
-                            context,
-                            "워치 연결 시도 중...",
-                            android.widget.Toast.LENGTH_SHORT
-                        ).show()
-
-                        // 여기서 알람 정보를 디스크에 저장
-                        alarmPrefs.saveAlarm(alarmViewModel.alarm)
 
                         onClickConfirm()
                     },
@@ -500,34 +443,9 @@ fun SituationContent(
                                 selectedIsAm,
                                 selectedRingtoneUri,
                                 selectedVibrationEnabled,
-                                selectedVolume,
-                                earlyWakeUpMinutes = earlyWakeUpMinutes,
-                                isRem = isRem,
+                                selectedVolume
                             )
                             scheduler.schedule(alarmViewModel.alarm)
-
-                            val triggerTime = scheduler.getTriggerTime()
-
-                            // [추가] 선택된 상황을 라벨 문자열로 변환
-                            val situationLabel =
-                                selectedSituation.mapNotNull { id ->
-                                    allOptions.find { it.id == id }?.label
-                                }.joinToString("_").ifEmpty { "normal" }
-
-                            // 2. 워치 깨우기 (전선 연결! + 상황 라벨 전달)
-                            alarmViewModel.startSleepTracking(
-                                triggerTime,
-                                situationLabel
-                            )
-                            // 3. 눈으로 확인하기 위한 토스트 메시지 (추가)
-                            android.widget.Toast.makeText(
-                                context,
-                                "워치 연결 시도 중...",
-                                android.widget.Toast.LENGTH_SHORT
-                            ).show()
-
-                            // 여기서 알람 정보를 디스크에 저장
-                            alarmPrefs.saveAlarm(alarmViewModel.alarm)
 
                             onClickConfirm()
 

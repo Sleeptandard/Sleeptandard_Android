@@ -4,11 +4,14 @@ import android.util.Log
 import kotlin.math.abs
 import kotlin.math.sqrt
 import kotlin.math.PI
+import kotlin.math.ceil
 import kotlin.math.cos
-import kotlin.math.sin
+import kotlin.math.floor
 import kotlin.math.ln
+import kotlin.math.sin
 import kotlin.math.max
 import kotlin.math.pow
+import kotlin.math.roundToLong
 
 
 /**
@@ -30,10 +33,8 @@ data class MetricCalculationStatus(
 )
 
 /**
- * 각성 점수와 신뢰도를 분리해서 전달하는 공통 구조.
- *
- * score는 관측된 생체 변화의 각성 정도이고 confidence는 그 점수를 믿을 수 있는 정도다.
- * 사용 불가능한 지표는 0점으로 대입하지 않고 usable=false로 제외한다.
+ * 각 지표의 점수와 진단 정보를 전달하는 공통 구조.
+ * confidence/coverage는 이전 CSV/API 호환 필드이며 새 최종 점수에는 사용하지 않는다.
  */
 data class MetricEvidence(
     val score: Double? = null,              // 0~100
@@ -52,7 +53,7 @@ data class MetricEvidence(
     val log: String? = null
 )
 
-/** 영역 단위로 결합된 각성 증거. */
+/** 이전 domain 기반 CSV/API 호환 구조. 새 최종 점수에는 사용하지 않는다. */
 data class DomainEvidence(
     val score: Double? = null,       // 0~100
     val confidence: Double = 0.0,    // 0~1
@@ -67,6 +68,8 @@ data class ArousalState(
     val microMovementVariance: Double? = null,
     val microMovementScore: Double? = null,
     val microMovementRmsG: Double? = null,
+    val microMovementMaxAxisDeltaG: Double? = null,
+    val microMovementTwitchDetected: Boolean = false,
     val microMovementLevel: MicroMovementLevel? = null,
     val isMacroMovementLike: Boolean = false,
 
@@ -156,7 +159,7 @@ data class ArousalState(
     val skinTemperatureQuality: Double = 0.0,
     val skinTemperatureSampleCount: Int = 0,
 
-    // 점수와 신뢰도를 분리한 지표별 evidence.
+    // 지표별 점수 상세. confidence/coverage 필드는 CSV 호환용이며 최종 판정에는 사용하지 않는다.
     val microEvidence: MetricEvidence = MetricEvidence(),
     val rrEvidence: MetricEvidence = MetricEvidence(),
     val rrvEvidence: MetricEvidence = MetricEvidence(),
@@ -164,24 +167,23 @@ data class ArousalState(
     val hrvEvidence: MetricEvidence = MetricEvidence(),
     val temperatureEvidence: MetricEvidence = MetricEvidence(),
 
-    // 중복 신호를 줄이기 위해 먼저 결합한 영역별 evidence.
+    // 이전 domain 기반 CSV/API 호환 필드. 새 최종 판정에는 사용하지 않는다.
     val movementDomainEvidence: DomainEvidence = DomainEvidence(),
     val respiratoryDomainEvidence: DomainEvidence = DomainEvidence(),
     val cardiacDomainEvidence: DomainEvidence = DomainEvidence(),
     val temperatureDomainEvidence: DomainEvidence = DomainEvidence(),
 
     // Final
-    val finalWakeScore: Double = 0.0,       // confidence로 감산하지 않은 0~100 점수
-    val finalWakeConfidence: Double = 0.0,  // 0~100
-    val finalWakeCoverage: Double = 0.0,    // 0~100
+    val finalWakeScore: Double = 0.0,       // Python과 동일하게 최대 138점인 최종 점수
+    val finalWakeConfidence: Double = 0.0,  // legacy: 새 판정에서는 사용하지 않음
+    val finalWakeCoverage: Double = 0.0,    // legacy: 새 판정에서는 사용하지 않음
     val usedArousalDomainCount: Int = 0,
 
-    // Tolerant persistence: 최근 window 안에서 통과한 초의 개수로 기상 후보를 판정한다.
-    // wakeCandidateHoldSeconds는 기존 UI/로그 호환을 위해 현재 window의 통과 초와 동일하게 유지한다.
+    // 이전 tolerant persistence CSV/API 호환 필드. 새 판정에서는 모두 0이다.
     val wakeCandidateHoldSeconds: Int = 0,
     val wakeCurrentConditionPassed: Boolean = false,
-    val wakePersistenceWindowSeconds: Int = 30,
-    val wakePersistenceRequiredPassSeconds: Int = 24,
+    val wakePersistenceWindowSeconds: Int = 0,
+    val wakePersistenceRequiredPassSeconds: Int = 0,
     val wakePersistenceObservedSeconds: Int = 0,
     val wakePersistencePassedSeconds: Int = 0,
     val wakePersistenceFailedSeconds: Int = 0,
@@ -211,13 +213,31 @@ data class EvidenceScoringConfig(
     val hrvLfHfEvidenceMinimumScaleLogRatio: Double = 0.15,
     val temperatureEvidenceMinimumScaleCelsius: Double = 0.05,
 
-    // 지표 내부 baseline/trend 증거 가중치.
-    val rrBaselineEvidenceWeight: Double = 0.70,
-    val rrTrendEvidenceWeight: Double = 0.30,
+    // Python analyzer와 같은 HRV 점수 구간. 개인 baseline 형성 방식은 변경하지 않는다.
+    // RMSSD는 baseline 130%부터 시작하고 약 173.33%에서 95점이 되도록 보정한다.
+    val hrvRmssdArousalStartMultiplier: Double = 1.30,
+    val hrvRmssdArousalTargetMultiplier: Double = 1.30 * (100.0 / 75.0),
+    val hrvRmssdFallbackStartSec: Double = 0.075,
+    val hrvRmssdFallbackTargetSec: Double = 0.100,
+    val hrvLfHfArousalStartMultiplier: Double = 3.00,
+    val hrvLfHfArousalTargetMultiplier: Double = 4.00,
+    val hrvLfHfFallbackStart: Double = 1.50,
+    val hrvLfHfFallbackTarget: Double = 2.00,
+    val hrvTargetScore: Double = 0.95,
+    val rrvArousalStartMultiplier: Double = 1.35,
+
+    // RR/HR 개인 baseline 성분은 임시 비활성화하고 최근 상승량만 사용한다.
+    // 다시 활성화할 때는 아래 baseline/trend 가중치만 원래 비율로 복구하면 된다.
+    // val rrBaselineEvidenceWeight: Double = 0.30
+    // val rrTrendEvidenceWeight: Double = 0.70
+    val rrBaselineEvidenceWeight: Double = 0.00,
+    val rrTrendEvidenceWeight: Double = 1.00,
     val rrvBaselineEvidenceWeight: Double = 0.70,
     val rrvTrendEvidenceWeight: Double = 0.30,
-    val hrBaselineEvidenceWeight: Double = 0.60,
-    val hrTrendEvidenceWeight: Double = 0.40,
+    // val hrBaselineEvidenceWeight: Double = 0.60
+    // val hrTrendEvidenceWeight: Double = 0.40
+    val hrBaselineEvidenceWeight: Double = 0.00,
+    val hrTrendEvidenceWeight: Double = 1.00,
     val temperatureBaselineEvidenceWeight: Double = 0.70,
     val temperatureTrendEvidenceWeight: Double = 0.30,
 
@@ -225,7 +245,7 @@ data class EvidenceScoringConfig(
     val hrvFrequencyEvidenceWeight: Double = 0.70,
     val hrvRmssdEvidenceWeight: Double = 0.30,
 
-    // 중복 신호를 줄이기 위한 영역/지표 가중치.
+    // 이전 domain evidence 경로 호환 설정. 새 최종 점수에는 사용하지 않는다.
     val movementArousalDomainWeight: Double = 0.20,
     val respiratoryArousalDomainWeight: Double = 0.35,
     val cardiacArousalDomainWeight: Double = 0.35,
@@ -235,7 +255,7 @@ data class EvidenceScoringConfig(
     val hrArousalMetricWeight: Double = 0.55,
     val hrvArousalMetricWeight: Double = 0.45,
 
-    // 최종 후보는 점수, confidence, 사용 영역 조건을 최근 30초 중 24초 이상 만족해야 한다.
+    // 이전 confidence/domain/persistence 경로 호환 설정. 새 최종 판정에는 사용하지 않는다.
     val wakeCandidateMinConfidence: Double = 0.55,
     val wakePersistenceWindowSeconds: Int = 30,
     val wakePersistenceRequiredPassSeconds: Int = 24,
@@ -264,10 +284,15 @@ data class ArousalConfig(
     val macroMovementThresholdG: Double = 0.030,
     val microVarianceThreshold: Double = 0.0001,
 
+    // XYZ 중 어느 한 축이라도 연속 sample 변화량이 0.05g 이상이면 움찔로 판정한다.
+    val microAxisDeltaThresholdG: Double = 0.05,
+    val microScoreHoldMillis: Long = 60 * 1000L,
+
     // Respiration
-    val respLowCutHz: Double = 0.1,
+    // Python analyzer와 동일하게 분당 4회(4 / 60Hz)까지 호흡 대역으로 허용한다.
+    val respLowCutHz: Double = 4.0 / 60.0,
     val respHighCutHz: Double = 0.5,
-    val rrMinBpm: Double = 6.0,
+    val rrMinBpm: Double = 4.0,
     val rrMaxBpm: Double = 30.0,
 
     // PPG 기반 RR 계산용
@@ -276,7 +301,8 @@ data class ArousalConfig(
 
     // BPF 후 peak-to-peak amplitude가 너무 작으면 호흡 파형이 약하다고 판단
     // 실제 로그 보고 조정 필요
-    val ppgRespMinPeakToPeakAmplitude: Double = 30.0,
+    // Python lower-envelope RR 경로와 동일한 최소 prominence 하한.
+    val ppgRespMinPeakToPeakAmplitude: Double = 75.0,
 
     // interval 튄 값 제거 기준
     val ppgRespIntervalOutlierTolerance: Double = 0.40,
@@ -303,6 +329,12 @@ data class ArousalConfig(
     // 한 개의 큰 transient가 threshold와 진폭을 지배하지 않도록 robust percentile 사용.
     val ppgRespRobustLowPercentile: Double = 0.05,
     val ppgRespRobustHighPercentile: Double = 0.95,
+
+    // HR-used 박동 사이 lower point를 4Hz로 보간해 호흡 envelope를 만든다.
+    val ppgEnvelopeSampleRateHz: Double = 4.0,
+    val ppgEnvelopeMaxPointGapSeconds: Double = 2.5,
+    val ppgEnvelopePeakProminenceRangeRatio: Double = 0.12,
+    val ppgEnvelopePointMergeSeconds: Double = 0.20,
 
     // IMU 기반 RR 계산용
     val imuRespWindowSeconds: Int = 45,
@@ -348,8 +380,11 @@ data class ArousalConfig(
     // 이 값 이상이면 RR 절대값만으로는 높은 각성 신호로 봄
     val rrScoreHighBpm: Double = 24.0,
 
-    // 최근 RR이 baseline보다 이 정도 이상 증가하면 높은 각성 신호로 봄
-    val rrRiseThresholdBpm: Double = 3.0,
+    // 최근 RR 변화량 Hill 점수: 1.0bpm까지 0점, 1.5bpm에서 95점.
+    val rrRiseScoreStartBpm: Double = 1.0,
+    val rrRiseScoreNinetyFiveBpm: Double = 1.5,
+    val rrRiseScoreHillExponent: Double = 3.0,
+    val rrScoreHoldMillis: Long = 30 * 1000L,
 
     // 최근 RR 변화량 계산용 window
     val rrScoreWindowMillis: Long = 3 * 60 * 1000L,
@@ -392,12 +427,20 @@ data class ArousalConfig(
     val rrvMinUsableQuality: Double = 0.35,
 
     // HR
-    val hrGradientThreshold: Double = 3.0,
+    val hrScoreHoldMillis: Long = 30 * 1000L,
 
     // HR 각성지표 계산용
     val hrGradientWindowMillis: Long = 3 * 60 * 1000L,   // 최근 3분
     val hrGradientMinWindowMillis: Long = 60 * 1000L,    // 최소 1분 이상 쌓여야 계산
+    val hrBaselineWindowMillis: Long = 60 * 1000L,       // 가장 오래된 60초
+    val hrRecentWindowMillis: Long = 30 * 1000L,         // 현재 기준 최근 30초
     val hrMinSampleCount: Int = 5,
+
+    // Python HR Hill 곡선 보정점.
+    val hrScoreFirstRiseBpm: Double = 1.5,
+    val hrScoreAtFirstRise: Double = 0.40,
+    val hrScoreSecondRiseBpm: Double = 3.0,
+    val hrScoreAtSecondRise: Double = 0.85,
 
     // 비정상 튐 제거용
     val hrMaxReasonableBpm: Int = 220,
@@ -463,6 +506,14 @@ data class ArousalConfig(
     // 개인 기준선이 아직 없을 때만 fallback 점수에 사용한다.
     val hrvLfHfScoreThreshold: Double = 2.0,
 
+    // HRV 구성요소별 순간 최고점 유지 시간.
+    val hrvRmssdScoreHoldMillis: Long = 90 * 1000L,
+    val hrvLfHfScoreHoldMillis: Long = 60 * 1000L,
+
+    // RRV threshold 통과 점수 유지 시간. 개인 baseline이 없을 때는 2000ms를 사용한다.
+    val rrvFallbackWakeThresholdSec: Double = 2.0,
+    val rrvScoreHoldMillis: Long = 90 * 1000L,
+
     // 개인 기준선 기반 evidence scoring 설정.
     val evidenceScoring: EvidenceScoringConfig = EvidenceScoringConfig(),
 
@@ -473,7 +524,8 @@ data class ArousalConfig(
 
     // 최근 window에서 이 정도 이상 올라가면 의미 있는 상승으로 본다.
     // 실제 Potch 착용 로그를 보고 조정 필요.
-    val skinTempRiseThresholdCelsius: Double = 0.15,
+    val skinTempRiseThresholdCelsius: Double = 0.10,
+    val skinTempScoreHoldMillis: Long = 60 * 1000L,
 
     // 갑자기 튄 온도 제거 기준
     val skinTempOutlierToleranceCelsius: Double = 1.5,
@@ -485,15 +537,15 @@ data class ArousalConfig(
     val skinTempFreshnessTimeoutMillis: Long = 30 * 1000L,
 
     // Final evidence score
-    val wakeCandidateScore: Double = 60.0,
+    val wakeCandidateScore: Double = 80.0,
     // 아래 legacy weight는 과거 calculateFinalWakeScore 호환용이며 새 evidence 경로에서는 사용하지 않는다.
-    val mmScoreWeight: Double = 0.20,
-    val rrScoreWeight: Double = 0.15,
-    val rrvScoreWeight: Double = 0.15,
-    val hrScoreWeight: Double = 0.20,
-    val hrvScoreWeight: Double = 0.10,
-    // legacy 경로에서는 skin temperature를 multiplier로 사용했다.
-    val tempScoreWeight: Double = 0.25,
+    val mmScoreWeight: Double = 0.25,
+    val rrScoreWeight: Double = 0.20,
+    val rrvScoreWeight: Double = 0.20,
+    val hrScoreWeight: Double = 0.25,
+    val hrvScoreWeight: Double = 0.25,
+    // 피부온도 각성 신호가 유지되는 동안 기본 점수에 적용할 multiplier.
+    val temperatureWakeMultiplier: Double = 1.20,
 
     // Green PPG 128Hz / IMU 64Hz 기준으로 최근 60초 보관
     val ppgWindowSeconds: Int = 60,
@@ -548,6 +600,11 @@ data class MicroMovementResult(
     val isMacroMovementLike: Boolean
 )
 
+private data class ImuAppendResult(
+    val twitchDetected: Boolean,
+    val maxAxisDeltaG: Double?
+)
+
 /**
  * 호흡 peak 두 개 사이의 interval.
  *
@@ -596,7 +653,7 @@ enum class RespirationPeakPolarity {
 /**
  * ExperimentScreen에 노출하는 PPG 기반 RR 분석 파형 snapshot.
  *
- * samples는 실제 RR 계산과 동일하게 DC 제거 -> 0.1~0.5Hz BPF -> 2초 warm-up 제거를
+ * samples는 실제 RR 계산과 동일하게 DC 제거 -> 약 0.067~0.5Hz BPF -> 2초 warm-up 제거를
  * 적용한 뒤, 선택된 polarity가 위쪽 peak가 되도록 정렬한 파형이다.
  */
 data class PpgRespirationGraphData(
@@ -708,10 +765,206 @@ private data class GapAwarePpgRespirationWindow(
     val longGapCount: Int
 )
 
+/** Python analyzer의 shifted cubic Hill 점수와 동일한 규칙. */
+internal object ShiftedHillScorePolicy {
+    fun score(
+        value: Double,
+        start: Double,
+        target: Double,
+        targetScore: Double = 0.95,
+        fullAtTarget: Boolean = false,
+        exponent: Double = 3.0
+    ): Double {
+        if (!value.isFinite() || !start.isFinite() || !target.isFinite()) return 0.0
+        if (!targetScore.isFinite() || !exponent.isFinite() || exponent <= 0.0) return 0.0
+        if (target <= start) return if (value > start) 1.0 else 0.0
+        if (value <= start) return 0.0
+        if (fullAtTarget && value >= target) return 1.0
+
+        val calibration = targetScore.coerceIn(1e-9, 1.0 - 1e-9)
+        val span = target - start
+        val half = span / (calibration / (1.0 - calibration)).pow(1.0 / exponent)
+        val shifted = value - start
+        val numerator = shifted.pow(exponent)
+        val denominator = half.pow(exponent) + numerator
+        return if (denominator > 0.0) {
+            (numerator / denominator).coerceIn(0.0, 1.0)
+        } else {
+            0.0
+        }
+    }
+}
+
+/** Python analyzer의 두 보정점을 통과하는 HR 상승량 Hill 곡선. */
+internal object HeartRateRiseHillScorePolicy {
+    fun score(
+        riseBpm: Double,
+        firstRiseBpm: Double,
+        firstScore: Double,
+        secondRiseBpm: Double,
+        secondScore: Double
+    ): Double {
+        if (!riseBpm.isFinite() || riseBpm <= 0.0) return 0.0
+        if (
+            !firstRiseBpm.isFinite() || !secondRiseBpm.isFinite() ||
+            firstRiseBpm <= 0.0 || secondRiseBpm <= firstRiseBpm
+        ) return 0.0
+        if (
+            !firstScore.isFinite() || !secondScore.isFinite() ||
+            firstScore <= 0.0 || firstScore >= 1.0 ||
+            secondScore <= firstScore || secondScore >= 1.0
+        ) return 0.0
+
+        val firstOdds = firstScore / (1.0 - firstScore)
+        val secondOdds = secondScore / (1.0 - secondScore)
+        val exponent = ln(secondOdds / firstOdds) / ln(secondRiseBpm / firstRiseBpm)
+        if (!exponent.isFinite() || exponent <= 0.0) return 0.0
+        val half = firstRiseBpm / firstOdds.pow(1.0 / exponent)
+        val numerator = riseBpm.pow(exponent)
+        val denominator = half.pow(exponent) + numerator
+        return if (denominator > 0.0) {
+            (numerator / denominator).coerceIn(0.0, 1.0)
+        } else {
+            0.0
+        }
+    }
+}
+
+/** Python analyzer처럼 RRV 임계치는 2000ms와 개인 baseline 135% 중 큰 값이다. */
+internal object RrvWakeThresholdPolicy {
+    fun threshold(
+        personalBaselineSec: Double?,
+        fallbackThresholdSec: Double,
+        baselineMultiplier: Double
+    ): Double {
+        val fallback = fallbackThresholdSec.takeIf { it.isFinite() && it > 0.0 } ?: 2.0
+        val personal = personalBaselineSec
+            ?.takeIf { it.isFinite() && it > 0.0 && baselineMultiplier.isFinite() }
+            ?.times(baselineMultiplier)
+        return max(fallback, personal ?: fallback)
+    }
+}
+
+/**
+ * RR 최근 변화량을 Hill 곡선으로 바꾼다.
+ * startBpm까지는 0점이고 ninetyFiveBpm에서 정확히 0.95가 되도록 half-saturation을 역산한다.
+ */
+internal object RrRiseHillScorePolicy {
+    fun score(
+        riseBpm: Double,
+        startBpm: Double,
+        ninetyFiveBpm: Double,
+        exponent: Double
+    ): Double {
+        if (!riseBpm.isFinite() || !startBpm.isFinite() || !ninetyFiveBpm.isFinite()) return 0.0
+        if (!exponent.isFinite() || exponent <= 0.0 || ninetyFiveBpm <= startBpm) return 0.0
+
+        val distance = (riseBpm - startBpm).coerceAtLeast(0.0)
+        if (distance <= 0.0) return 0.0
+
+        val targetDistance = ninetyFiveBpm - startBpm
+        val halfSaturation = targetDistance * (1.0 / 0.95 - 1.0).pow(1.0 / exponent)
+        val numerator = distance.pow(exponent)
+        val denominator = halfSaturation.pow(exponent) + numerator
+        return if (denominator > 0.0) (numerator / denominator).coerceIn(0.0, 1.0) else 0.0
+    }
+}
+
+/** 순간 최고점이 갱신되면 지정 시간 동안 그 점수를 하한으로 유지한다. */
+internal class PeakScoreHold(
+    private val durationMillis: Long
+) {
+    private var heldScore: Double = 0.0
+    private var expiresAtMillis: Long = Long.MIN_VALUE
+
+    fun update(score: Double?, nowMillis: Long): Double? {
+        val current = score?.takeIf { it.isFinite() }?.coerceIn(0.0, 1.0)
+        if (nowMillis >= expiresAtMillis) {
+            heldScore = 0.0
+            expiresAtMillis = Long.MIN_VALUE
+        }
+        if (current != null && current > heldScore) {
+            heldScore = current
+            expiresAtMillis = safeExpiry(nowMillis, durationMillis)
+        }
+        return when {
+            expiresAtMillis != Long.MIN_VALUE && nowMillis < expiresAtMillis ->
+                max(heldScore, current ?: 0.0)
+            current != null -> current
+            else -> null
+        }
+    }
+
+    fun reset() {
+        heldScore = 0.0
+        expiresAtMillis = Long.MIN_VALUE
+    }
+}
+
+/** binary 각성 신호가 다시 검출될 때마다 100점 유지 시간을 새로 시작한다. */
+internal class BinaryScoreHold(
+    private val durationMillis: Long
+) {
+    private var expiresAtMillis: Long = Long.MIN_VALUE
+
+    fun update(triggered: Boolean, nowMillis: Long): Double {
+        if (triggered) {
+            expiresAtMillis = safeExpiry(nowMillis, durationMillis)
+        }
+        return if (nowMillis < expiresAtMillis) 1.0 else 0.0
+    }
+
+    fun reset() {
+        expiresAtMillis = Long.MIN_VALUE
+    }
+}
+
+private fun safeExpiry(nowMillis: Long, durationMillis: Long): Long {
+    val duration = durationMillis.coerceAtLeast(0L)
+    return if (Long.MAX_VALUE - nowMillis < duration) Long.MAX_VALUE else nowMillis + duration
+}
+
+/** confidence/domain 보정 없이 고정 지표 가중치와 온도 multiplier만 적용한다. */
+internal object FinalWakeScorePolicy {
+    private const val BASE_WEIGHT_SUM = 1.15
+
+    fun score(
+        microScore: Double?,
+        hrScore: Double?,
+        hrvScore: Double?,
+        rrScore: Double?,
+        rrvScore: Double?,
+        temperatureActive: Boolean,
+        temperatureMultiplier: Double = 1.20
+    ): Double {
+        val base =
+            normalize(microScore) * 0.25 +
+                    normalize(hrScore) * 0.25 +
+                    normalize(hrvScore) * 0.25 +
+                    normalize(rrScore) * 0.20 +
+                    normalize(rrvScore) * 0.20
+        val multiplier = if (temperatureActive) temperatureMultiplier.coerceAtLeast(0.0) else 1.0
+        val maximum = BASE_WEIGHT_SUM * temperatureMultiplier.coerceAtLeast(0.0)
+        return (base * multiplier).coerceIn(0.0, maximum)
+    }
+
+    private fun normalize(score: Double?): Double =
+        score?.takeIf { it.isFinite() }?.coerceIn(0.0, 1.0) ?: 0.0
+}
+
+/** 4Hz로 보간·필터링한 HR lower-envelope 최신 연속 구간. */
+private data class PpgLowerEnvelopeGrid(
+    val samplePositions: DoubleArray,
+    val displayValues: DoubleArray,
+    val respirationValues: DoubleArray,
+    val sourcePointCount: Int,
+    val sourceStartSamplePosition: Long
+)
+
 /**
  * PPG에서 추출한 호흡수 계산 결과.
  *
- * 원본 PPG에서 호흡 대역(0.1~0.5Hz)을 남긴 뒤 peak 간격을 계산하여
+ * 원본 PPG에서 호흡 대역(약 0.067~0.5Hz)을 남긴 뒤 peak 간격을 계산하여
  * RR bpm, interval 목록, 품질 점수를 함께 보관한다.
  */
 data class PpgRespirationResult(
@@ -930,20 +1183,7 @@ private enum class EvidenceDirection {
 }
 
 private data class EvidenceComponent(
-    val name: String,
-    val score: Double,
-    val confidence: Double,
-    val baseWeight: Double,
-    val usable: Boolean,
-    val reason: String? = null
-)
-
-private data class EvidenceCombination(
-    val score: Double?,
-    val confidence: Double,
-    val coverage: Double,
-    val usable: Boolean,
-    val composition: String
+    val score: Double
 )
 
 private data class BaselineEvidenceDetail(
@@ -966,39 +1206,10 @@ private data class HrvEvidenceBundle(
 
 private data class FinalArousalResult(
     val score: Double,
-    val confidence: Double,
-    val coverage: Double,
-    val movementDomain: DomainEvidence,
-    val respiratoryDomain: DomainEvidence,
-    val cardiacDomain: DomainEvidence,
-    val temperatureDomain: DomainEvidence,
-    val usedDomainCount: Int,
     val currentConditionPassed: Boolean,
-    val persistenceWindowSeconds: Int,
-    val persistenceRequiredPassSeconds: Int,
-    val persistenceObservedSeconds: Int,
-    val persistencePassedSeconds: Int,
-    val persistenceFailedSeconds: Int,
-    val persistencePassRatio: Double,
     val candidate: Boolean,
     val reason: String,
     val log: String
-)
-
-private data class WakePersistenceSample(
-    val secondBucket: Long,
-    val passed: Boolean
-)
-
-private data class WakePersistenceSummary(
-    val windowSeconds: Int,
-    val requiredPassSeconds: Int,
-    val observedSeconds: Int,
-    val passedSeconds: Int,
-    val failedSeconds: Int,
-    val passRatio: Double,
-    val windowComplete: Boolean,
-    val candidate: Boolean
 )
 /**
  * 최근 skin temperature 변화 방향.
@@ -1069,6 +1280,12 @@ class PotchArousalCalculator(
     private val greenPpgBuffer = ArrayDeque<Double>()
 
     /**
+     * DataProcessor가 최종 HR interval마다 추출한 raw PPG lower point.
+     * rolling HR 재계산에서 반복되는 점은 위치 기준으로 합치며, RR/RRV의 실제 입력은 이 buffer다.
+     */
+    private val ppgLowerEnvelopeSampleBuffer = ArrayDeque<PpgLowerEnvelopeSample>()
+
+    /**
      * RR 각성 점수 계산용 rolling buffer.
      *
      * Pair<timestampMillis, rrBpm>
@@ -1076,12 +1293,6 @@ class PotchArousalCalculator(
      * rrFinal이 계산되고 confidence가 충분한 경우에만 저장한다.
      */
     private val respirationRateBuffer = ArrayDeque<Pair<Long, Double>>()
-
-    /**
-     * 선택된 RRV RMSSD의 시간 변화 추세를 계산하기 위한 rolling history.
-     * 같은 3분 호흡 interval buffer와 별도로, 최종 대표 RMSSD를 1초 단위로 보관한다.
-     */
-    private val rrvValueBuffer = ArrayDeque<Pair<Long, Double>>()
 
     // PPG RR 경로 hysteresis state.
     private var activePpgRespirationPath =
@@ -1164,6 +1375,9 @@ class PotchArousalCalculator(
     private var lastAcceptedPpgRrvEndSamplePosition: Long = Long.MIN_VALUE
     private var lastAcceptedImuRrvEndSamplePosition: Long = Long.MIN_VALUE
 
+    // lower-envelope point gap(기본 2.5초)으로 나뉜 최신 호흡 continuity group 시작점.
+    private var ppgEnvelopeContinuityGroupStartPosition: Long? = null
+
     // 현재 유효한 분석 연속 구간과 HRV 중복 제거 위치.
     private var currentAnalysisSegmentId: Long = 0L
     private var lastAcceptedHrvIbiSegmentId: Long = Long.MIN_VALUE
@@ -1189,11 +1403,18 @@ class PotchArousalCalculator(
 
     private var lastState = ArousalState()
 
+    private var previousImuAccelerationG: Triple<Double, Double, Double>? = null
+
+    private val microScoreHold = BinaryScoreHold(config.microScoreHoldMillis)
+    private val rrScoreHold = PeakScoreHold(config.rrScoreHoldMillis)
+    private val rrvScoreHold = BinaryScoreHold(config.rrvScoreHoldMillis)
+    private val hrScoreHold = PeakScoreHold(config.hrScoreHoldMillis)
+    private val hrvRmssdScoreHold = PeakScoreHold(config.hrvRmssdScoreHoldMillis)
+    private val hrvLfHfScoreHold = PeakScoreHold(config.hrvLfHfScoreHoldMillis)
+    private val temperatureScoreHold = BinaryScoreHold(config.skinTempScoreHoldMillis)
+
     /** 수면 세션 시작 시 PotchStabilityCalculator가 고정한 개인 기준선 snapshot. */
     private var personalBaselines: Map<BaselineMetricType, PersonalBaselineRecord> = emptyMap()
-
-    /** 최근 N초 중 M초 통과 방식의 tolerant persistence 기록. */
-    private val wakePersistenceSamples = ArrayDeque<WakePersistenceSample>()
 
     @Synchronized
     fun updatePersonalBaselines(
@@ -1236,7 +1457,7 @@ class PotchArousalCalculator(
         trimMetricBuffersNow(nowMillis)
 
         appendPpg(sensorData.ppgData)
-        appendImu(sensorData.imuData)
+        val imuAppendResult = appendImu(sensorData.imuData)
         appendTemperature(nowMillis, sensorData.ntcCelsius)
 
         if (heartRateEstimate != null) {
@@ -1249,16 +1470,34 @@ class PotchArousalCalculator(
                 estimate = heartRateEstimate,
                 acceptedAtMillis = nowMillis
             )
+
+            appendPpgLowerEnvelopeSamples(
+                samples = heartRateEstimate.lowerEnvelopeSamples,
+                replaceFromSamplePosition =
+                    heartRateEstimate.lowerEnvelopeReplacementStartSamplePosition
+            )
         }
 
         val microMovement = calculateMicroMovement()
 
-        val ppgRespiration = calculatePpgRespiration()
-        val imuRespiration = calculateImuRespiration()
+        // 최종 RR/RRV는 HR-used peak 사이 raw PPG lower envelope만 사용한다.
+        // 기존 direct PPG/IMU 호흡 검출 함수는 진단/회귀 비교 API로 남겨 둔다.
+        val ppgRespiration = calculatePpgLowerEnvelopeRespiration()
+        val imuRespiration: ImuRespirationResult? = null
 
-        val rrFusion = fuseRespiration(
+        val rrFusionBase = fuseRespiration(
             ppg = ppgRespiration,
             imu = imuRespiration
+        )
+        val rrFusion = rrFusionBase.copy(
+            log = if (ppgRespiration != null) {
+                "RR source: HR raw-PPG lower-envelope · " +
+                        "${config.ppgEnvelopeSampleRateHz.toInt()}Hz · positive crest · " +
+                        "q=${"%.2f".format(ppgRespiration.qualityScore)}"
+            } else {
+                "RR source: HR raw-PPG lower-envelope unavailable · " +
+                        latestPpgRespirationGraphData.description
+            }
         )
         val rrFromPpg = ppgRespiration?.rrBpm
         val rrFromImu = imuRespiration?.rrBpm
@@ -1285,10 +1524,6 @@ class PotchArousalCalculator(
             rrFusion = rrFusion
         )
         val rrvResult = rrvBundle.selected
-        appendRrvEvidenceHistory(
-            nowMillis = nowMillis,
-            result = rrvResult
-        )
 
         val heartRateIsFresh = isFresh(
             lastValidTimestampMillis = lastValidHeartRateTimestampMillis,
@@ -1309,7 +1544,7 @@ class PotchArousalCalculator(
         )
 
         val hrResult = if (heartRateIsFresh) {
-            calculateHeartRateArousal()
+            calculateHeartRateArousal(nowMillis)
         } else {
             null
         }
@@ -1350,33 +1585,39 @@ class PotchArousalCalculator(
             ?.takeIf { hrvFrequencyAssessment.usable }
 
         // 기존 threshold 기반 결합값은 디버깅 호환용으로 남기되,
-        // 실제 각성점수는 개인 기준선+trend evidence 구조를 사용한다.
+        // 실제 HRV 각성점수는 lower-tail 개인 기준선 배수 구조를 사용한다.
         val hrvCombinedScore = combineHrvScores(
             frequencyResult = usableHrvFrequencyResult,
             rmssdResult = hrvResult,
             frequencyAssessment = hrvFrequencyAssessment
         )
 
-        val microEvidence = buildMicroEvidence(microMovement)
+        val microEvidence = buildMicroEvidence(
+            twitchDetected = imuAppendResult.twitchDetected,
+            maxAxisDeltaG = imuAppendResult.maxAxisDeltaG,
+            nowMillis = nowMillis
+        )
         val rrEvidence = buildRrEvidence(
             result = rrArousalResult,
-            fusion = rrFusion
+            fusion = rrFusion,
+            nowMillis = nowMillis
         )
-        val rrvEvidence = buildRrvEvidence(rrvResult)
+        val rrvEvidence = buildRrvEvidence(rrvResult, nowMillis)
         val hrEvidence = buildHrEvidence(
             result = hrResult,
-            heartRateEstimate = heartRateEstimate
+            heartRateEstimate = heartRateEstimate,
+            nowMillis = nowMillis
         )
         val hrvEvidenceBundle = buildHrvEvidence(
             frequencyResult = usableHrvFrequencyResult,
             rmssdResult = hrvResult,
-            assessment = hrvFrequencyAssessment
+            assessment = hrvFrequencyAssessment,
+            nowMillis = nowMillis
         )
         val hrvEvidence = hrvEvidenceBundle.evidence
-        val temperatureEvidence = buildTemperatureEvidence(skinTempResult)
+        val temperatureEvidence = buildTemperatureEvidence(skinTempResult, nowMillis)
 
         val finalArousal = calculateFinalArousalResult(
-            nowMillis = nowMillis,
             micro = microEvidence,
             rr = rrEvidence,
             rrv = rrvEvidence,
@@ -1385,11 +1626,7 @@ class PotchArousalCalculator(
             temperature = temperatureEvidence
         )
 
-        val rrCalculationStatus = buildRrCalculationStatus(
-            ppg = ppgRespiration,
-            imu = imuRespiration,
-            fusion = rrFusion
-        )
+        val rrCalculationStatus = buildRrCalculationStatus(rrFusion)
 
         val rrvCalculationStatus = buildRrvCalculationStatus(
             result = rrvResult,
@@ -1413,8 +1650,10 @@ class PotchArousalCalculator(
 
         lastState = ArousalState(
             microMovementVariance = microMovement?.varianceG,
-            microMovementScore = microMovement?.score?.times(100.0),
+            microMovementScore = microEvidence.score,
             microMovementRmsG = microMovement?.rmsG,
+            microMovementMaxAxisDeltaG = imuAppendResult.maxAxisDeltaG,
+            microMovementTwitchDetected = imuAppendResult.twitchDetected,
             microMovementLevel = microMovement?.level,
             isMacroMovementLike = microMovement?.isMacroMovementLike ?: false,
 
@@ -1466,7 +1705,10 @@ class PotchArousalCalculator(
             hrvHf = hrvFrequencyResult?.hfPower,
             hrvLfHf = hrvFrequencyResult?.lfHfRatio,
             hrvScore = hrvEvidence.score,
-            hrvQuality = hrvEvidence.confidence,
+            hrvQuality = (
+                    (hrvFrequencyResult?.qualityScore ?: 0.0) * 0.70 +
+                            (hrvResult?.qualityScore ?: 0.0) * 0.30
+                    ).coerceIn(0.0, 1.0),
             hrvIbiCount = maxOf(
                 hrvFrequencyAssessment.recentIbiCount,
                 hrvResult?.ibiCount ?: 0
@@ -1513,23 +1755,18 @@ class PotchArousalCalculator(
             hrvEvidence = hrvEvidence,
             temperatureEvidence = temperatureEvidence,
 
-            movementDomainEvidence = finalArousal.movementDomain,
-            respiratoryDomainEvidence = finalArousal.respiratoryDomain,
-            cardiacDomainEvidence = finalArousal.cardiacDomain,
-            temperatureDomainEvidence = finalArousal.temperatureDomain,
-
             finalWakeScore = finalArousal.score * 100.0,
-            finalWakeConfidence = finalArousal.confidence * 100.0,
-            finalWakeCoverage = finalArousal.coverage * 100.0,
-            usedArousalDomainCount = finalArousal.usedDomainCount,
-            wakeCandidateHoldSeconds = finalArousal.persistencePassedSeconds,
+            finalWakeConfidence = 0.0,
+            finalWakeCoverage = 0.0,
+            usedArousalDomainCount = 0,
+            wakeCandidateHoldSeconds = 0,
             wakeCurrentConditionPassed = finalArousal.currentConditionPassed,
-            wakePersistenceWindowSeconds = finalArousal.persistenceWindowSeconds,
-            wakePersistenceRequiredPassSeconds = finalArousal.persistenceRequiredPassSeconds,
-            wakePersistenceObservedSeconds = finalArousal.persistenceObservedSeconds,
-            wakePersistencePassedSeconds = finalArousal.persistencePassedSeconds,
-            wakePersistenceFailedSeconds = finalArousal.persistenceFailedSeconds,
-            wakePersistencePassRatio = finalArousal.persistencePassRatio * 100.0,
+            wakePersistenceWindowSeconds = 0,
+            wakePersistenceRequiredPassSeconds = 0,
+            wakePersistenceObservedSeconds = 0,
+            wakePersistencePassedSeconds = 0,
+            wakePersistenceFailedSeconds = 0,
+            wakePersistencePassRatio = 0.0,
             wakeDecisionReason = finalArousal.reason,
             isWakeTimingCandidate = finalArousal.candidate,
             lastLog = finalArousal.log + ", " +
@@ -1548,13 +1785,14 @@ class PotchArousalCalculator(
     fun processBurst(
         sensorData: SensorData,
         heartRateEstimate: HeartRateEstimate?,
-        heartRateStatus: MetricCalculationStatus
+        heartRateStatus: MetricCalculationStatus,
+        analysisSegmentId: Long = currentAnalysisSegmentId
     ): ArousalState {
         return process(
             sensorData = sensorData,
             heartRateEstimate = heartRateEstimate,
             heartRateSignalStatus = heartRateStatus,
-            analysisSegmentId = currentAnalysisSegmentId
+            analysisSegmentId = analysisSegmentId
         )
     }
 
@@ -1562,8 +1800,6 @@ class PotchArousalCalculator(
     fun currentState(): ArousalState = lastState
 
     private fun buildRrCalculationStatus(
-        ppg: PpgRespirationResult?,
-        imu: ImuRespirationResult?,
         fusion: RrFusionResult
     ): MetricCalculationStatus {
         if (fusion.rrBpm != null) {
@@ -1581,41 +1817,24 @@ class PotchArousalCalculator(
             )
         }
 
-        val ppgMinSamples =
-            (config.ppgSampleRateHz * config.ppgRespMinWindowSeconds).toInt()
-        val imuMinSamples =
-            (config.imuSampleRateHz * config.imuRespMinWindowSeconds).toInt()
-
-        // raw buffer 길이가 아니라 contact/gap-aware 전처리 후 실제 유효 PPG sample 수를 사용한다.
-        // 연결 직후 0값이나 긴 contact loss가 25초 수집량으로 잘못 계산되지 않게 한다.
-        val ppgSampleCount = latestPpgRespirationGraphData.validOriginalSampleCount
-        val imuSampleCount = imuGBuffer.size
-
-        val hasEnoughPpg = ppgSampleCount >= ppgMinSamples
-        val hasEnoughImu = imuSampleCount >= imuMinSamples
-
-        if (!hasEnoughPpg && !hasEnoughImu) {
-            val ppgSeconds = ppgSampleCount / config.ppgSampleRateHz
-            val imuSeconds = imuSampleCount / config.imuSampleRateHz
-
+        // lower-envelope graph의 원본 개수는 128Hz PPG sample 수가 아니라 heartbeat point 수다.
+        // 수집 상태는 graph가 기록한 실제 envelope 지속시간으로 판정한다.
+        val envelopeSeconds = latestPpgRespirationGraphData.rawWindowSeconds
+        if (
+            latestPpgRespirationGraphData.processingState ==
+            MetricCalculationState.COLLECTING ||
+            envelopeSeconds < config.ppgRespMinWindowSeconds
+        ) {
             return MetricCalculationStatus(
                 state = MetricCalculationState.COLLECTING,
-                message = "호흡 파형 수집 중: PPG ${"%.1f".format(ppgSeconds)}초, " +
-                        "IMU ${"%.1f".format(imuSeconds)}초 / 최소 ${config.ppgRespMinWindowSeconds}초"
+                message = "HR lower-envelope 수집 중: ${"%.1f".format(envelopeSeconds)}초 / " +
+                        "최소 ${config.ppgRespMinWindowSeconds}초"
             )
-        }
-
-        val sourceHint = when {
-            ppg == null && imu == null -> "PPG/IMU 모두"
-            ppg == null -> "PPG"
-            imu == null -> "IMU"
-            else -> "fusion"
         }
 
         return MetricCalculationStatus(
             state = MetricCalculationState.REJECTED,
-            message = "$sourceHint 유효 호흡 파형 없음: 접촉 불량, 움직임 잡음, " +
-                    "낮은 진폭 또는 interval 이상치 필터링 가능"
+            message = latestPpgRespirationGraphData.description
         )
     }
 
@@ -1794,12 +2013,9 @@ class PotchArousalCalculator(
     private fun buildBaselineEvidence(
         metricType: BaselineMetricType,
         value: Double?,
-        signalQuality: Double,
         direction: EvidenceDirection,
         minimumScale: Double,
-        fallbackScore: Double?,
-        componentName: String,
-        baseWeight: Double
+        fallbackScore: Double?
     ): BaselineEvidenceDetail {
         if (value == null || !value.isFinite()) {
             return BaselineEvidenceDetail(
@@ -1813,7 +2029,6 @@ class PotchArousalCalculator(
             )
         }
 
-        val quality = signalQuality.coerceIn(0.0, 1.0)
         val baseline = personalBaselines[metricType]
             ?.takeIf {
                 it.isUsable &&
@@ -1834,20 +2049,8 @@ class PotchArousalCalculator(
                 EvidenceDirection.TWO_SIDED -> abs(signedDistance)
             }
             val score = hillEvidenceScore(directedDistance)
-            val baselineConfidence = baseline.confidence.coerceIn(0.0, 1.0)
-            val confidence = (
-                    quality * 0.65 +
-                            baselineConfidence * 0.35
-                    ).coerceIn(0.0, 1.0)
-
             return BaselineEvidenceDetail(
-                component = EvidenceComponent(
-                    name = componentName,
-                    score = score,
-                    confidence = confidence,
-                    baseWeight = baseWeight,
-                    usable = true
-                ),
+                component = EvidenceComponent(score = score),
                 source = "PERSONAL",
                 center = center,
                 spread = rawSpread,
@@ -1873,20 +2076,8 @@ class PotchArousalCalculator(
             )
         }
 
-        val confidence = (
-                quality * 0.70 +
-                        config.evidenceScoring.fallbackBaselineConfidence.coerceIn(0.0, 1.0) * 0.30
-                ).coerceIn(0.0, 1.0)
-
         return BaselineEvidenceDetail(
-            component = EvidenceComponent(
-                name = componentName,
-                score = fallback,
-                confidence = confidence,
-                baseWeight = baseWeight,
-                usable = true,
-                reason = "PERSONAL_BASELINE_UNAVAILABLE"
-            ),
+            component = EvidenceComponent(score = fallback),
             source = "FALLBACK",
             center = null,
             spread = null,
@@ -1896,362 +2087,167 @@ class PotchArousalCalculator(
         )
     }
 
-    private fun combineEvidenceComponents(
-        components: List<EvidenceComponent>
-    ): EvidenceCombination {
-        val totalBaseWeight = components.sumOf { it.baseWeight.coerceAtLeast(0.0) }
-        if (totalBaseWeight <= 0.0) {
-            return EvidenceCombination(
-                score = null,
-                confidence = 0.0,
-                coverage = 0.0,
-                usable = false,
-                composition = "NO_COMPONENT_WEIGHT"
-            )
-        }
-
-        val usable = components.filter {
-            it.usable &&
-                    it.score.isFinite() &&
-                    it.confidence.isFinite() &&
-                    it.confidence > 0.0 &&
-                    it.baseWeight > 0.0
-        }
-
-        if (usable.isEmpty()) {
-            return EvidenceCombination(
-                score = null,
-                confidence = 0.0,
-                coverage = 0.0,
-                usable = false,
-                composition = components.joinToString("|") {
-                    "${it.name}=UNAVAILABLE${it.reason?.let { reason -> ":$reason" } ?: ""}"
-                }
-            )
-        }
-
-        val effectiveWeight = usable.sumOf {
-            it.baseWeight * it.confidence.coerceIn(0.0, 1.0)
-        }
-        val score = if (effectiveWeight <= 0.0) {
-            null
-        } else {
-            usable.sumOf {
-                it.score.coerceIn(0.0, 1.0) *
-                        it.baseWeight *
-                        it.confidence.coerceIn(0.0, 1.0)
-            } / effectiveWeight
-        }
-
-        val confidence = usable.sumOf {
-            it.baseWeight * it.confidence.coerceIn(0.0, 1.0)
-        } / totalBaseWeight
-
-        val coverage = usable.sumOf { it.baseWeight } / totalBaseWeight
-
-        return EvidenceCombination(
-            score = score?.coerceIn(0.0, 1.0),
-            confidence = confidence.coerceIn(0.0, 1.0),
-            coverage = coverage.coerceIn(0.0, 1.0),
-            usable = score != null,
-            composition = components.joinToString("|") {
-                if (it.usable) {
-                    "${it.name}=USED(w=${"%.2f".format(it.baseWeight)},q=${"%.2f".format(it.confidence)})"
-                } else {
-                    "${it.name}=SKIP${it.reason?.let { reason -> ":$reason" } ?: ""}"
-                }
-            }
-        )
-    }
-
-    private fun buildMetricEvidence(
-        combination: EvidenceCombination,
-        baseline: BaselineEvidenceDetail?,
-        trendScore: Double?,
-        signalQuality: Double,
-        extraReasons: List<String> = emptyList(),
-        logPrefix: String
+    private fun buildMicroEvidence(
+        twitchDetected: Boolean,
+        maxAxisDeltaG: Double?,
+        nowMillis: Long
     ): MetricEvidence {
-        val reasons = buildList {
-            baseline?.reason?.let(::add)
-            addAll(extraReasons.filter { it.isNotBlank() })
-        }.distinct()
-
-        return MetricEvidence(
-            score = combination.score?.times(100.0),
-            confidence = combination.confidence,
-            coverage = combination.coverage,
-            usable = combination.usable,
-            baselineSource = baseline?.source ?: "NONE",
-            baselineCenter = baseline?.center,
-            baselineSpread = baseline?.spread,
-            signedDistance = baseline?.signedDistance,
-            normalizedDistance = baseline?.normalizedDistance,
-            baselineScore = baseline?.component?.score?.times(100.0),
-            trendScore = trendScore?.times(100.0),
-            signalQuality = signalQuality.coerceIn(0.0, 1.0),
-            reasons = reasons.takeIf { it.isNotEmpty() }?.joinToString("|"),
-            log = "$logPrefix score=${combination.score?.let { "%.3f".format(it) } ?: "N/A"}, " +
-                    "confidence=${"%.3f".format(combination.confidence)}, " +
-                    "coverage=${"%.3f".format(combination.coverage)}, " +
-                    "composition=${combination.composition}"
-        )
-    }
-
-    private fun buildMicroEvidence(result: MicroMovementResult?): MetricEvidence {
-        if (result == null) {
-            return MetricEvidence(
-                reasons = "MICRO_MOVEMENT_UNAVAILABLE",
-                log = "Micro evidence unavailable"
-            )
-        }
-
-        val score = result.score.coerceIn(0.0, 1.0)
+        val score = microScoreHold.update(twitchDetected, nowMillis)
         return MetricEvidence(
             score = score * 100.0,
-            confidence = 1.0,
-            coverage = 1.0,
             usable = true,
             baselineSource = "DIRECT",
             baselineScore = score * 100.0,
-            signalQuality = 1.0,
-            log = "Micro evidence score=${"%.3f".format(score)}, level=${result.level}"
+            log = "Micro twitch score=${"%.3f".format(score)}, " +
+                    "detected=$twitchDetected, maxAxisDeltaG=" +
+                    (maxAxisDeltaG?.let { "%.4f".format(it) } ?: "N/A")
         )
     }
 
     private fun buildRrEvidence(
         result: RespiratoryRateArousalResult?,
-        fusion: RrFusionResult
+        fusion: RrFusionResult,
+        nowMillis: Long
     ): MetricEvidence {
         val current = result?.currentRrBpm ?: fusion.rrBpm
         val signalQuality = fusion.confidence.coerceIn(0.0, 1.0)
         val baseline = buildBaselineEvidence(
             metricType = BaselineMetricType.RR,
             value = current,
-            signalQuality = signalQuality,
             direction = EvidenceDirection.HIGHER_ONLY,
             minimumScale = config.evidenceScoring.rrEvidenceMinimumScaleBpm,
-            fallbackScore = result?.absoluteScore,
-            componentName = "BASELINE",
-            baseWeight = config.evidenceScoring.rrBaselineEvidenceWeight
+            fallbackScore = null
         )
 
         val trend = result?.riseScore
             ?.takeIf { it.isFinite() }
             ?.coerceIn(0.0, 1.0)
-        val historyCoverage = result?.let {
-            val sampleCoverage =
-                (it.sampleCount.toDouble() / config.rrScoreMinSampleCount.coerceAtLeast(1))
-                    .coerceIn(0.0, 1.0)
-            val timeCoverage =
-                ((it.windowSeconds ?: 0.0) * 1000.0 / config.rrScoreMinWindowMillis.coerceAtLeast(1L))
-                    .coerceIn(0.0, 1.0)
-            (sampleCoverage * 0.4 + timeCoverage * 0.6).coerceIn(0.0, 1.0)
-        } ?: 0.0
-
-        val trendComponent = EvidenceComponent(
-            name = "TREND",
-            score = trend ?: 0.0,
-            confidence = (signalQuality * 0.6 + historyCoverage * 0.4).coerceIn(0.0, 1.0),
-            baseWeight = config.evidenceScoring.rrTrendEvidenceWeight,
-            usable = trend != null,
-            reason = if (trend == null) "RR_TREND_UNAVAILABLE" else null
-        )
-
-        val combination = combineEvidenceComponents(
-            listOf(
-                baseline.component ?: EvidenceComponent(
-                    name = "BASELINE",
-                    score = 0.0,
-                    confidence = 0.0,
-                    baseWeight = config.evidenceScoring.rrBaselineEvidenceWeight,
-                    usable = false,
-                    reason = baseline.reason
-                ),
-                trendComponent
-            )
-        )
-
-        return buildMetricEvidence(
-            combination = combination,
-            baseline = baseline,
-            trendScore = trend,
-            signalQuality = signalQuality,
-            extraReasons = listOfNotNull(
-                if (fusion.rrBpm == null) "RR_FUSION_UNAVAILABLE" else null,
-                if (trend == null) "RR_TREND_UNAVAILABLE" else null
-            ),
-            logPrefix = "RR evidence"
-        )
-    }
-
-    private fun appendRrvEvidenceHistory(
-        nowMillis: Long,
-        result: RrvResult?
-    ) {
-        val value = result?.rmssdSec ?: return
-        if (!value.isFinite() || value < 0.0) return
-        rrvValueBuffer.add(nowMillis to value)
-        while (
-            rrvValueBuffer.isNotEmpty() &&
-            nowMillis - rrvValueBuffer.first().first > config.evidenceScoring.rrvTrendWindowMillis
-        ) {
-            rrvValueBuffer.removeFirst()
+        val baselineScore = baseline.component?.score
+        val instantaneousScore = current?.let {
+            (baselineScore.orZero() * config.evidenceScoring.rrBaselineEvidenceWeight +
+                    trend.orZero() * config.evidenceScoring.rrTrendEvidenceWeight)
+                .coerceIn(0.0, 1.0)
         }
-    }
-
-    private fun calculateRrvTrendEvidence(): Pair<Double, Double>? {
-        if (rrvValueBuffer.size < config.evidenceScoring.rrvTrendMinSampleCount) return null
-        val duration = rrvValueBuffer.last().first - rrvValueBuffer.first().first
-        if (duration < config.evidenceScoring.rrvTrendMinWindowMillis) return null
-
-        val split = (rrvValueBuffer.size / 3).coerceAtLeast(1)
-        val previous = rrvValueBuffer.take(split).map { it.second }.average()
-        val recent = rrvValueBuffer.takeLast(split).map { it.second }.average()
-        if (!previous.isFinite() || !recent.isFinite()) return null
-
-        val scale = max(
-            personalBaselines[BaselineMetricType.RRV]
-                ?.spread
-                ?.takeIf { it.isFinite() && it > 0.0 }
-                ?.times(1.4826)
-                ?: 0.0,
-            config.evidenceScoring.rrvEvidenceMinimumScaleSec
+        val heldScore = rrScoreHold.update(instantaneousScore, nowMillis)
+        val reasons = listOfNotNull(
+            baseline.reason,
+            if (fusion.rrBpm == null) "RR_FUSION_UNAVAILABLE" else null,
+            if (trend == null) "RR_TREND_UNAVAILABLE" else null
+        ).distinct()
+        return MetricEvidence(
+            score = heldScore?.times(100.0),
+            usable = heldScore != null,
+            baselineSource = baseline.source,
+            baselineCenter = baseline.center,
+            baselineSpread = baseline.spread,
+            signedDistance = baseline.signedDistance,
+            normalizedDistance = baseline.normalizedDistance,
+            baselineScore = baselineScore?.times(100.0),
+            trendScore = trend?.times(100.0),
+            signalQuality = signalQuality,
+            reasons = reasons.takeIf { it.isNotEmpty() }?.joinToString("|"),
+            log = "RR fixed score=${heldScore?.let { "%.3f".format(it) } ?: "N/A"}, " +
+                    "baseline0=${baselineScore?.let { "%.3f".format(it) } ?: "N/A"}, " +
+                    "trend100=${trend?.let { "%.3f".format(it) } ?: "N/A"}, hold=30s"
         )
-        val normalized = abs(recent - previous) / scale.coerceAtLeast(1e-9)
-        val score = hillEvidenceScore(normalized)
-        val sampleCoverage =
-            (rrvValueBuffer.size.toDouble() / config.evidenceScoring.rrvTrendMinSampleCount.coerceAtLeast(1))
-                .coerceIn(0.0, 1.0)
-        val timeCoverage =
-            (duration.toDouble() / config.evidenceScoring.rrvTrendWindowMillis.coerceAtLeast(1L))
-                .coerceIn(0.0, 1.0)
-        return score to (sampleCoverage * 0.4 + timeCoverage * 0.6).coerceIn(0.0, 1.0)
     }
 
-    private fun buildRrvEvidence(result: RrvResult?): MetricEvidence {
+    private fun buildRrvEvidence(result: RrvResult?, nowMillis: Long): MetricEvidence {
         val signalQuality = result?.qualityScore?.coerceIn(0.0, 1.0) ?: 0.0
-        val baseline = buildBaselineEvidence(
-            metricType = BaselineMetricType.RRV,
-            value = result?.rmssdSec,
+        val personalBaseline = personalBaselines[BaselineMetricType.RRV]
+            ?.takeIf { it.isUsable && it.center?.isFinite() == true && it.center > 0.0 }
+        val baselineCenter = personalBaseline?.center
+        val thresholdSec = RrvWakeThresholdPolicy.threshold(
+            personalBaselineSec = baselineCenter,
+            fallbackThresholdSec = config.rrvFallbackWakeThresholdSec,
+            baselineMultiplier = config.evidenceScoring.rrvArousalStartMultiplier
+        )
+        val value = result?.rmssdSec
+        val triggered = value?.let { it.isFinite() && it >= thresholdSec } ?: false
+        val heldScore = rrvScoreHold.update(triggered, nowMillis)
+        return MetricEvidence(
+            score = heldScore * 100.0,
+            usable = result != null || heldScore > 0.0,
+            baselineSource = if (personalBaseline != null) {
+                "PERSONAL_RATIO_WITH_2S_FLOOR"
+            } else {
+                "FALLBACK_2S"
+            },
+            baselineCenter = baselineCenter,
+            baselineSpread = personalBaseline?.spread,
+            signedDistance = if (value != null && baselineCenter != null) value - baselineCenter else null,
+            normalizedDistance = if (value != null && baselineCenter != null) value / baselineCenter else null,
+            baselineScore = if (result != null) if (triggered) 100.0 else 0.0 else null,
             signalQuality = signalQuality,
-            direction = EvidenceDirection.TWO_SIDED,
-            minimumScale = config.evidenceScoring.rrvEvidenceMinimumScaleSec,
-            fallbackScore = result?.score,
-            componentName = "BASELINE",
-            baseWeight = config.evidenceScoring.rrvBaselineEvidenceWeight
-        )
-
-        val trendPair = calculateRrvTrendEvidence()
-        val trend = trendPair?.first
-        val trendComponent = EvidenceComponent(
-            name = "TREND",
-            score = trend ?: 0.0,
-            confidence = (
-                    signalQuality * 0.60 +
-                            (trendPair?.second ?: 0.0) * 0.40
-                    ).coerceIn(0.0, 1.0),
-            baseWeight = config.evidenceScoring.rrvTrendEvidenceWeight,
-            usable = trend != null,
-            reason = if (trend == null) "RRV_TREND_UNAVAILABLE" else null
-        )
-        val combination = combineEvidenceComponents(
-            listOf(
-                baseline.component ?: EvidenceComponent(
-                    name = "BASELINE",
-                    score = 0.0,
-                    confidence = 0.0,
-                    baseWeight = config.evidenceScoring.rrvBaselineEvidenceWeight,
-                    usable = false,
-                    reason = baseline.reason
-                ),
-                trendComponent
-            )
-        )
-        return buildMetricEvidence(
-            combination = combination,
-            baseline = baseline,
-            trendScore = trend,
-            signalQuality = signalQuality,
-            extraReasons = listOfNotNull(
-                if (result == null) "RRV_UNAVAILABLE" else null,
-                if (trend == null) "RRV_TREND_UNAVAILABLE" else null
-            ),
-            logPrefix = "RRV evidence"
+            reasons = listOfNotNull(
+                if (personalBaseline == null) "PERSONAL_BASELINE_UNAVAILABLE" else null,
+                if (result == null) "RRV_UNAVAILABLE" else null
+            ).distinct().takeIf { it.isNotEmpty() }?.joinToString("|"),
+            log = "RRV binary score=${"%.3f".format(heldScore)}, triggered=$triggered, " +
+                    "threshold=${"%.3f".format(thresholdSec)}s, hold=90s"
         )
     }
 
     private fun buildHrEvidence(
         result: HeartRateArousalResult?,
-        heartRateEstimate: HeartRateEstimate?
+        heartRateEstimate: HeartRateEstimate?,
+        nowMillis: Long
     ): MetricEvidence {
         val signalQuality = heartRateEstimate?.qualityScore?.coerceIn(0.0, 1.0) ?: 0.0
         val current = result?.currentBpm?.toDouble() ?: heartRateEstimate?.bpm?.toDouble()
         val baseline = buildBaselineEvidence(
             metricType = BaselineMetricType.HR,
             value = current,
-            signalQuality = signalQuality,
             direction = EvidenceDirection.HIGHER_ONLY,
             minimumScale = config.evidenceScoring.hrEvidenceMinimumScaleBpm,
-            fallbackScore = null,
-            componentName = "BASELINE",
-            baseWeight = config.evidenceScoring.hrBaselineEvidenceWeight
+            fallbackScore = null
         )
 
         val trend = result?.score
             ?.takeIf { it.isFinite() }
             ?.coerceIn(0.0, 1.0)
-        val historyCoverage = result?.let {
-            val sampleCoverage =
-                (it.sampleCount.toDouble() / config.hrMinSampleCount.coerceAtLeast(1))
-                    .coerceIn(0.0, 1.0)
-            val timeCoverage =
-                (it.windowSeconds * 1000.0 / config.hrGradientMinWindowMillis.coerceAtLeast(1L))
-                    .coerceIn(0.0, 1.0)
-            (sampleCoverage * 0.4 + timeCoverage * 0.6).coerceIn(0.0, 1.0)
-        } ?: 0.0
-        val trendComponent = EvidenceComponent(
-            name = "TREND",
-            score = trend ?: 0.0,
-            confidence = (
-                    signalQuality * 0.60 +
-                            historyCoverage * 0.40
-                    ).coerceIn(0.0, 1.0),
-            baseWeight = config.evidenceScoring.hrTrendEvidenceWeight,
-            usable = trend != null,
-            reason = if (trend == null) "HR_TREND_UNAVAILABLE" else null
-        )
-        val combination = combineEvidenceComponents(
-            listOf(
-                baseline.component ?: EvidenceComponent(
-                    name = "BASELINE",
-                    score = 0.0,
-                    confidence = 0.0,
-                    baseWeight = config.evidenceScoring.hrBaselineEvidenceWeight,
-                    usable = false,
-                    reason = baseline.reason
-                ),
-                trendComponent
-            )
-        )
-        return buildMetricEvidence(
-            combination = combination,
-            baseline = baseline,
-            trendScore = trend,
+        val baselineScore = baseline.component?.score
+        val instantaneousScore = current?.let {
+            (baselineScore.orZero() * config.evidenceScoring.hrBaselineEvidenceWeight +
+                    trend.orZero() * config.evidenceScoring.hrTrendEvidenceWeight)
+                .coerceIn(0.0, 1.0)
+        }
+        val heldScore = hrScoreHold.update(instantaneousScore, nowMillis)
+        val reasons = listOfNotNull(
+            baseline.reason,
+            if (current == null) "HR_UNAVAILABLE" else null,
+            if (trend == null) "HR_TREND_UNAVAILABLE" else null
+        ).distinct()
+        return MetricEvidence(
+            score = heldScore?.times(100.0),
+            usable = heldScore != null,
+            baselineSource = baseline.source,
+            baselineCenter = baseline.center,
+            baselineSpread = baseline.spread,
+            signedDistance = baseline.signedDistance,
+            normalizedDistance = baseline.normalizedDistance,
+            baselineScore = baselineScore?.times(100.0),
+            trendScore = trend?.times(100.0),
             signalQuality = signalQuality,
-            extraReasons = listOfNotNull(
-                if (current == null) "HR_UNAVAILABLE" else null,
-                if (trend == null) "HR_TREND_UNAVAILABLE" else null
-            ),
-            logPrefix = "HR evidence"
+            reasons = reasons.takeIf { it.isNotEmpty() }?.joinToString("|"),
+            log = "HR fixed score=${heldScore?.let { "%.3f".format(it) } ?: "N/A"}, " +
+                    "baseline0=${baselineScore?.let { "%.3f".format(it) } ?: "N/A"}, " +
+                    "trend100=${trend?.let { "%.3f".format(it) } ?: "N/A"}, " +
+                    "instant=${instantaneousScore?.let { "%.3f".format(it) } ?: "N/A"}, hold=30s"
         )
     }
 
-    private fun buildLogRatioBaselineEvidence(
+    private fun Double?.orZero(): Double = this?.takeIf { it.isFinite() }?.coerceIn(0.0, 1.0) ?: 0.0
+
+    private fun buildPythonHrvBaselineEvidence(
+        metricType: BaselineMetricType,
         value: Double?,
-        signalQuality: Double,
-        fallbackScore: Double?,
-        baseWeight: Double
+        fallbackStart: Double,
+        fallbackTarget: Double,
+        personalStartMultiplier: Double,
+        personalTargetMultiplier: Double,
+        targetScore: Double,
+        fullAtTarget: Boolean
     ): BaselineEvidenceDetail {
         if (value == null || !value.isFinite() || value <= 0.0) {
             return BaselineEvidenceDetail(
@@ -2261,79 +2257,49 @@ class PotchArousalCalculator(
                 spread = null,
                 signedDistance = null,
                 normalizedDistance = null,
-                reason = "LF_HF_VALUE_INVALID"
+                reason = "${metricType.name}_VALUE_INVALID"
             )
         }
 
-        val baseline = personalBaselines[BaselineMetricType.HRV_LF_HF]
-            ?.takeIf {
-                it.isUsable &&
-                        it.center?.isFinite() == true &&
-                        it.center > 0.0 &&
-                        it.spread?.isFinite() == true
-            }
-
-        if (baseline == null) {
-            return buildBaselineEvidence(
-                metricType = BaselineMetricType.HRV_LF_HF,
-                value = value,
-                signalQuality = signalQuality,
-                direction = EvidenceDirection.HIGHER_ONLY,
-                minimumScale = config.evidenceScoring.hrvLfHfEvidenceMinimumScaleLogRatio,
-                fallbackScore = fallbackScore,
-                componentName = "LF_HF",
-                baseWeight = baseWeight
-            )
-        }
-
-        val center = baseline.center ?: return BaselineEvidenceDetail(
-            null, "NONE", null, null, null, null, "LF_HF_BASELINE_INVALID"
+        val baseline = personalBaselines[metricType]
+            ?.takeIf { it.isUsable && it.center?.isFinite() == true && it.center > 0.0 }
+        val center = baseline?.center
+        val start = max(fallbackStart, center?.times(personalStartMultiplier) ?: fallbackStart)
+        val target = max(fallbackTarget, center?.times(personalTargetMultiplier) ?: fallbackTarget)
+        val score = ShiftedHillScorePolicy.score(
+            value = value,
+            start = start,
+            target = target,
+            targetScore = targetScore,
+            fullAtTarget = fullAtTarget
         )
-        val spread = baseline.spread ?: 0.0
-        val logValue = ln(value)
-        val logCenter = ln(center)
-        val upper = (center + spread).coerceAtLeast(center * 1.000001)
-        val approximateLogMad = abs(ln(upper) - logCenter)
-        val scale = max(
-            1.4826 * approximateLogMad,
-            config.evidenceScoring.hrvLfHfEvidenceMinimumScaleLogRatio
-        )
-        val normalized = (logValue - logCenter) / scale.coerceAtLeast(1e-9)
-        val directed = max(0.0, normalized)
-        val score = hillEvidenceScore(directed)
-        val confidence = (
-                signalQuality.coerceIn(0.0, 1.0) * 0.65 +
-                        baseline.confidence.coerceIn(0.0, 1.0) * 0.35
-                ).coerceIn(0.0, 1.0)
-
         return BaselineEvidenceDetail(
-            component = EvidenceComponent(
-                name = "LF_HF",
-                score = score,
-                confidence = confidence,
-                baseWeight = baseWeight,
-                usable = true
-            ),
-            source = "PERSONAL_LOG",
+            component = EvidenceComponent(score = score),
+            source = if (baseline != null) "PERSONAL_PYTHON_HILL" else "FALLBACK_PYTHON_HILL",
             center = center,
-            spread = spread,
-            signedDistance = value - center,
-            normalizedDistance = normalized,
-            reason = null
+            spread = baseline?.spread,
+            signedDistance = center?.let { value - it },
+            normalizedDistance = center?.let { value / it },
+            reason = if (baseline == null) "PERSONAL_BASELINE_UNAVAILABLE" else null
         )
     }
 
     private fun buildHrvEvidence(
         frequencyResult: HrvFrequencyResult?,
         rmssdResult: HeartRateVariabilityResult?,
-        assessment: HrvFrequencyAssessment
+        assessment: HrvFrequencyAssessment,
+        nowMillis: Long
     ): HrvEvidenceBundle {
         val frequencyDetail = if (assessment.usable && frequencyResult != null) {
-            buildLogRatioBaselineEvidence(
+            buildPythonHrvBaselineEvidence(
+                metricType = BaselineMetricType.HRV_LF_HF,
                 value = frequencyResult.lfHfRatio,
-                signalQuality = frequencyResult.qualityScore,
-                fallbackScore = frequencyResult.score,
-                baseWeight = config.evidenceScoring.hrvFrequencyEvidenceWeight
+                fallbackStart = config.evidenceScoring.hrvLfHfFallbackStart,
+                fallbackTarget = config.evidenceScoring.hrvLfHfFallbackTarget,
+                personalStartMultiplier = config.evidenceScoring.hrvLfHfArousalStartMultiplier,
+                personalTargetMultiplier = config.evidenceScoring.hrvLfHfArousalTargetMultiplier,
+                targetScore = config.evidenceScoring.hrvTargetScore,
+                fullAtTarget = true
             )
         } else {
             BaselineEvidenceDetail(
@@ -2347,164 +2313,88 @@ class PotchArousalCalculator(
             )
         }
 
-        // 개인 기준선이 없을 때는 낮은 RMSSD일수록 각성점수가 커지는 fallback을 사용한다.
-        val rmssdFallback = rmssdResult?.let {
-            if (config.hrvRmssdScoreThresholdMs <= 0.0) {
-                null
-            } else {
-                ((config.hrvRmssdScoreThresholdMs - it.rmssdMs) /
-                        config.hrvRmssdScoreThresholdMs)
-                    .coerceIn(0.0, 1.0)
-            }
-        }
-        val rmssdDetail = buildBaselineEvidence(
+        val rmssdDetail = buildPythonHrvBaselineEvidence(
             metricType = BaselineMetricType.HRV_RMSSD,
             value = rmssdResult?.rmssdSec,
-            signalQuality = rmssdResult?.qualityScore ?: 0.0,
-            direction = EvidenceDirection.LOWER_ONLY,
-            minimumScale = config.evidenceScoring.hrvRmssdEvidenceMinimumScaleSec,
-            fallbackScore = rmssdFallback,
-            componentName = "RMSSD",
-            baseWeight = config.evidenceScoring.hrvRmssdEvidenceWeight
+            fallbackStart = config.evidenceScoring.hrvRmssdFallbackStartSec,
+            fallbackTarget = config.evidenceScoring.hrvRmssdFallbackTargetSec,
+            personalStartMultiplier = config.evidenceScoring.hrvRmssdArousalStartMultiplier,
+            personalTargetMultiplier = config.evidenceScoring.hrvRmssdArousalTargetMultiplier,
+            targetScore = config.evidenceScoring.hrvTargetScore,
+            fullAtTarget = false
         )
 
-        val components = listOfNotNull(
-            frequencyDetail.component,
-            rmssdDetail.component
-        ) + listOfNotNull(
-            if (frequencyDetail.component == null) {
-                EvidenceComponent(
-                    name = "LF_HF",
-                    score = 0.0,
-                    confidence = 0.0,
-                    baseWeight = config.evidenceScoring.hrvFrequencyEvidenceWeight,
-                    usable = false,
-                    reason = frequencyDetail.reason
-                )
-            } else null,
-            if (rmssdDetail.component == null) {
-                EvidenceComponent(
-                    name = "RMSSD",
-                    score = 0.0,
-                    confidence = 0.0,
-                    baseWeight = config.evidenceScoring.hrvRmssdEvidenceWeight,
-                    usable = false,
-                    reason = rmssdDetail.reason
-                )
-            } else null
+        val heldFrequencyScore = hrvLfHfScoreHold.update(
+            frequencyDetail.component?.score,
+            nowMillis
         )
-
-        val combination = combineEvidenceComponents(components)
+        val heldRmssdScore = hrvRmssdScoreHold.update(
+            rmssdDetail.component?.score,
+            nowMillis
+        )
+        val combinedScore = if (heldFrequencyScore != null || heldRmssdScore != null) {
+            (heldFrequencyScore.orZero() * config.evidenceScoring.hrvFrequencyEvidenceWeight +
+                    heldRmssdScore.orZero() * config.evidenceScoring.hrvRmssdEvidenceWeight)
+                .coerceIn(0.0, 1.0)
+        } else {
+            null
+        }
         val reasons = listOfNotNull(
             frequencyDetail.reason,
             rmssdDetail.reason
         )
         val evidence = MetricEvidence(
-            score = combination.score?.times(100.0),
-            confidence = combination.confidence,
-            coverage = combination.coverage,
-            usable = combination.usable,
+            score = combinedScore?.times(100.0),
+            usable = combinedScore != null,
             baselineSource = "LF_HF=${frequencyDetail.source};RMSSD=${rmssdDetail.source}",
             baselineCenter = frequencyDetail.center,
             baselineSpread = frequencyDetail.spread,
             signedDistance = frequencyDetail.signedDistance,
             normalizedDistance = frequencyDetail.normalizedDistance,
-            baselineScore = frequencyDetail.component?.score?.times(100.0),
-            trendScore = rmssdDetail.component?.score?.times(100.0),
+            baselineScore = heldFrequencyScore?.times(100.0),
+            trendScore = heldRmssdScore?.times(100.0),
             signalQuality = (
                     (frequencyResult?.qualityScore ?: 0.0) * config.evidenceScoring.hrvFrequencyEvidenceWeight +
                             (rmssdResult?.qualityScore ?: 0.0) * config.evidenceScoring.hrvRmssdEvidenceWeight
                     ).coerceIn(0.0, 1.0),
             reasons = reasons.takeIf { it.isNotEmpty() }?.joinToString("|"),
-            log = "HRV evidence score=${combination.score?.let { "%.3f".format(it) } ?: "N/A"}, " +
-                    "confidence=${"%.3f".format(combination.confidence)}, " +
-                    "coverage=${"%.3f".format(combination.coverage)}, " +
-                    "composition=${combination.composition}"
+            log = "HRV fixed score=${combinedScore?.let { "%.3f".format(it) } ?: "N/A"}, " +
+                    "LF/HF70=${heldFrequencyScore?.let { "%.3f".format(it) } ?: "N/A"}(hold=60s), " +
+                    "RMSSD30=${heldRmssdScore?.let { "%.3f".format(it) } ?: "N/A"}(hold=90s)"
         )
 
         return HrvEvidenceBundle(
             evidence = evidence,
-            frequencyScore = frequencyDetail.component?.score,
-            rmssdScore = rmssdDetail.component?.score,
-            composition = combination.composition,
+            frequencyScore = heldFrequencyScore,
+            rmssdScore = heldRmssdScore,
+            composition = "LF_HF_70_RMSSD_30_FIXED",
             log = evidence.log ?: "HRV evidence unavailable"
         )
     }
 
-    private fun buildTemperatureEvidence(result: SkinTemperatureResult?): MetricEvidence {
+    private fun buildTemperatureEvidence(
+        result: SkinTemperatureResult?,
+        nowMillis: Long
+    ): MetricEvidence {
         val signalQuality = result?.qualityScore?.coerceIn(0.0, 1.0) ?: 0.0
-        val baseline = buildBaselineEvidence(
-            metricType = BaselineMetricType.TEMPERATURE,
-            value = result?.currentCelsius,
+        val triggered = result?.gradientCelsius?.let {
+            it.isFinite() && it >= config.skinTempRiseThresholdCelsius
+        } ?: false
+        val heldScore = temperatureScoreHold.update(triggered, nowMillis)
+        return MetricEvidence(
+            score = heldScore * 100.0,
+            usable = result != null || heldScore > 0.0,
+            baselineSource = "DIRECT_GRADIENT",
+            baselineScore = heldScore * 100.0,
+            trendScore = result?.score?.times(100.0),
             signalQuality = signalQuality,
-            direction = EvidenceDirection.HIGHER_ONLY,
-            minimumScale = config.evidenceScoring.temperatureEvidenceMinimumScaleCelsius,
-            fallbackScore = null,
-            componentName = "BASELINE",
-            baseWeight = config.evidenceScoring.temperatureBaselineEvidenceWeight
-        )
-        val trend = result?.score
-            ?.takeIf { it.isFinite() }
-            ?.coerceIn(0.0, 1.0)
-        val trendComponent = EvidenceComponent(
-            name = "TREND",
-            score = trend ?: 0.0,
-            confidence = signalQuality,
-            baseWeight = config.evidenceScoring.temperatureTrendEvidenceWeight,
-            usable = trend != null,
-            reason = if (trend == null) "TEMPERATURE_TREND_UNAVAILABLE" else null
-        )
-        val combination = combineEvidenceComponents(
-            listOf(
-                baseline.component ?: EvidenceComponent(
-                    name = "BASELINE",
-                    score = 0.0,
-                    confidence = 0.0,
-                    baseWeight = config.evidenceScoring.temperatureBaselineEvidenceWeight,
-                    usable = false,
-                    reason = baseline.reason
-                ),
-                trendComponent
-            )
-        )
-        return buildMetricEvidence(
-            combination = combination,
-            baseline = baseline,
-            trendScore = trend,
-            signalQuality = signalQuality,
-            extraReasons = listOfNotNull(
-                if (result == null) "TEMPERATURE_UNAVAILABLE" else null,
-                if (trend == null) "TEMPERATURE_TREND_UNAVAILABLE" else null
-            ),
-            logPrefix = "Temperature evidence"
+            reasons = if (result == null) "TEMPERATURE_UNAVAILABLE" else null,
+            log = "Temperature binary score=${"%.3f".format(heldScore)}, " +
+                    "triggered=$triggered, riseThreshold=${config.skinTempRiseThresholdCelsius}C, hold=60s"
         )
     }
-
-    private fun metricEvidenceComponent(
-        name: String,
-        evidence: MetricEvidence,
-        baseWeight: Double
-    ): EvidenceComponent {
-        return EvidenceComponent(
-            name = name,
-            score = (evidence.score ?: 0.0) / 100.0,
-            confidence = evidence.confidence.coerceIn(0.0, 1.0),
-            baseWeight = baseWeight,
-            usable = evidence.usable && evidence.score != null,
-            reason = evidence.reasons
-        )
-    }
-
-    private fun EvidenceCombination.toDomainEvidence(): DomainEvidence = DomainEvidence(
-        score = score?.times(100.0),
-        confidence = confidence.coerceIn(0.0, 1.0),
-        coverage = coverage.coerceIn(0.0, 1.0),
-        usable = usable,
-        composition = composition
-    )
 
     private fun calculateFinalArousalResult(
-        nowMillis: Long,
         micro: MetricEvidence,
         rr: MetricEvidence,
         rrv: MetricEvidence,
@@ -2512,186 +2402,39 @@ class PotchArousalCalculator(
         hrv: MetricEvidence,
         temperature: MetricEvidence
     ): FinalArousalResult {
-        val movementDomain = combineEvidenceComponents(
-            listOf(metricEvidenceComponent("MICRO", micro, 1.0))
+        val temperatureActive = (temperature.score ?: 0.0) >= 100.0
+        val score = FinalWakeScorePolicy.score(
+            microScore = micro.score?.div(100.0),
+            hrScore = hr.score?.div(100.0),
+            hrvScore = hrv.score?.div(100.0),
+            rrScore = rr.score?.div(100.0),
+            rrvScore = rrv.score?.div(100.0),
+            temperatureActive = temperatureActive,
+            temperatureMultiplier = config.temperatureWakeMultiplier
         )
-        val respiratoryDomain = combineEvidenceComponents(
-            listOf(
-                metricEvidenceComponent("RR", rr, config.evidenceScoring.rrArousalMetricWeight),
-                metricEvidenceComponent("RRV", rrv, config.evidenceScoring.rrvArousalMetricWeight)
-            )
-        )
-        val cardiacDomain = combineEvidenceComponents(
-            listOf(
-                metricEvidenceComponent("HR", hr, config.evidenceScoring.hrArousalMetricWeight),
-                metricEvidenceComponent("HRV", hrv, config.evidenceScoring.hrvArousalMetricWeight)
-            )
-        )
-        val temperatureDomain = combineEvidenceComponents(
-            listOf(metricEvidenceComponent("TEMP", temperature, 1.0))
-        )
-
-        val domainComponents = listOf(
-            EvidenceComponent(
-                "MOVEMENT",
-                movementDomain.score ?: 0.0,
-                movementDomain.confidence,
-                config.evidenceScoring.movementArousalDomainWeight,
-                movementDomain.usable,
-                if (movementDomain.usable) null else movementDomain.composition
-            ),
-            EvidenceComponent(
-                "RESPIRATORY",
-                respiratoryDomain.score ?: 0.0,
-                respiratoryDomain.confidence,
-                config.evidenceScoring.respiratoryArousalDomainWeight,
-                respiratoryDomain.usable,
-                if (respiratoryDomain.usable) null else respiratoryDomain.composition
-            ),
-            EvidenceComponent(
-                "CARDIAC",
-                cardiacDomain.score ?: 0.0,
-                cardiacDomain.confidence,
-                config.evidenceScoring.cardiacArousalDomainWeight,
-                cardiacDomain.usable,
-                if (cardiacDomain.usable) null else cardiacDomain.composition
-            ),
-            EvidenceComponent(
-                "TEMPERATURE",
-                temperatureDomain.score ?: 0.0,
-                temperatureDomain.confidence,
-                config.evidenceScoring.temperatureArousalDomainWeight,
-                temperatureDomain.usable,
-                if (temperatureDomain.usable) null else temperatureDomain.composition
-            )
-        )
-
-        val finalCombination = combineEvidenceComponents(domainComponents)
-        val score = finalCombination.score ?: 0.0
-        val confidence = finalCombination.confidence
-        val coverage = finalCombination.coverage
-        val usedDomainCount = domainComponents.count { it.usable }
-
-        val scorePassed = score * 100.0 >= config.wakeCandidateScore
-        val confidencePassed = confidence >= config.evidenceScoring.wakeCandidateMinConfidence
-        val domainPassed = usedDomainCount >= config.evidenceScoring.wakeCandidateMinimumDomainCount
-        val currentPassed = scorePassed && confidencePassed && domainPassed
-
-        val persistence = updateWakePersistence(
-            nowMillis = nowMillis,
-            currentPassed = currentPassed
-        )
-        val candidate = persistence.candidate
-
-        val currentFailureReason = when {
-            !scorePassed ->
-                "점수 부족 ${"%.1f".format(score * 100.0)}/${"%.1f".format(config.wakeCandidateScore)}"
-            !confidencePassed ->
-                "신뢰도 부족 ${"%.1f".format(confidence * 100.0)}/${"%.1f".format(config.evidenceScoring.wakeCandidateMinConfidence * 100.0)}"
-            !domainPassed ->
-                "사용 영역 부족 $usedDomainCount/${config.evidenceScoring.wakeCandidateMinimumDomainCount}"
-            else -> "현재 조건 통과"
-        }
-
-        val reason = when {
-            !persistence.windowComplete ->
-                "Tolerant persistence 수집 중 " +
-                        "${persistence.observedSeconds}/${persistence.windowSeconds}초 · " +
-                        "통과 ${persistence.passedSeconds}/${persistence.requiredPassSeconds}초 · " +
-                        "현재 ${if (currentPassed) "통과" else "실패"}"
-            candidate ->
-                "최근 ${persistence.windowSeconds}초 중 ${persistence.passedSeconds}초 통과 " +
-                        "(필요 ${persistence.requiredPassSeconds}초) · " +
-                        "현재 ${if (currentPassed) "통과" else "일시 실패 허용"}"
-            else ->
-                "최근 ${persistence.windowSeconds}초 통과 부족 " +
-                        "${persistence.passedSeconds}/${persistence.requiredPassSeconds}초 · " +
-                        "실패 ${persistence.failedSeconds}초 · 현재: $currentFailureReason"
+        val candidate = score * 100.0 >= config.wakeCandidateScore
+        val reason = if (candidate) {
+            "최종 점수 ${"%.1f".format(score * 100.0)}점으로 각성 기준 통과"
+        } else {
+            "최종 점수 ${"%.1f".format(score * 100.0)}/${"%.1f".format(config.wakeCandidateScore)}점"
         }
 
         return FinalArousalResult(
-            score = score.coerceIn(0.0, 1.0),
-            confidence = confidence.coerceIn(0.0, 1.0),
-            coverage = coverage.coerceIn(0.0, 1.0),
-            movementDomain = movementDomain.toDomainEvidence(),
-            respiratoryDomain = respiratoryDomain.toDomainEvidence(),
-            cardiacDomain = cardiacDomain.toDomainEvidence(),
-            temperatureDomain = temperatureDomain.toDomainEvidence(),
-            usedDomainCount = usedDomainCount,
-            currentConditionPassed = currentPassed,
-            persistenceWindowSeconds = persistence.windowSeconds,
-            persistenceRequiredPassSeconds = persistence.requiredPassSeconds,
-            persistenceObservedSeconds = persistence.observedSeconds,
-            persistencePassedSeconds = persistence.passedSeconds,
-            persistenceFailedSeconds = persistence.failedSeconds,
-            persistencePassRatio = persistence.passRatio,
+            score = score,
+            currentConditionPassed = candidate,
             candidate = candidate,
             reason = reason,
-            log = "Final evidence score=${"%.3f".format(score)}, " +
-                    "confidence=${"%.3f".format(confidence)}, " +
-                    "coverage=${"%.3f".format(coverage)}, domains=$usedDomainCount, " +
-                    "currentPassed=$currentPassed, " +
-                    "persistence=${persistence.passedSeconds}/${persistence.windowSeconds}, " +
-                    "required=${persistence.requiredPassSeconds}, " +
-                    "observed=${persistence.observedSeconds}, failed=${persistence.failedSeconds}, " +
-                    "candidate=$candidate, reason=$reason"
+            log = "Final fixed score=${"%.3f".format(score)}, " +
+                    "micro25=${formatScoreForLog(micro.score)}, hr25=${formatScoreForLog(hr.score)}, " +
+                    "hrv25=${formatScoreForLog(hrv.score)}, rr20=${formatScoreForLog(rr.score)}, " +
+                    "rrv20=${formatScoreForLog(rrv.score)}, " +
+                    "tempMultiplier=${if (temperatureActive) config.temperatureWakeMultiplier else 1.0}, " +
+                    "candidate=$candidate"
         )
     }
 
-    /**
-     * 같은 초에 여러 번 호출되면 마지막 판정으로 덮어쓰고,
-     * 최근 windowSeconds 범위에 실제 관측된 1초 bucket만 유지한다.
-     * 누락된 초는 관측 초 수를 채우지 못하므로 후보 판정에 기여하지 않는다.
-     */
-    private fun updateWakePersistence(
-        nowMillis: Long,
-        currentPassed: Boolean
-    ): WakePersistenceSummary {
-        val windowSeconds = config.evidenceScoring.wakePersistenceWindowSeconds.coerceAtLeast(1)
-        val requiredPassSeconds = config.evidenceScoring.wakePersistenceRequiredPassSeconds
-            .coerceIn(1, windowSeconds)
-        val currentSecond = nowMillis / 1000L
-
-        if (wakePersistenceSamples.lastOrNull()?.secondBucket == currentSecond) {
-            wakePersistenceSamples.removeLast()
-        }
-        wakePersistenceSamples.add(
-            WakePersistenceSample(
-                secondBucket = currentSecond,
-                passed = currentPassed
-            )
-        )
-
-        val minimumSecond = currentSecond - windowSeconds + 1L
-        while (
-            wakePersistenceSamples.isNotEmpty() &&
-            wakePersistenceSamples.first().secondBucket < minimumSecond
-        ) {
-            wakePersistenceSamples.removeFirst()
-        }
-
-        val observedSeconds = wakePersistenceSamples.size
-        val passedSeconds = wakePersistenceSamples.count { it.passed }
-        val failedSeconds = observedSeconds - passedSeconds
-        val passRatio = if (observedSeconds > 0) {
-            passedSeconds.toDouble() / observedSeconds.toDouble()
-        } else {
-            0.0
-        }
-        val windowComplete = observedSeconds >= windowSeconds
-        val candidate = windowComplete && passedSeconds >= requiredPassSeconds
-
-        return WakePersistenceSummary(
-            windowSeconds = windowSeconds,
-            requiredPassSeconds = requiredPassSeconds,
-            observedSeconds = observedSeconds,
-            passedSeconds = passedSeconds,
-            failedSeconds = failedSeconds,
-            passRatio = passRatio.coerceIn(0.0, 1.0),
-            windowComplete = windowComplete,
-            candidate = candidate
-        )
-    }
+    private fun formatScoreForLog(score: Double?): String =
+        score?.takeIf { it.isFinite() }?.let { "%.1f".format(it) } ?: "N/A"
 
     /**
      * 과거 threshold 기반 최종 점수 계산기.
@@ -2719,7 +2462,7 @@ class PotchArousalCalculator(
      *     hrvScore   * w5
      *
      * skinMultiplier =
-     *     1.0 + tempScore * tempScoreWeight
+     *     1.0 + tempScore * (temperatureWakeMultiplier - 1.0)
      *
      * finalWakeScore =
      *     baseScore * skinMultiplier
@@ -2746,10 +2489,10 @@ class PotchArousalCalculator(
                     config.hrScoreWeight +
                     config.hrvScoreWeight
 
-        if (abs(baseWeightSum - 0.8) > 0.000001) {
+        if (abs(baseWeightSum - 1.15) > 0.000001) {
             Log.w(
                 "PotchArousalCalculator",
-                "Base score weight sum should be 0.8, but was $baseWeightSum"
+                "Base score weight sum should be 1.15, but was $baseWeightSum"
             )
         }
 
@@ -2760,14 +2503,13 @@ class PotchArousalCalculator(
                     hr * config.hrScoreWeight +
                     hrv * config.hrvScoreWeight
 
-        // 네 설계대로 기본 생체/움직임 점수는 최대 0.8까지만 허용.
-        val baseScore = baseScoreRaw.coerceIn(0.0, 0.8)
+        val baseScore = baseScoreRaw.coerceIn(0.0, 1.0)
 
         // temp = 0이면 multiplier 1.0
-        // temp = 1이면 multiplier 1.25
+        // temp = 1이면 multiplier 1.20
         val skinTemperatureMultiplier =
-            (1.0 + temp * config.tempScoreWeight)
-                .coerceIn(1.0, 1.25)
+            (1.0 + temp * (config.temperatureWakeMultiplier - 1.0))
+                .coerceIn(1.0, config.temperatureWakeMultiplier)
 
         val finalScore =
             (baseScore * skinTemperatureMultiplier)
@@ -2808,7 +2550,10 @@ class PotchArousalCalculator(
      * Potch510 IMU 6축 sample(12B)에서 앞의 가속도 XYZ를 g-magnitude로 변환한다.
      * 뒤의 gyro XYZ는 현재 각성도 계산에는 사용하지 않지만 packet 정렬을 위해 건너뛴다.
      */
-    private fun appendImu(imuData: ByteArray) {
+    private fun appendImu(imuData: ByteArray): ImuAppendResult {
+        var twitchDetected = false
+        var maxAxisDeltaG: Double? = null
+
         for (i in imuData.indices step 12) {
             if (i + 11 >= imuData.size) break
 
@@ -2819,6 +2564,19 @@ class PotchArousalCalculator(
             val xG = xRaw / config.imuLsbPerG
             val yG = yRaw / config.imuLsbPerG
             val zG = zRaw / config.imuLsbPerG
+
+            previousImuAccelerationG?.let { previous ->
+                val axisDelta = maxOf(
+                    abs(xG - previous.first),
+                    abs(yG - previous.second),
+                    abs(zG - previous.third)
+                )
+                maxAxisDeltaG = max(maxAxisDeltaG ?: 0.0, axisDelta)
+                if (axisDelta >= config.microAxisDeltaThresholdG) {
+                    twitchDetected = true
+                }
+            }
+            previousImuAccelerationG = Triple(xG, yG, zG)
 
             val gMagnitude = sqrt(xG * xG + yG * yG + zG * zG)
 
@@ -2831,6 +2589,11 @@ class PotchArousalCalculator(
 
             totalImuRespSampleCount += 1L
         }
+
+        return ImuAppendResult(
+            twitchDetected = twitchDetected,
+            maxAxisDeltaG = maxAxisDeltaG
+        )
     }
 
     /**
@@ -2923,7 +2686,6 @@ class PotchArousalCalculator(
 
         if (hasExpired(lastValidRespirationTimestampMillis, nowMillis, config.rrFreshnessTimeoutMillis)) {
             respirationRateBuffer.clear()
-            rrvValueBuffer.clear()
             clearRespirationVariabilityBuffers(resetSampleCounters = false)
             lastValidRespirationTimestampMillis = null
             respirationBufferExpiredByGap = true
@@ -3055,7 +2817,6 @@ class PotchArousalCalculator(
      */
     fun onHeartRateDiscontinuity(reason: String): ArousalState {
         hrvIbiBuffer.clear()
-        wakePersistenceSamples.clear()
         lastAcceptedHrvIbiSegmentId = Long.MIN_VALUE
         lastAcceptedHrvIbiEndSamplePosition = Double.NEGATIVE_INFINITY
         lastValidHrvTimestampMillis = null
@@ -3104,7 +2865,7 @@ class PotchArousalCalculator(
             wakePersistencePassedSeconds = 0,
             wakePersistenceFailedSeconds = 0,
             wakePersistencePassRatio = 0.0,
-            wakeDecisionReason = "HR artifact로 tolerant persistence 초기화",
+            wakeDecisionReason = "HR artifact로 현재 판정 보류",
             isWakeTimingCandidate = false
         )
 
@@ -3125,12 +2886,13 @@ class PotchArousalCalculator(
         currentAnalysisSegmentId = newSegmentId
 
         greenPpgBuffer.clear()
+        ppgLowerEnvelopeSampleBuffer.clear()
+        ppgEnvelopeContinuityGroupStartPosition = null
         imuGBuffer.clear()
+        previousImuAccelerationG = null
         microFilteredBuffer.clear()
         microBpf.reset()
         clearRespirationVariabilityBuffers(resetSampleCounters = true)
-        rrvValueBuffer.clear()
-        wakePersistenceSamples.clear()
         resetRespirationPathSelection()
 
         // HRV는 한 개의 연속 segment 안에서만 계산한다.
@@ -3183,12 +2945,14 @@ class PotchArousalCalculator(
      */
     fun reset(initialSegmentId: Long = 0L) {
         greenPpgBuffer.clear()
+        ppgLowerEnvelopeSampleBuffer.clear()
+        ppgEnvelopeContinuityGroupStartPosition = null
         imuGBuffer.clear()
+        previousImuAccelerationG = null
         microFilteredBuffer.clear()
         temperatureBuffer.clear()
         heartRateBuffer.clear()
         respirationRateBuffer.clear()
-        rrvValueBuffer.clear()
         hrvIbiBuffer.clear()
         clearRespirationVariabilityBuffers(resetSampleCounters = true)
         resetRespirationPathSelection()
@@ -3207,7 +2971,13 @@ class PotchArousalCalculator(
         respirationBufferExpiredByGap = false
         temperatureBufferExpiredByGap = false
 
-        wakePersistenceSamples.clear()
+        microScoreHold.reset()
+        rrScoreHold.reset()
+        rrvScoreHold.reset()
+        hrScoreHold.reset()
+        hrvRmssdScoreHold.reset()
+        hrvLfHfScoreHold.reset()
+        temperatureScoreHold.reset()
         lastState = ArousalState()
         microBpf.reset()
     }
@@ -3468,6 +3238,604 @@ class PotchArousalCalculator(
     /********************* RR from PPG ********************/
 
     /**
+     * rolling HR window가 반복해서 넘기는 lower point를 위치 기준으로 합친다.
+     * 교체 시작점 이후는 최신 HR snapshot으로 다시 만들며, 같은 박동으로 볼 수 있는
+     * 점에서는 raw 값이 더 낮은 표본을 유지한다.
+     */
+    private fun appendPpgLowerEnvelopeSamples(
+        samples: List<PpgLowerEnvelopeSample>,
+        replaceFromSamplePosition: Long?
+    ) {
+        if (replaceFromSamplePosition != null) {
+            // rolling HR 재분석으로 lower-envelope tail이 바뀌면 같은 구간에서
+            // 이미 만든 호흡 interval도 함께 철회한다. 그렇지 않으면 이동/소실된
+            // peak의 옛 interval이 RRV 3분 buffer에 남아 새 interval과 섞인다.
+            invalidatePpgRrvIntervalsFrom(replaceFromSamplePosition)
+
+            val retained = ppgLowerEnvelopeSampleBuffer.filter {
+                it.segmentId == currentAnalysisSegmentId &&
+                        it.samplePosition < replaceFromSamplePosition
+            }
+            ppgLowerEnvelopeSampleBuffer.clear()
+            ppgLowerEnvelopeSampleBuffer.addAll(retained)
+        }
+
+        val mergeSamples =
+            (config.ppgSampleRateHz * config.ppgEnvelopePointMergeSeconds)
+                .roundToLong()
+                .coerceAtLeast(1L)
+        val minimumPosition = totalPpgRespSampleCount - maxPpgSamples.toLong()
+        val ordered = (ppgLowerEnvelopeSampleBuffer.toList() + samples)
+            .asSequence()
+            .filter {
+                it.segmentId == currentAnalysisSegmentId &&
+                        it.rawValue.isFinite() &&
+                        it.samplePosition >= minimumPosition &&
+                        it.samplePosition < totalPpgRespSampleCount
+            }
+            .sortedBy { it.samplePosition }
+            .toList()
+
+        val merged = mutableListOf<PpgLowerEnvelopeSample>()
+        for (candidate in ordered) {
+            val previous = merged.lastOrNull()
+            if (
+                previous != null &&
+                candidate.samplePosition - previous.samplePosition <= mergeSamples
+            ) {
+                if (candidate.rawValue < previous.rawValue) {
+                    merged[merged.lastIndex] = candidate
+                }
+            } else {
+                merged += candidate
+            }
+        }
+
+        ppgLowerEnvelopeSampleBuffer.clear()
+        ppgLowerEnvelopeSampleBuffer.addAll(merged)
+    }
+
+    private fun invalidatePpgRrvIntervalsFrom(samplePosition: Long) {
+        val retained = ppgRrvIntervalBuffer.filter {
+            it.interval.segmentId == currentAnalysisSegmentId &&
+                    it.interval.endSamplePosition < samplePosition
+        }
+        ppgRrvIntervalBuffer.clear()
+        ppgRrvIntervalBuffer.addAll(retained)
+        lastAcceptedPpgRrvEndSamplePosition =
+            retained.lastOrNull()?.interval?.endSamplePosition ?: Long.MIN_VALUE
+    }
+
+    private fun trimPpgLowerEnvelopeSampleBuffer() {
+        val minimumPosition = totalPpgRespSampleCount - maxPpgSamples.toLong()
+        while (
+            ppgLowerEnvelopeSampleBuffer.isNotEmpty() &&
+            (
+                    ppgLowerEnvelopeSampleBuffer.first().segmentId != currentAnalysisSegmentId ||
+                            ppgLowerEnvelopeSampleBuffer.first().samplePosition < minimumPosition
+                    )
+        ) {
+            ppgLowerEnvelopeSampleBuffer.removeFirst()
+        }
+    }
+
+    /**
+     * HR-used 박동 사이 raw PPG lower point를 4Hz envelope로 보간한 뒤 RR을 계산한다.
+     * 최종 경로는 positive 호흡 crest만 사용하며 direct raw-PPG/IMU fusion을 거치지 않는다.
+     */
+    private fun calculatePpgLowerEnvelopeRespiration(): PpgRespirationResult? {
+        trimPpgLowerEnvelopeSampleBuffer()
+
+        val allPoints = ppgLowerEnvelopeSampleBuffer
+            .filter { it.segmentId == currentAnalysisSegmentId }
+            .sortedBy { it.samplePosition }
+        val maxGapSamples =
+            (config.ppgSampleRateHz * config.ppgEnvelopeMaxPointGapSeconds)
+                .roundToLong()
+                .coerceAtLeast(1L)
+
+        val previousGroupStart = ppgEnvelopeContinuityGroupStartPosition
+        var latestDetectedGroupStart: Long? =
+            previousGroupStart ?: allPoints.firstOrNull()?.samplePosition
+        for (index in 1 until allPoints.size) {
+            if (
+                allPoints[index].samplePosition -
+                allPoints[index - 1].samplePosition > maxGapSamples
+            ) {
+                latestDetectedGroupStart = allPoints[index].samplePosition
+            }
+        }
+        if (
+            latestDetectedGroupStart != null &&
+            (previousGroupStart == null || latestDetectedGroupStart > previousGroupStart)
+        ) {
+            ppgEnvelopeContinuityGroupStartPosition = latestDetectedGroupStart
+            // Python 경로처럼 envelope continuity group마다 RRV interval history를 분리한다.
+            ppgRrvIntervalBuffer.clear()
+            lastAcceptedPpgRrvEndSamplePosition = Long.MIN_VALUE
+        }
+        val activeGroupStart = ppgEnvelopeContinuityGroupStartPosition
+        val points = if (activeGroupStart == null) {
+            emptyList()
+        } else {
+            allPoints.filter { it.samplePosition >= activeGroupStart }
+        }
+        val sourceDurationSeconds = if (points.size >= 2) {
+            (points.last().samplePosition - points.first().samplePosition) /
+                    config.ppgSampleRateHz
+        } else {
+            0.0
+        }
+        val latestPointAgeSamples = points.lastOrNull()?.let {
+            totalPpgRespSampleCount - it.samplePosition
+        }
+        val latestPointFresh =
+            latestPointAgeSamples != null && latestPointAgeSamples <= maxGapSamples
+        val enoughWindow =
+            latestPointFresh &&
+                    points.size >= 4 &&
+                    sourceDurationSeconds >= config.ppgRespMinWindowSeconds
+
+        if (!enoughWindow) {
+            latestPpgRespirationGraphData = PpgRespirationGraphData(
+                channel = PpgRespirationChannel.GREEN,
+                selectedPolarity = RespirationPeakPolarity.POSITIVE,
+                processingState = MetricCalculationState.COLLECTING,
+                sampleRateHz = config.ppgEnvelopeSampleRateHz,
+                windowSeconds = sourceDurationSeconds,
+                minimumWindowSeconds = config.ppgRespMinWindowSeconds,
+                rawWindowSeconds = sourceDurationSeconds,
+                validOriginalSampleCount = points.size,
+                segmentCount = if (points.isEmpty()) 0 else 1,
+                description = when {
+                    !latestPointFresh && points.isNotEmpty() ->
+                        "HR lower-envelope가 ${config.ppgEnvelopeMaxPointGapSeconds}초 이상 갱신되지 않음"
+                    else ->
+                        "HR lower-envelope 수집 중: ${"%.1f".format(sourceDurationSeconds)}초 / " +
+                                "최소 ${config.ppgRespMinWindowSeconds}초 · points=${points.size}"
+                }
+            )
+            return null
+        }
+
+        val grid = buildPpgLowerEnvelopeGrid(points)
+        if (grid == null || grid.respirationValues.size < 3) {
+            latestPpgRespirationGraphData = PpgRespirationGraphData(
+                channel = PpgRespirationChannel.GREEN,
+                selectedPolarity = RespirationPeakPolarity.POSITIVE,
+                processingState = MetricCalculationState.REJECTED,
+                sampleRateHz = config.ppgEnvelopeSampleRateHz,
+                windowSeconds = sourceDurationSeconds,
+                minimumWindowSeconds = config.ppgRespMinWindowSeconds,
+                rawWindowSeconds = sourceDurationSeconds,
+                validOriginalSampleCount = points.size,
+                segmentCount = 1,
+                description = "HR lower-envelope 4Hz 보간/필터 실패"
+            )
+            return null
+        }
+
+        val analysisWindowSamples =
+            (config.ppgRespWindowSeconds * config.ppgEnvelopeSampleRateHz)
+                .toInt()
+                .coerceAtLeast(1)
+        val windowStartIndex =
+            (grid.respirationValues.size - analysisWindowSamples).coerceAtLeast(0)
+        val warmupSamples =
+            (2.0 * config.ppgEnvelopeSampleRateHz).toInt().coerceAtLeast(0)
+        val usableStartIndex =
+            (windowStartIndex + warmupSamples)
+                .coerceAtMost(grid.respirationValues.lastIndex)
+        val usableRespirationValues =
+            grid.respirationValues.copyOfRange(
+                usableStartIndex,
+                grid.respirationValues.size
+            )
+        val graphValues = grid.displayValues
+            .copyOfRange(usableStartIndex, grid.displayValues.size)
+            .toList()
+        val robustSource = usableRespirationValues.toList()
+
+        val robustLow = calculateRespirationPercentile(
+            robustSource,
+            config.ppgRespRobustLowPercentile
+        )
+        val robustHigh = calculateRespirationPercentile(
+            robustSource,
+            config.ppgRespRobustHighPercentile
+        )
+        val robustRange = if (robustLow != null && robustHigh != null) {
+            robustHigh - robustLow
+        } else {
+            0.0
+        }
+        val threshold = if (robustLow != null) {
+            robustLow + robustRange * 0.55
+        } else {
+            null
+        }
+        val minimumProminence = max(
+            config.ppgRespMinPeakToPeakAmplitude,
+            robustRange * config.ppgEnvelopePeakProminenceRangeRatio
+        )
+        val peakToPeakAmplitude = if (usableRespirationValues.isNotEmpty()) {
+            (usableRespirationValues.maxOrNull() ?: 0.0) -
+                    (usableRespirationValues.minOrNull() ?: 0.0)
+        } else {
+            0.0
+        }
+
+        val minimumPeakDistance =
+            (config.ppgEnvelopeSampleRateHz * (60.0 / config.rrMaxBpm))
+                .toInt()
+                .coerceAtLeast(1)
+        val peakGridIndices = mutableListOf<Int>()
+        var lastPeakGridIndex = -minimumPeakDistance
+
+        if (threshold != null && robustRange.isFinite() && robustRange > 0.0) {
+            for (index in usableStartIndex + 1 until grid.respirationValues.lastIndex) {
+                val value = grid.respirationValues[index]
+                val isPeak =
+                    value > grid.respirationValues[index - 1] &&
+                            value >= grid.respirationValues[index + 1] &&
+                            value > threshold &&
+                            calculateEnvelopePeakProminence(
+                                signal = grid.respirationValues,
+                                peakIndex = index,
+                                lowerBound = usableStartIndex,
+                                upperBound = grid.respirationValues.lastIndex
+                            ) >= minimumProminence
+                if (!isPeak) continue
+
+                val distance = index - lastPeakGridIndex
+                if (distance >= minimumPeakDistance) {
+                    peakGridIndices += index
+                    lastPeakGridIndex = index
+                } else if (peakGridIndices.isNotEmpty()) {
+                    val previous = peakGridIndices.last()
+                    if (value > grid.respirationValues[previous]) {
+                        peakGridIndices[peakGridIndices.lastIndex] = index
+                        lastPeakGridIndex = index
+                    }
+                }
+            }
+        }
+
+        val peakSamplePositions = peakGridIndices.map { index ->
+            grid.samplePositions[index].roundToLong()
+        }
+        val allIntervals = peakSamplePositions.zipWithNext().map { (start, end) ->
+            RespirationInterval(
+                intervalSec = (end - start) / config.ppgSampleRateHz,
+                startSamplePosition = start,
+                endSamplePosition = end,
+                segmentId = currentAnalysisSegmentId,
+                continuityGroupId =
+                    ppgEnvelopeContinuityGroupStartPosition
+                        ?: grid.sourceStartSamplePosition
+            )
+        }
+        val minimumIntervalSec = 60.0 / config.rrMaxBpm
+        val maximumIntervalSec = 60.0 / config.rrMinBpm
+        val physiologicalIntervals = allIntervals.filter {
+            it.intervalSec in minimumIntervalSec..maximumIntervalSec
+        }
+        val usedIntervals = removeRespIntervalOutliers(physiologicalIntervals)
+        val usedIntervalValues = usedIntervals.map { it.intervalSec }
+        val averageIntervalSec =
+            usedIntervalValues.takeIf { it.isNotEmpty() }?.average()
+        val rrBpm = averageIntervalSec
+            ?.takeIf { it.isFinite() && it > 0.0 }
+            ?.let { 60.0 / it }
+
+        val amplitudeValid = peakToPeakAmplitude >= minimumProminence
+        val peakCountValid = peakSamplePositions.size >= 3
+        val intervalCountValid = physiologicalIntervals.size >= 2
+        val usedIntervalCountValid = usedIntervals.size >= 2
+        val rrValid = rrBpm != null && rrBpm in config.rrMinBpm..config.rrMaxBpm
+        val intervalRegularity = if (usedIntervalValues.size >= 2) {
+            calculateIntervalRegularityScore(usedIntervalValues)
+        } else {
+            0.0
+        }
+        val amplitudeScore = if (minimumProminence > 0.0) {
+            (peakToPeakAmplitude / minimumProminence).coerceIn(0.0, 3.0) / 3.0
+        } else {
+            0.0
+        }
+        val qualityScore =
+            (intervalRegularity * 0.70 + amplitudeScore * 0.30)
+                .coerceIn(0.0, 1.0)
+        val acceptedEndPositions = usedIntervals.map { it.endSamplePosition }.toSet()
+        val rejectedEndPositions = allIntervals
+            .map { it.endSamplePosition }
+            .filterNot { it in acceptedEndPositions }
+            .toSet()
+        val graphIndexByPosition = peakGridIndices.associate { gridIndex ->
+            grid.samplePositions[gridIndex].roundToLong() to
+                    (gridIndex - usableStartIndex)
+        }
+        val graphWindowSeconds =
+            usableRespirationValues.size / config.ppgEnvelopeSampleRateHz
+
+        val processingState: MetricCalculationState
+        val description: String
+        when {
+            !amplitudeValid -> {
+                processingState = MetricCalculationState.REJECTED
+                description = "lower-envelope 호흡 진폭/prominence 부족: " +
+                        "${"%.2f".format(peakToPeakAmplitude)} < " +
+                        "${"%.2f".format(minimumProminence)}"
+            }
+            !peakCountValid -> {
+                processingState = MetricCalculationState.REJECTED
+                description = "lower-envelope 호흡 peak 부족: ${peakSamplePositions.size}개 / 최소 3개"
+            }
+            !intervalCountValid -> {
+                processingState = MetricCalculationState.REJECTED
+                description = "lower-envelope 생리 범위 interval 부족: ${physiologicalIntervals.size}개"
+            }
+            !usedIntervalCountValid -> {
+                processingState = MetricCalculationState.REJECTED
+                description = "lower-envelope median filter 통과 interval 부족: ${usedIntervals.size}개"
+            }
+            !rrValid -> {
+                processingState = MetricCalculationState.REJECTED
+                description = "lower-envelope RR 범위 초과: " +
+                        (rrBpm?.let { "${"%.1f".format(it)} bpm" } ?: "--")
+            }
+            else -> {
+                processingState = MetricCalculationState.VALID
+                description = "HR lower-envelope positive · RR ${"%.1f".format(rrBpm)} bpm · " +
+                        "points=${grid.sourcePointCount}"
+            }
+        }
+
+        val firstPeakGraphIndex = peakSamplePositions
+            .firstOrNull()
+            ?.let(graphIndexByPosition::get)
+        latestPpgRespirationGraphData = PpgRespirationGraphData(
+            channel = PpgRespirationChannel.GREEN,
+            selectedPolarity = RespirationPeakPolarity.POSITIVE,
+            processingState = processingState,
+            samples = graphValues,
+            sampleRateHz = config.ppgEnvelopeSampleRateHz,
+            windowSeconds = graphWindowSeconds,
+            minimumWindowSeconds = config.ppgRespMinWindowSeconds,
+            detectedPeakSampleIndices = peakSamplePositions
+                .mapNotNull(graphIndexByPosition::get)
+                .distinct()
+                .sorted(),
+            acceptedPeakSampleIndices = acceptedEndPositions
+                .mapNotNull(graphIndexByPosition::get)
+                .distinct()
+                .sorted(),
+            rejectedPeakSampleIndices = rejectedEndPositions
+                .mapNotNull(graphIndexByPosition::get)
+                .distinct()
+                .sorted(),
+            referencePeakSampleIndex = firstPeakGraphIndex,
+            referencePeakSampleIndices =
+                firstPeakGraphIndex?.let { listOf(it) } ?: emptyList(),
+            rawWindowSeconds = sourceDurationSeconds,
+            validOriginalSampleCount = grid.sourcePointCount,
+            segmentCount = 1,
+            detectedPeakCount = peakSamplePositions.size,
+            rawIntervalCount = allIntervals.size,
+            acceptedIntervalCount = usedIntervals.size,
+            rejectedIntervalCount = rejectedEndPositions.size,
+            peakThreshold = threshold,
+            peakToPeakAmplitude = peakToPeakAmplitude,
+            calculatedRrBpm = rrBpm,
+            qualityScore = qualityScore.takeIf { usedIntervals.isNotEmpty() },
+            description = description
+        )
+
+        return if (
+            processingState == MetricCalculationState.VALID &&
+            rrBpm != null
+        ) {
+            PpgRespirationResult(
+                channel = PpgRespirationChannel.GREEN,
+                rrBpm = rrBpm,
+                peakCount = peakSamplePositions.size,
+                intervalCount = usedIntervals.size,
+                averageIntervalSec = usedIntervalValues.average(),
+                peakToPeakAmplitude = peakToPeakAmplitude,
+                qualityScore = qualityScore,
+                inverted = false,
+                peakSamplePositions = peakSamplePositions,
+                intervals = usedIntervals.sortedBy { it.endSamplePosition }
+            )
+        } else {
+            null
+        }
+    }
+
+    private fun buildPpgLowerEnvelopeGrid(
+        points: List<PpgLowerEnvelopeSample>
+    ): PpgLowerEnvelopeGrid? {
+        if (
+            points.size < 4 ||
+            config.ppgSampleRateHz <= 0.0 ||
+            config.ppgEnvelopeSampleRateHz <= 0.0
+        ) {
+            return null
+        }
+
+        val ordered = points.sortedBy { it.samplePosition }
+        val repairedValues = repairPpgLowerEnvelopeOutliers(
+            ordered.map { it.rawValue }
+        )
+        val gridStepSamples =
+            config.ppgSampleRateHz / config.ppgEnvelopeSampleRateHz
+        if (!gridStepSamples.isFinite() || gridStepSamples <= 0.0) return null
+
+        val firstGridPosition =
+            ceil(ordered.first().samplePosition / gridStepSamples) * gridStepSamples
+        val lastGridPosition =
+            floor(ordered.last().samplePosition / gridStepSamples) * gridStepSamples
+        if (lastGridPosition <= firstGridPosition) return null
+
+        val gridCount =
+            (floor((lastGridPosition - firstGridPosition) / gridStepSamples).toInt() + 1)
+                .coerceAtLeast(0)
+        if (gridCount < 3) return null
+
+        val gridPositions = DoubleArray(gridCount) { index ->
+            firstGridPosition + index * gridStepSamples
+        }
+        val interpolated = DoubleArray(gridCount)
+        var rightPointIndex = 1
+        for (gridIndex in gridPositions.indices) {
+            val position = gridPositions[gridIndex]
+            while (
+                rightPointIndex < ordered.lastIndex &&
+                ordered[rightPointIndex].samplePosition < position
+            ) {
+                rightPointIndex += 1
+            }
+
+            val leftIndex = (rightPointIndex - 1).coerceAtLeast(0)
+            val rightIndex = rightPointIndex.coerceAtMost(ordered.lastIndex)
+            val leftPosition = ordered[leftIndex].samplePosition.toDouble()
+            val rightPosition = ordered[rightIndex].samplePosition.toDouble()
+            val fraction = if (rightPosition <= leftPosition) {
+                0.0
+            } else {
+                ((position - leftPosition) / (rightPosition - leftPosition))
+                    .coerceIn(0.0, 1.0)
+            }
+            interpolated[gridIndex] =
+                repairedValues[leftIndex] +
+                        (repairedValues[rightIndex] - repairedValues[leftIndex]) * fraction
+        }
+
+        val displayValues = forwardBackwardLowPass(
+            values = interpolated,
+            sampleRateHz = config.ppgEnvelopeSampleRateHz,
+            cutoffHz = config.respHighCutHz
+        )
+        val mean = interpolated.average()
+        val centered = DoubleArray(interpolated.size) { index ->
+            interpolated[index] - mean
+        }
+        val respirationValues = forwardBackwardBandPass(
+            values = centered,
+            sampleRateHz = config.ppgEnvelopeSampleRateHz,
+            lowCutHz = config.respLowCutHz,
+            highCutHz = config.respHighCutHz
+        )
+
+        return PpgLowerEnvelopeGrid(
+            samplePositions = gridPositions,
+            displayValues = displayValues,
+            respirationValues = respirationValues,
+            sourcePointCount = ordered.size,
+            sourceStartSamplePosition = ordered.first().samplePosition
+        )
+    }
+
+    private fun repairPpgLowerEnvelopeOutliers(values: List<Double>): DoubleArray {
+        val repaired = values.toDoubleArray()
+        for (index in values.indices) {
+            val start = (index - 4).coerceAtLeast(0)
+            val endExclusive = (index + 5).coerceAtMost(values.size)
+            val local = values.subList(start, endExclusive).sorted()
+            if (local.isEmpty()) continue
+            val median = local[local.size / 2]
+            val deviations = local.map { abs(it - median) }.sorted()
+            val mad = deviations[deviations.size / 2]
+            val robustLimit = 4.5 * 1.4826 * mad
+            val value = values[index]
+            val ratioOutlier =
+                median > 0.0 && (value < median * 0.25 || value > median * 4.0)
+            if (
+                (mad > 0.0 && abs(value - median) > robustLimit) ||
+                ratioOutlier
+            ) {
+                repaired[index] = median
+            }
+        }
+        return repaired
+    }
+
+    private fun forwardBackwardBandPass(
+        values: DoubleArray,
+        sampleRateHz: Double,
+        lowCutHz: Double,
+        highCutHz: Double
+    ): DoubleArray {
+        fun oneDirection(input: DoubleArray): DoubleArray {
+            val filter = SimpleBandPassFilter(
+                sampleRateHz = sampleRateHz,
+                lowCutHz = lowCutHz,
+                highCutHz = highCutHz
+            )
+            return DoubleArray(input.size) { index -> filter.filter(input[index]) }
+        }
+
+        val forward = oneDirection(values)
+        val reversed = DoubleArray(forward.size) { index ->
+            forward[forward.lastIndex - index]
+        }
+        val backward = oneDirection(reversed)
+        return DoubleArray(backward.size) { index ->
+            backward[backward.lastIndex - index]
+        }
+    }
+
+    private fun forwardBackwardLowPass(
+        values: DoubleArray,
+        sampleRateHz: Double,
+        cutoffHz: Double
+    ): DoubleArray {
+        fun oneDirection(input: DoubleArray): DoubleArray {
+            val filter = OnePoleLowPassFilter(
+                sampleRateHz = sampleRateHz,
+                cutoffHz = cutoffHz
+            )
+            return DoubleArray(input.size) { index -> filter.filter(input[index]) }
+        }
+
+        val forward = oneDirection(values)
+        val reversed = DoubleArray(forward.size) { index ->
+            forward[forward.lastIndex - index]
+        }
+        val backward = oneDirection(reversed)
+        return DoubleArray(backward.size) { index ->
+            backward[backward.lastIndex - index]
+        }
+    }
+
+    private fun calculateEnvelopePeakProminence(
+        signal: DoubleArray,
+        peakIndex: Int,
+        lowerBound: Int,
+        upperBound: Int
+    ): Double {
+        if (peakIndex !in signal.indices) return 0.0
+        val peakValue = signal[peakIndex]
+        var left = peakIndex
+        while (left > lowerBound && signal[left - 1] <= peakValue) {
+            left -= 1
+        }
+        var right = peakIndex
+        while (right < upperBound && signal[right + 1] <= peakValue) {
+            right += 1
+        }
+        var leftBase = peakValue
+        for (index in left..peakIndex) {
+            leftBase = kotlin.math.min(leftBase, signal[index])
+        }
+        var rightBase = peakValue
+        for (index in peakIndex..right) {
+            rightBase = kotlin.math.min(rightBase, signal[index])
+        }
+        return peakValue - max(leftBase, rightBase)
+    }
+
+    /**
      * Green PPG 기반 호흡수를 계산한다.
      *
      * positive peak를 primary로 유지하고, 지속 실패한 경우에만 negative peak를
@@ -3557,7 +3925,7 @@ class PotchArousalCalculator(
 
     /**
      * 지정 채널의 최근 45초 raw PPG에서 contact/gap-aware segment를 만들고,
-     * segment별로 DC 제거 -> 0.1~0.5Hz BPF -> 2초 warm-up 제거를 적용한다.
+     * segment별로 DC 제거 -> 약 0.067~0.5Hz BPF -> 2초 warm-up 제거를 적용한다.
      */
     private fun calculatePpgRespirationCandidatesFromBuffer(
         channel: PpgRespirationChannel,
@@ -4426,7 +4794,7 @@ class PotchArousalCalculator(
     /**
      * IMU 기반 호흡수를 계산한다.
      *
-     * g-magnitude에서 DC/자세 성분을 제거한 뒤 0.1~0.5Hz 호흡 대역만 남기고,
+     * g-magnitude에서 DC/자세 성분을 제거한 뒤 약 0.067~0.5Hz 호흡 대역만 남기고,
      * peak 간격으로 RR bpm을 추정한다.
      */
     fun calculateImuRespiration(): ImuRespirationResult? {
@@ -4461,8 +4829,8 @@ class PotchArousalCalculator(
             rawWindow[i] - mean
         }
 
-        // 2. 호흡 대역 BPF: 0.1~0.5Hz
-        // 6~30 breaths/min 정도만 남긴다.
+        // 2. 호흡 대역 BPF: 약 0.067~0.5Hz
+        // 4~30 breaths/min 정도만 남긴다.
         val respBpf = SimpleBandPassFilter(
             sampleRateHz = config.imuSampleRateHz,
             lowCutHz = config.respLowCutHz,
@@ -5251,16 +5619,12 @@ class PotchArousalCalculator(
     private fun scoreRespiratoryRateRise(
         riseBpm: Double
     ): Double {
-        if (riseBpm <= 0.0) {
-            return 0.0
-        }
-
-        if (config.rrRiseThresholdBpm <= 0.0) {
-            return 0.0
-        }
-
-        return (riseBpm / config.rrRiseThresholdBpm)
-            .coerceIn(0.0, 1.0)
+        return RrRiseHillScorePolicy.score(
+            riseBpm = riseBpm,
+            startBpm = config.rrRiseScoreStartBpm,
+            ninetyFiveBpm = config.rrRiseScoreNinetyFiveBpm,
+            exponent = config.rrRiseScoreHillExponent
+        )
     }
 
     /********************* //RR Arousal Score ********************/
@@ -5653,16 +6017,16 @@ class PotchArousalCalculator(
      * 최근 HR window를 초반/후반 구간으로 나누어 평균 BPM 차이를 구하고,
      * 심박 상승량을 score로 변환한다.
      */
-    fun calculateHeartRateArousal(): HeartRateArousalResult? {
+    fun calculateHeartRateArousal(
+        nowMillis: Long = System.currentTimeMillis()
+    ): HeartRateArousalResult? {
         if (heartRateBuffer.size < config.hrMinSampleCount) {
             return null
         }
 
-        val latestTime = heartRateBuffer.last().first
-
         val windowValues = heartRateBuffer
             .filter { (timestamp, bpm) ->
-                latestTime - timestamp <= config.hrGradientWindowMillis &&
+                nowMillis - timestamp in 0..config.hrGradientWindowMillis &&
                         bpm in config.hrMinReasonableBpm..config.hrMaxReasonableBpm
             }
 
@@ -5683,10 +6047,17 @@ class PotchArousalCalculator(
             return null
         }
 
-        val splitSize = (cleanedValues.size / 3).coerceAtLeast(1)
-
-        val baselinePart = cleanedValues.take(splitSize)
-        val recentPart = cleanedValues.takeLast(splitSize)
+        val baselineEndMillis = cleanedValues.first().first + config.hrBaselineWindowMillis
+        val recentStartMillis = nowMillis - config.hrRecentWindowMillis
+        val baselinePart = cleanedValues.filter { (timestamp, _) ->
+            timestamp <= baselineEndMillis
+        }
+        val recentPart = cleanedValues.filter { (timestamp, _) ->
+            timestamp >= recentStartMillis
+        }
+        if (baselinePart.isEmpty() || recentPart.isEmpty()) {
+            return null
+        }
 
         val baselineBpm = baselinePart.map { it.second }.average()
         val recentBpm = recentPart.map { it.second }.average()
@@ -5754,11 +6125,7 @@ class PotchArousalCalculator(
         }
     }
 
-    /**
-     * HR 상승량을 0~1 각성 점수로 변환한다.
-     *
-     * 상승량이 threshold 이상이면 HR 관점에서는 강한 각성 후보로 본다.
-     */
+    /** Python analyzer와 동일한 두 점 보정 Hill 곡선으로 HR 상승량을 점수화한다. */
     private fun scoreHeartRateGradient(
         gradientBpm: Double
     ): Double {
@@ -5766,12 +6133,13 @@ class PotchArousalCalculator(
             return 0.0
         }
 
-        if (config.hrGradientThreshold <= 0.0) {
-            return 0.0
-        }
-
-        return (gradientBpm / config.hrGradientThreshold)
-            .coerceIn(0.0, 1.0)
+        return HeartRateRiseHillScorePolicy.score(
+            riseBpm = gradientBpm,
+            firstRiseBpm = config.hrScoreFirstRiseBpm,
+            firstScore = config.hrScoreAtFirstRise,
+            secondRiseBpm = config.hrScoreSecondRiseBpm,
+            secondScore = config.hrScoreAtSecondRise
+        )
     }
 
     /********************* //HR Arousal ********************/
@@ -6809,16 +7177,10 @@ class PotchArousalCalculator(
     private fun scoreSkinTemperatureGradient(
         gradientCelsius: Double
     ): Double {
-        if (gradientCelsius <= 0.0) {
-            return 0.0
-        }
-
         if (config.skinTempRiseThresholdCelsius <= 0.0) {
             return 0.0
         }
-
-        return (gradientCelsius / config.skinTempRiseThresholdCelsius)
-            .coerceIn(0.0, 1.0)
+        return if (gradientCelsius >= config.skinTempRiseThresholdCelsius) 1.0 else 0.0
     }
 
     /********************* //Skin Temperature Arousal ********************/

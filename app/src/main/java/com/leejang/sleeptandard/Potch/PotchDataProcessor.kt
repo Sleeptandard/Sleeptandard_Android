@@ -126,6 +126,18 @@ data class IbiInterval(
     val endSamplePosition: Double = endSampleIndex.toDouble()
 )
 
+/**
+ * HR에서 채택한 두 박동 peak 사이 raw Green PPG 최저점.
+ *
+ * 같은 심장 박동 구간에서 하나의 점만 만들고, 이 점들을 시간 순서로 이으면
+ * PPG lower envelope가 된다. RR/RRV는 이 envelope의 느린 호흡 변조에서 계산한다.
+ */
+data class PpgLowerEnvelopeSample(
+    val samplePosition: Long,
+    val rawValue: Double,
+    val segmentId: Long
+)
+
 data class HeartRateEstimate(
     val bpm: Int,
     val ibiIntervals: List<IbiInterval>,
@@ -160,8 +172,135 @@ data class HeartRateEstimate(
         detectedPeakSamplePositions.firstOrNull(),
 
     val meanPeakInterpolationOffsetMs: Double = 0.0,
-    val maxPeakInterpolationOffsetMs: Double = 0.0
+    val maxPeakInterpolationOffsetMs: Double = 0.0,
+
+    // 최종 HR IBI에 포함된 upper peak 쌍마다 하나씩 뽑은 raw PPG lower point.
+    val lowerEnvelopeSamples: List<PpgLowerEnvelopeSample> = emptyList(),
+
+    // rolling snapshot 교체 시작점. 이 위치 이후의 과거 lower point를 새 snapshot으로 대체한다.
+    val lowerEnvelopeReplacementStartSamplePosition: Long? = null
 )
+
+/**
+ * 최종 HR interval을 PPG lower-envelope 표본으로 바꾸는 순수 변환기.
+ *
+ * rolling HR window가 같은 박동 peak를 조금 다른 위치에서 반복 검출하므로 먼저
+ * 0.20초 안의 upper peak를 합치고 raw 값이 더 큰 위치를 유지한다. 그 뒤 생리적인
+ * HR 간격을 이루는 인접 upper peak 사이에서 raw 최저점을 하나만 선택한다.
+ */
+internal object PpgLowerEnvelopeExtractor {
+    fun extract(
+        rawSamples: List<Double>,
+        windowStartSamplePosition: Long,
+        acceptedIntervals: List<IbiInterval>,
+        segmentId: Long,
+        sampleRateHz: Double
+    ): List<PpgLowerEnvelopeSample> {
+        if (rawSamples.size < 3 || acceptedIntervals.isEmpty() || sampleRateHz <= 0.0) {
+            return emptyList()
+        }
+
+        data class UpperPeak(
+            val samplePosition: Long,
+            val rawValue: Double
+        )
+
+        fun rawValueAt(samplePosition: Long): Double? {
+            val index = samplePosition - windowStartSamplePosition
+            if (index !in 0L until rawSamples.size.toLong()) return null
+            return rawSamples[index.toInt()].takeIf { it.isFinite() }
+        }
+
+        val mergeSamples = (sampleRateHz * 0.20).roundToLong().coerceAtLeast(1L)
+        val refractorySamples = (sampleRateHz * 0.25).roundToLong().coerceAtLeast(1L)
+        val minimumHeartIntervalSamples =
+            (sampleRateHz * 60.0 / 180.0).roundToLong().coerceAtLeast(1L)
+        val maximumHeartIntervalSamples =
+            (sampleRateHz * 60.0 / 40.0).roundToLong().coerceAtLeast(minimumHeartIntervalSamples)
+
+        val upperCandidates = acceptedIntervals
+            .asSequence()
+            .filter {
+                it.segmentId == segmentId &&
+                        it.intervalSec.isFinite() &&
+                        it.intervalSec > 0.0 &&
+                        it.endSamplePosition.isFinite()
+            }
+            .flatMap { interval ->
+                val end = interval.endSamplePosition.roundToLong()
+                val start = (
+                        interval.endSamplePosition - interval.intervalSec * sampleRateHz
+                        ).roundToLong()
+                sequenceOf(start, end)
+            }
+            .distinct()
+            .sorted()
+            .mapNotNull { position ->
+                rawValueAt(position)?.let { UpperPeak(position, it) }
+            }
+            .toList()
+
+        if (upperCandidates.size < 2) return emptyList()
+
+        val mergedUpperPeaks = mutableListOf<UpperPeak>()
+        for (candidate in upperCandidates) {
+            val previous = mergedUpperPeaks.lastOrNull()
+            if (
+                previous != null &&
+                candidate.samplePosition - previous.samplePosition <= mergeSamples
+            ) {
+                if (candidate.rawValue > previous.rawValue) {
+                    mergedUpperPeaks[mergedUpperPeaks.lastIndex] = candidate
+                }
+            } else {
+                mergedUpperPeaks += candidate
+            }
+        }
+
+        val lowerSamples = mutableListOf<PpgLowerEnvelopeSample>()
+        for (index in 1 until mergedUpperPeaks.size) {
+            val left = mergedUpperPeaks[index - 1].samplePosition
+            val right = mergedUpperPeaks[index].samplePosition
+            val intervalSamples = right - left
+            if (intervalSamples !in minimumHeartIntervalSamples..maximumHeartIntervalSamples) {
+                continue
+            }
+
+            // HR upper peak 자체와 경계 보간 영향을 피하도록 양 끝을 제외한다.
+            val searchStartPosition = left + 2L
+            val searchEndExclusive = right - 1L
+            if (searchEndExclusive - searchStartPosition < 3L) continue
+
+            var bestPosition: Long? = null
+            var bestValue = Double.POSITIVE_INFINITY
+            var position = searchStartPosition
+            while (position < searchEndExclusive) {
+                val rawValue = rawValueAt(position)
+                if (rawValue != null && rawValue < bestValue) {
+                    bestValue = rawValue
+                    bestPosition = position
+                }
+                position += 1L
+            }
+
+            val selectedPosition = bestPosition ?: continue
+            if (
+                lowerSamples.isNotEmpty() &&
+                selectedPosition - lowerSamples.last().samplePosition < refractorySamples
+            ) {
+                continue
+            }
+
+            lowerSamples += PpgLowerEnvelopeSample(
+                samplePosition = selectedPosition,
+                rawValue = bestValue,
+                segmentId = segmentId
+            )
+        }
+
+        return lowerSamples
+    }
+}
 
 data class HeartRateGraphData(
     val source: HeartRateSource = HeartRateSource.NONE,
@@ -220,7 +359,6 @@ class PotchDataProcessor(
     private val stabilityCalculator: PotchStabilityCalculator? = null
 ) {
     private data class ParsedPacket(
-        val raw: ByteArray,
         val sequence: Int,
         val timestamp: Long,
         val batteryRaw: Int,
@@ -349,6 +487,7 @@ class PotchDataProcessor(
 
     @Synchronized
     fun processIncomingData(data: ByteArray) {
+        val receivedAtMillis = System.currentTimeMillis()
         _state.update { it.copy(totalMiniPackets = it.totalMiniPackets + 1) }
 
         if (data.size != PACKET_SIZE) {
@@ -357,6 +496,14 @@ class PotchDataProcessor(
             breakContinuity(message)
             return
         }
+
+        // RawDataAnalyzer/parser.py 호환 형식:
+        // 각 record를 [phone time 8B little-endian][raw BLE packet 142B]로 기록한다.
+        // 헤더/CRC 검증 전에 저장해야 손상 패킷도 사후 분석할 수 있다.
+        dataLogger?.logRawPacket(
+            phoneTimeMillis = receivedAtMillis,
+            rawPacket = data
+        )
 
         if (data[0] != HEADER_0 || data[1] != HEADER_1) {
             val message = "Header Drop: %02X %02X".format(
@@ -401,7 +548,6 @@ class PotchDataProcessor(
         expectedSequence = (sequence + 1) and 0xFFFF
 
         val packet = ParsedPacket(
-            raw = data.copyOf(),
             sequence = sequence,
             timestamp = readUInt32(data, 4),
             batteryRaw = readUInt16(data, 8),
@@ -437,7 +583,7 @@ class PotchDataProcessor(
         lastValidHeartRateAt = null
         analysisSegmentId += 1L
         resetPolaritySelection()
-        arousalCalculator.reset()
+        arousalCalculator.reset(initialSegmentId = analysisSegmentId)
         stabilityCalculator?.onContinuityBreak(
             reason = "processor reset",
             newSegmentId = analysisSegmentId
@@ -584,16 +730,12 @@ class PotchDataProcessor(
         heartRateSampleMotionMaskedBuffer.addAll(motion)
     }
     private fun processBurst(packets: List<ParsedPacket>) {
-        val rawSuperFrame = ByteArray(packets.sumOf { it.raw.size })
         val imuBytes = ByteArray(packets.sumOf { it.imuData.size })
         val ppgBytes = ByteArray(packets.sumOf { it.ppgData.size })
-        var rawOffset = 0
         var imuOffset = 0
         var ppgOffset = 0
 
         packets.forEach { packet ->
-            packet.raw.copyInto(rawSuperFrame, rawOffset)
-            rawOffset += packet.raw.size
             packet.imuData.copyInto(imuBytes, imuOffset)
             imuOffset += packet.imuData.size
             packet.ppgData.copyInto(ppgBytes, ppgOffset)
@@ -693,7 +835,12 @@ class PotchDataProcessor(
         }
 
         val arousalState =
-            arousalCalculator.processBurst(sensorData, freshEstimate, status)
+            arousalCalculator.processBurst(
+                sensorData = sensorData,
+                heartRateEstimate = freshEstimate,
+                heartRateStatus = status,
+                analysisSegmentId = analysisSegmentId
+            )
         val stabilityState = stabilityCalculator?.processFrame(
             StabilityFrameInput(
                 phoneTimeMillis = now,
@@ -708,23 +855,6 @@ class PotchDataProcessor(
             )
         ) ?: StabilityState()
         val greenMax = greenSamples.maxOrNull()?.toDouble() ?: 0.0
-
-        // processBurst()는 8개 slot이 모두 정상적으로 모인 경우에만 호출된다.
-        // 각 142-byte 원시 패킷을 순서대로 이어 붙인 1,136-byte superframe만 binary로 기록한다.
-        dataLogger?.logCompleteSuperFrame(rawSuperFrame)
-        dataLogger?.logHeartRateDiagnostics(
-            now,
-            sensorData.timestamp,
-            diagnostics
-        )
-        dataLogger?.logArousalState(
-            phoneTimeMillis = now,
-            timestamp = sensorData.timestamp,
-            arousalState = arousalState,
-            complete = "true",
-            missPacketNum = counters.estimatedLostPacketCount.toString(),
-            errorLog = ""
-        )
 
         _state.update { current ->
             current.copy(
@@ -1325,7 +1455,6 @@ class PotchDataProcessor(
 
         val positiveSearch =
             if (
-                requiredPolarity == null ||
                 requiredPolarity == HeartRatePeakPolarity.POSITIVE
             ) {
                 findBestHeartRatePeakFit(
@@ -1342,7 +1471,6 @@ class PotchDataProcessor(
 
         val negativeSearch =
             if (
-                requiredPolarity == null ||
                 requiredPolarity == HeartRatePeakPolarity.NEGATIVE
             ) {
                 findBestHeartRatePeakFit(
@@ -1570,6 +1698,14 @@ class PotchDataProcessor(
                 .filterNot { it in acceptedEndPositionSet }
                 .distinct()
 
+        val lowerEnvelopeSamples = PpgLowerEnvelopeExtractor.extract(
+            rawSamples = cleanWindow.signal,
+            windowStartSamplePosition = cleanWindow.startSamplePosition,
+            acceptedIntervals = bestFit.usedIntervals,
+            segmentId = analysisSegmentId,
+            sampleRateHz = sampleRateHz
+        )
+
         val estimate = HeartRateEstimate(
             bpm = bpm,
             ibiIntervals = bestFit.usedIntervals,
@@ -1598,7 +1734,12 @@ class PotchDataProcessor(
             referencePeakSamplePosition =
                 detectedPeakSamplePositions.firstOrNull(),
             meanPeakInterpolationOffsetMs = bestFit.meanInterpolationOffsetMs,
-            maxPeakInterpolationOffsetMs = bestFit.maxInterpolationOffsetMs
+            maxPeakInterpolationOffsetMs = bestFit.maxInterpolationOffsetMs,
+            lowerEnvelopeSamples = lowerEnvelopeSamples,
+            // 첫 재계산 가능 lower point부터만 교체한다. window 시작점에 걸친
+            // 박동 쌍은 이번 snapshot에서 복원할 수 없으므로 이전 값을 보존한다.
+            lowerEnvelopeReplacementStartSamplePosition =
+                lowerEnvelopeSamples.firstOrNull()?.samplePosition
         )
 
         return HeartRateAnalysisResult(
@@ -2793,8 +2934,16 @@ class PotchDataProcessor(
     private fun breakContinuity(reason: String) {
         burstPackets.clear()
         analysisSegmentId += 1L
+        greenPpgBuffer.clear()
+        heartRateSamplePositionBuffer.clear()
+        heartRateSampleSegmentBuffer.clear()
+        heartRateSampleUsableBuffer.clear()
+        heartRateSampleMotionMaskedBuffer.clear()
+        totalHeartRateSamples = 0L
+        lastValidHeartRate = null
+        lastValidHeartRateAt = null
         resetPolaritySelection()
-        arousalCalculator.reset()
+        arousalCalculator.reset(initialSegmentId = analysisSegmentId)
         stabilityCalculator?.onContinuityBreak(
             reason = reason,
             newSegmentId = analysisSegmentId

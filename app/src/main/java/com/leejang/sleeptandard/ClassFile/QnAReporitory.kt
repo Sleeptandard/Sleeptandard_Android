@@ -45,7 +45,7 @@ object QnARepository {
                     "간혹 잘못 체크하거나 피드백을 건너뛰더라도, 전체 학습 결과에 큰 오차를 만들지는 않아요. 이후에 남겨주시는 피드백들이 점점 더 정확한 기상 패턴을 만들어줍니다."
         ),
 
-    )
+        )
 
     fun findById(id: String): QnAItem? = items.firstOrNull { it.id == id }
 }

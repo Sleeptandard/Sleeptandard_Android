@@ -5,13 +5,17 @@ import android.content.Context
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import android.util.Log
 import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.io.RandomAccessFile
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 
 data class InternalPotchLogFile(
     val name: String,
@@ -38,250 +42,65 @@ data class StabilityEpisodeLogRecord(
 )
 
 /** Potch510 Green PPG/IMU 수신 및 분석 로그를 관리한다. */
-class PotchDataLogger(context: Context) {
+class PotchDataLogger(context: Context, private val closedFileExporter: ((File) -> Unit)? = null) {
     private val appContext = context.applicationContext
-    private var isLogging = false
-    private var workingSuperFrameRawFile: File? = null
-    private var superFrameRawOutput: BufferedOutputStream? = null
+    private data class RawOutput(val session: AlarmLogSession, val file: File, val output: BufferedOutputStream)
+    private val rawOutputs = mutableMapOf<String, RawOutput>()
+    private val preferences = appContext.getSharedPreferences("potch_log_files", Context.MODE_PRIVATE)
     private var workingDebugFile: File? = null
-    private var workingArousalFile: File? = null
-    private var workingHeartRateFile: File? = null
     private var workingStabilityEpisodeFile: File? = null
+    private var stabilityLogSession: AlarmLogSession? = null
+    private val stabilityRows = linkedMapOf<String, String>()
+
+    val stabilitySessionId: String? get() = stabilityLogSession?.id
+    val stabilityStartedAtMillis: Long? get() = stabilityLogSession?.startedAtMillis
+
+    init {
+        preferences.getString("ble_file", null)?.let { name ->
+            workingDebugFile = File(logDirectory(), name).takeIf {
+                it.exists() && !PotchLogExporter.isClosed(appContext, name)
+            }
+        }
+        val stabilityId = preferences.getString("stability_id", null)
+        AlarmLogSessionStore(appContext).load().find { it.id == stabilityId }?.let {
+            val file = alarmFile(it, "potch_stability_episode_log", "csv")
+            if (file.exists() && !PotchLogExporter.isClosed(appContext, file.name)) openStability(it)
+        }
+        if (closedFileExporter == null) PotchLogExporter.retryPending(appContext)
+    }
 
     var lastSavedFilePath: String? = null
         private set
 
     @Synchronized
-    fun start() {
-        val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
-        val directory = File(appContext.filesDir, INTERNAL_LOG_DIR_NAME).apply { mkdirs() }
+    fun startBleLogging() {
+        if (workingDebugFile != null) return
+        val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.getDefault()).format(Date())
+        workingDebugFile = uniqueTarget(logDirectory(), "potch_debug_log_$timestamp.txt")
+        workingDebugFile?.writeText("Potch BLE debug log started at $timestamp\n", Charsets.UTF_8)
+        check(preferences.edit().putString("ble_file", workingDebugFile!!.name).commit())
+    }
 
-        closeSuperFrameRawOutput()
-        workingSuperFrameRawFile =
-            File(directory, "potch_superframe_raw_data_$timestamp.bin")
-        superFrameRawOutput = FileOutputStream(workingSuperFrameRawFile, false).buffered()
+    private fun logDirectory() = File(appContext.filesDir, INTERNAL_LOG_DIR_NAME).apply { mkdirs() }
 
-        workingDebugFile = File(directory, "potch_debug_log_$timestamp.txt")
-        workingArousalFile = File(directory, "potch_arousal_state_log_$timestamp.csv")
-        workingHeartRateFile = File(directory, "potch_hr_diagnostic_log_$timestamp.csv")
-        workingStabilityEpisodeFile =
-            File(directory, "potch_stability_episode_log_$timestamp.csv")
+    private fun alarmFile(session: AlarmLogSession, prefix: String, extension: String): File {
+        val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.getDefault()).format(Date(session.startedAtMillis))
+        return File(logDirectory(), "${prefix}_${timestamp}_${session.id}.$extension")
+    }
 
-        workingDebugFile?.writeText(
-            "Potch debug log started at $timestamp\n",
-            Charsets.UTF_8
-        )
-
-        workingArousalFile?.writeText(
-            UTF8_BOM + listOf(
-                "phone_time",
-                "timestamp",
-                "final_wake_score",
-                "final_wake_confidence",
-                "final_wake_coverage",
-                "used_arousal_domain_count",
-                "movement_domain_score",
-                "movement_domain_confidence",
-                "movement_domain_coverage",
-                "movement_domain_usable",
-                "movement_domain_composition",
-                "respiratory_domain_score",
-                "respiratory_domain_confidence",
-                "respiratory_domain_coverage",
-                "respiratory_domain_usable",
-                "respiratory_domain_composition",
-                "cardiac_domain_score",
-                "cardiac_domain_confidence",
-                "cardiac_domain_coverage",
-                "cardiac_domain_usable",
-                "cardiac_domain_composition",
-                "temperature_domain_score",
-                "temperature_domain_confidence",
-                "temperature_domain_coverage",
-                "temperature_domain_usable",
-                "temperature_domain_composition",
-                "wake_candidate_hold_seconds",
-                "wake_current_condition_passed",
-                "wake_persistence_window_seconds",
-                "wake_persistence_required_pass_seconds",
-                "wake_persistence_observed_seconds",
-                "wake_persistence_passed_seconds",
-                "wake_persistence_failed_seconds",
-                "wake_persistence_pass_ratio_percent",
-                "wake_decision_reason",
-                "is_wake_timing_candidate",
-                "micro_movement_variance",
-                "micro_movement_score",
-                "rr_from_green_ppg",
-                "rr_from_imu",
-                "rr_final",
-                "rr_score",
-                "rr_raw_score",
-                "rr_source",
-                "rr_confidence",
-                "rr_log",
-                "rrv_rmssd_sec",
-                "rrv_score",
-                "rrv_source",
-                "hr_bpm",
-                "hr_gradient",
-                "hr_score",
-                "hrv_rmssd_sec",
-                "hrv_lf",
-                "hrv_hf",
-                "hrv_lf_hf",
-                "hrv_score",
-                "hrv_quality",
-                "hrv_score_composition",
-                "hrv_rmssd_score",
-                "hrv_rmssd_quality",
-                "hrv_rmssd_ibi_count",
-                "hrv_frequency_score",
-                "hrv_frequency_quality",
-                "hrv_frequency_ibi_count",
-                "hrv_frequency_usable",
-                "hrv_frequency_status",
-                "hrv_frequency_rejection_reasons",
-                "hrv_frequency_observed_seconds",
-                "hrv_frequency_raw_ibi_count",
-                "hrv_frequency_cleaned_ibi_count",
-                "hrv_frequency_resampled_count",
-                "hrv_frequency_ppg_signal_quality",
-                "hrv_frequency_rr_bpm",
-                "skin_temperature_celsius",
-                "skin_temperature_gradient",
-                "skin_temperature_score",
-                "micro_evidence_score",
-                "micro_evidence_confidence",
-                "micro_evidence_coverage",
-                "micro_evidence_usable",
-                "micro_baseline_source",
-                "micro_baseline_center",
-                "micro_baseline_spread",
-                "micro_signed_distance",
-                "micro_normalized_distance",
-                "micro_baseline_score",
-                "micro_trend_score",
-                "micro_signal_quality",
-                "micro_evidence_reasons",
-                "micro_evidence_log",
-                "rr_evidence_score",
-                "rr_evidence_confidence",
-                "rr_evidence_coverage",
-                "rr_evidence_usable",
-                "rr_baseline_source",
-                "rr_baseline_center",
-                "rr_baseline_spread",
-                "rr_signed_distance",
-                "rr_normalized_distance",
-                "rr_baseline_score",
-                "rr_trend_score",
-                "rr_signal_quality",
-                "rr_evidence_reasons",
-                "rr_evidence_log",
-                "rrv_evidence_score",
-                "rrv_evidence_confidence",
-                "rrv_evidence_coverage",
-                "rrv_evidence_usable",
-                "rrv_baseline_source",
-                "rrv_baseline_center",
-                "rrv_baseline_spread",
-                "rrv_signed_distance",
-                "rrv_normalized_distance",
-                "rrv_baseline_score",
-                "rrv_trend_score",
-                "rrv_signal_quality",
-                "rrv_evidence_reasons",
-                "rrv_evidence_log",
-                "hr_evidence_score",
-                "hr_evidence_confidence",
-                "hr_evidence_coverage",
-                "hr_evidence_usable",
-                "hr_baseline_source",
-                "hr_baseline_center",
-                "hr_baseline_spread",
-                "hr_signed_distance",
-                "hr_normalized_distance",
-                "hr_baseline_score",
-                "hr_trend_score",
-                "hr_signal_quality",
-                "hr_evidence_reasons",
-                "hr_evidence_log",
-                "hrv_evidence_score",
-                "hrv_evidence_confidence",
-                "hrv_evidence_coverage",
-                "hrv_evidence_usable",
-                "hrv_baseline_source",
-                "hrv_baseline_center",
-                "hrv_baseline_spread",
-                "hrv_signed_distance",
-                "hrv_normalized_distance",
-                "hrv_baseline_score",
-                "hrv_trend_score",
-                "hrv_signal_quality",
-                "hrv_evidence_reasons",
-                "hrv_evidence_log",
-                "temperature_evidence_score",
-                "temperature_evidence_confidence",
-                "temperature_evidence_coverage",
-                "temperature_evidence_usable",
-                "temperature_baseline_source",
-                "temperature_baseline_center",
-                "temperature_baseline_spread",
-                "temperature_signed_distance",
-                "temperature_normalized_distance",
-                "temperature_baseline_score",
-                "temperature_trend_score",
-                "temperature_signal_quality",
-                "temperature_evidence_reasons",
-                "temperature_evidence_log",
-                "complete",
-                "miss_packet_num",
-                "error_log",
-                "last_log"
-            ).joinToString(",") + "\n",
-            Charsets.UTF_8
-        )
-
-        workingHeartRateFile?.writeText(
-            UTF8_BOM + listOf(
-                "phone_time",
-                "timestamp",
-                "analysis_segment_id",
-                "processing_state",
-                "underlying_failure_reason",
-                "message",
-                "heart_rate_fresh",
-                "heart_rate_age_ms",
-                "source",
-                "source_log",
-                "green_dc_mean",
-                "green_min",
-                "green_max",
-                "ac_robust_amplitude",
-                "selected_peak_threshold",
-                "selected_polarity",
-                "detected_peak_count",
-                "raw_ibi_count",
-                "valid_ibi_count",
-                "accepted_interval_ratio",
-                "raw_sdsd_ms",
-                "quality_score",
-                "calculated_bpm",
-                "displayed_bpm",
-                "window_sample_count",
-                "window_seconds",
-                "imu_max_delta_g",
-                "imu_p95_delta_g",
-                "imu_motion_exceedance_ratio",
-                "max_raw_sample_delta",
-                "crc_error_count",
-                "sequence_loss_count",
-                "estimated_lost_packet_count"
-            ).joinToString(",") + "\n",
-            Charsets.UTF_8
-        )
-
+    private fun openStability(session: AlarmLogSession) {
+        stabilityLogSession = session
+        workingStabilityEpisodeFile = alarmFile(session, "potch_stability_episode_log", "csv")
+        check(preferences.edit().putString("stability_id", session.id).commit())
+        stabilityRows.clear()
+        if (workingStabilityEpisodeFile!!.length() > 0L) {
+            workingStabilityEpisodeFile!!.useLines { lines ->
+                lines.drop(1).forEach { line ->
+                    line.split(',', limit = 4).getOrNull(2)?.let { stabilityRows[it] = line }
+                }
+            }
+            return
+        }
         workingStabilityEpisodeFile?.writeText(
             UTF8_BOM + listOf(
                 "logged_at",
@@ -394,187 +213,99 @@ class PotchDataLogger(context: Context) {
             Charsets.UTF_8
         )
 
-        isLogging = true
-        lastSavedFilePath = null
     }
 
+    /** Called only for alarm lifecycle changes, never for BLE reconnect or monitoring start. */
     @Synchronized
-    fun startIfNeeded() {
-        if (!isLogging || workingSuperFrameRawFile == null || superFrameRawOutput == null) start()
+    fun syncAlarmFiles(sessions: List<AlarmLogSession>, nowMillis: Long = System.currentTimeMillis()) {
+        val desiredRaw = sessions.filter { it.recordsRaw(nowMillis) }.associateBy { it.id }
+        rawOutputs.keys.toList().filter { it !in desiredRaw }.forEach { id ->
+            rawOutputs.remove(id)?.let { it.output.close(); exportClosed(it.file) }
+        }
+        desiredRaw.forEach { (id, session) ->
+            val existing = rawOutputs[id]
+            if (existing != null) {
+                rawOutputs[id] = existing.copy(session = session)
+            } else {
+                val file = alarmFile(session, "potch_packet_raw_data", "bin")
+                // Append to the recovered session; each record retains its original phone timestamp.
+                // A killed process can leave a partial final record; retain every complete 150-byte record.
+                if (file.exists() && file.length() % RAW_RECORD_SIZE_BYTES != 0L) {
+                    RandomAccessFile(file, "rw").use { raw ->
+                        raw.setLength(raw.length() / RAW_RECORD_SIZE_BYTES * RAW_RECORD_SIZE_BYTES)
+                    }
+                }
+                rawOutputs[id] = RawOutput(session, file, FileOutputStream(file, true).buffered())
+            }
+        }
+        val desiredStability = sessions.lastOrNull { it.recordsStability }
+        if (stabilityLogSession?.id != desiredStability?.id) {
+            workingStabilityEpisodeFile?.let(::exportClosed)
+            workingStabilityEpisodeFile = null
+            stabilityLogSession = null
+            stabilityRows.clear()
+            check(preferences.edit().remove("stability_id").commit())
+            desiredStability?.let(::openStability)
+        }
+        // Closed/expired sessions may have been restored with no in-memory file handles.
+        sessions.forEach { session ->
+            if (!session.recordsRaw(nowMillis)) exportClosed(alarmFile(session, "potch_packet_raw_data", "bin"))
+            if (!session.recordsStability) exportClosed(alarmFile(session, "potch_stability_episode_log", "csv"))
+        }
     }
 
     @Synchronized
     fun logDebug(tag: String, message: String, level: String = "D") {
-        if (!isLogging) return
+        if (workingDebugFile == null) return
         val time = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.getDefault()).format(Date())
-        workingDebugFile?.appendText("$time $level/$tag: $message\n", Charsets.UTF_8)
+        runCatching { workingDebugFile?.appendText("$time $level/$tag: $message\n", Charsets.UTF_8) }
+            .onFailure { Log.e("PotchDataLogger", "BLE debug log write failed", it) }
     }
 
     /**
-     * CRC/sequence/burst-slot 검사를 모두 통과한 완성 superframe의 원시 패킷 바이트를
-     * 헤더나 구분자 없이 수신 순서 그대로 binary 파일에 이어 붙인다.
+     * 수신한 142-byte BLE 패킷을 앱 수신 시각과 함께 고정 길이 binary record로 기록한다.
      *
-     * Potch510의 현재 형식은 142 bytes x 8 packets = 1,136 bytes다.
+     * Record format (150 bytes):
+     * - [0..7]   phone time, Unix epoch milliseconds, little-endian unsigned 64-bit
+     * - [8..149] raw BLE packet, 142 bytes
+     *
+     * 길이가 다른 notification은 record alignment를 깨므로 이 함수에서 기록하지 않는다.
      */
     @Synchronized
-    fun logCompleteSuperFrame(rawSuperFrame: ByteArray) {
-        if (!isLogging) return
-        if (rawSuperFrame.size != COMPLETE_SUPERFRAME_SIZE_BYTES) {
+    fun logRawPacket(phoneTimeMillis: Long, rawPacket: ByteArray) {
+        if (rawOutputs.isEmpty()) return
+        if (rawPacket.size != PACKET_SIZE_BYTES) {
             workingDebugFile?.appendText(
-                "${phoneTime(System.currentTimeMillis())} W/PotchDataLogger: " +
-                        "완성 superframe 크기 불일치: " +
-                        "expected=$COMPLETE_SUPERFRAME_SIZE_BYTES actual=${rawSuperFrame.size}\n",
+                "${phoneTime(phoneTimeMillis)} W/PotchDataLogger: " +
+                        "raw packet 크기 불일치: " +
+                        "expected=$PACKET_SIZE_BYTES actual=${rawPacket.size}\n",
                 Charsets.UTF_8
             )
             return
         }
 
         runCatching {
-            superFrameRawOutput?.apply {
-                write(rawSuperFrame)
-                // 1초 단위 기록이므로 최근 frame이 프로세스 종료로 유실되지 않도록 즉시 flush한다.
-                flush()
+            val record = ByteArray(RAW_RECORD_SIZE_BYTES)
+            for (byteIndex in 0 until PHONE_TIME_SIZE_BYTES) {
+                record[byteIndex] =
+                    ((phoneTimeMillis ushr (byteIndex * 8)) and 0xFFL).toByte()
+            }
+            rawPacket.copyInto(record, destinationOffset = PHONE_TIME_SIZE_BYTES)
+
+            rawOutputs.values.forEach { raw ->
+                if (raw.session.recordsRaw(phoneTimeMillis)) {
+                    raw.output.write(record)
+                    raw.output.flush()
+                }
             }
         }.onFailure { error ->
             workingDebugFile?.appendText(
                 "${phoneTime(System.currentTimeMillis())} E/PotchDataLogger: " +
-                        "superframe binary 기록 실패: ${error.message}\n",
+                        "raw packet binary 기록 실패: ${error.message}\n",
                 Charsets.UTF_8
             )
         }
     }
-
-    @Synchronized
-    fun logHeartRateDiagnostics(
-        phoneTimeMillis: Long,
-        timestamp: Long,
-        diagnostics: HeartRateDiagnostics
-    ) {
-        if (!isLogging) return
-        appendCsv(
-            workingHeartRateFile,
-            phoneTime(phoneTimeMillis),
-            timestamp,
-            diagnostics.analysisSegmentId,
-            diagnostics.processingState,
-            diagnostics.underlyingFailureReason,
-            diagnostics.message,
-            diagnostics.heartRateFresh,
-            diagnostics.heartRateAgeMillis,
-            diagnostics.source,
-            diagnostics.sourceLog,
-            diagnostics.greenDcMean,
-            diagnostics.greenMin,
-            diagnostics.greenMax,
-            diagnostics.acRobustAmplitude,
-            diagnostics.selectedPeakThreshold,
-            diagnostics.selectedPolarity,
-            diagnostics.detectedPeakCount,
-            diagnostics.rawIbiCount,
-            diagnostics.validIbiCount,
-            diagnostics.acceptedIntervalRatio,
-            diagnostics.rawSdsdMs,
-            diagnostics.qualityScore,
-            diagnostics.calculatedBpm,
-            diagnostics.displayedBpm,
-            diagnostics.windowSampleCount,
-            diagnostics.windowSeconds,
-            diagnostics.imuMaxDeltaG,
-            diagnostics.imuP95DeltaG,
-            diagnostics.imuMotionExceedanceRatio,
-            diagnostics.maxRawSampleDelta,
-            diagnostics.crcErrorCount,
-            diagnostics.sequenceLossCount,
-            diagnostics.estimatedLostPacketCount
-        )
-    }
-
-    @Synchronized
-    fun logArousalState(
-        phoneTimeMillis: Long,
-        timestamp: Long,
-        arousalState: ArousalState,
-        complete: String,
-        missPacketNum: String,
-        errorLog: String
-    ) {
-        if (!isLogging) return
-        appendCsv(
-            workingArousalFile,
-            phoneTime(phoneTimeMillis),
-            timestamp,
-            arousalState.finalWakeScore,
-            arousalState.finalWakeConfidence,
-            arousalState.finalWakeCoverage,
-            arousalState.usedArousalDomainCount,
-            *arousalState.movementDomainEvidence.toCsvValues(),
-            *arousalState.respiratoryDomainEvidence.toCsvValues(),
-            *arousalState.cardiacDomainEvidence.toCsvValues(),
-            *arousalState.temperatureDomainEvidence.toCsvValues(),
-            arousalState.wakeCandidateHoldSeconds,
-            arousalState.wakeCurrentConditionPassed,
-            arousalState.wakePersistenceWindowSeconds,
-            arousalState.wakePersistenceRequiredPassSeconds,
-            arousalState.wakePersistenceObservedSeconds,
-            arousalState.wakePersistencePassedSeconds,
-            arousalState.wakePersistenceFailedSeconds,
-            arousalState.wakePersistencePassRatio,
-            arousalState.wakeDecisionReason,
-            arousalState.isWakeTimingCandidate,
-            arousalState.microMovementVariance,
-            arousalState.microMovementScore,
-            arousalState.rrFromPpg,
-            arousalState.rrFromImu,
-            arousalState.rrFinal,
-            arousalState.rrScore,
-            arousalState.rrRawScore,
-            arousalState.rrFusionSource,
-            arousalState.rrFusionConfidence,
-            arousalState.rrFusionLog,
-            arousalState.rrvRmssd,
-            arousalState.rrvScore,
-            arousalState.rrvSource,
-            arousalState.hrBpm,
-            arousalState.hrGradient,
-            arousalState.hrScore,
-            arousalState.hrvRmssd,
-            arousalState.hrvLf,
-            arousalState.hrvHf,
-            arousalState.hrvLfHf,
-            arousalState.hrvScore,
-            arousalState.hrvQuality,
-            arousalState.hrvScoreComposition,
-            arousalState.hrvRmssdScore,
-            arousalState.hrvRmssdQuality,
-            arousalState.hrvRmssdIbiCount,
-            arousalState.hrvFrequencyScore,
-            arousalState.hrvFrequencyQuality,
-            arousalState.hrvFrequencyIbiCount,
-            arousalState.hrvFrequencyUsable,
-            arousalState.hrvFrequencyStatus.state,
-            arousalState.hrvFrequencyRejectionReasons,
-            arousalState.hrvFrequencyObservedSeconds,
-            arousalState.hrvFrequencyRawIbiCount,
-            arousalState.hrvFrequencyCleanedIbiCount,
-            arousalState.hrvFrequencyResampledCount,
-            arousalState.hrvFrequencyPpgSignalQuality,
-            arousalState.hrvFrequencyRespiratoryRateBpm,
-            arousalState.skinTemperatureCelsius,
-            arousalState.skinTemperatureGradient,
-            arousalState.skinTemperatureScore,
-            *arousalState.microEvidence.toCsvValues(),
-            *arousalState.rrEvidence.toCsvValues(),
-            *arousalState.rrvEvidence.toCsvValues(),
-            *arousalState.hrEvidence.toCsvValues(),
-            *arousalState.hrvEvidence.toCsvValues(),
-            *arousalState.temperatureEvidence.toCsvValues(),
-            complete,
-            missPacketNum,
-            errorLog,
-            arousalState.lastLog
-        )
-    }
-
 
     /**
      * 검출된 안정 episode의 대표값과 후보 선별 결과를 새 CSV에 기록한다.
@@ -583,9 +314,9 @@ class PotchDataLogger(context: Context) {
      */
     @Synchronized
     fun logStabilityEpisode(record: StabilityEpisodeLogRecord) {
-        if (!isLogging) return
-
         val candidate = record.candidate
+        val session = stabilityLogSession ?: return
+        if (candidate.startedAt < session.startedAtMillis) return
         val rrBaseline = record.activeBaselines[BaselineMetricType.RR]
         val rrvBaseline = record.activeBaselines[BaselineMetricType.RRV]
         val hrBaseline = record.activeBaselines[BaselineMetricType.HR]
@@ -713,89 +444,44 @@ class PotchDataLogger(context: Context) {
     }
 
     @Synchronized
-    fun stopAndSave(): String? {
-        if (!isLogging) return lastSavedFilePath
-        isLogging = false
-        closeSuperFrameRawOutput()
-
-        val files = listOfNotNull(
-            workingSuperFrameRawFile,
-            workingDebugFile,
-            workingArousalFile,
-            workingHeartRateFile,
-            workingStabilityEpisodeFile
-        ).filter { it.exists() }
-
-        val exported = files.mapNotNull { exportFileToDownloads(appContext, it) }
-        lastSavedFilePath = exported.firstOrNull()
-        clearWorkingReferences()
+    fun stopBleAndSave(reason: String): String? {
+        logConnectionEvent("finished", reason)
+        val file = workingDebugFile
+        workingDebugFile = null
+        file?.let(::exportClosed)
+        check(preferences.edit().remove("ble_file").commit())
         return lastSavedFilePath
     }
 
-    fun getWorkingLogPath(): String? = workingSuperFrameRawFile?.absolutePath
+    fun getWorkingLogPath(): String? = rawOutputs.values.lastOrNull()?.file?.absolutePath
     fun getWorkingDebugLogPath(): String? = workingDebugFile?.absolutePath
-    fun getWorkingArousalLogPath(): String? = workingArousalFile?.absolutePath
-    fun getWorkingHeartRateDiagnosticLogPath(): String? = workingHeartRateFile?.absolutePath
     fun getWorkingStabilityEpisodeLogPath(): String? =
         workingStabilityEpisodeFile?.absolutePath
 
     @Synchronized
-    fun clear() {
-        isLogging = false
-        closeSuperFrameRawOutput()
-        listOfNotNull(
-            workingSuperFrameRawFile,
-            workingDebugFile,
-            workingArousalFile,
-            workingHeartRateFile,
-            workingStabilityEpisodeFile
-        ).forEach { runCatching { it.delete() } }
-        clearWorkingReferences()
-        lastSavedFilePath = null
+    fun closeHandlesForRecovery() {
+        rawOutputs.values.forEach { runCatching { it.output.close() } }
+        rawOutputs.clear()
+        // Persistent identities remain: a service restart appends to these same files.
     }
 
-    private fun clearWorkingReferences() {
-        closeSuperFrameRawOutput()
-        workingSuperFrameRawFile = null
-        workingDebugFile = null
-        workingArousalFile = null
-        workingHeartRateFile = null
-        workingStabilityEpisodeFile = null
+    private fun exportClosed(file: File) {
+        if (!file.exists()) return
+        lastSavedFilePath = file.absolutePath
+        closedFileExporter?.invoke(file) ?: PotchLogExporter.enqueue(appContext, file.name)
     }
-
-    private fun closeSuperFrameRawOutput() {
-        runCatching { superFrameRawOutput?.flush() }
-        runCatching { superFrameRawOutput?.close() }
-        superFrameRawOutput = null
-    }
-
-    private fun DomainEvidence.toCsvValues(): Array<Any?> = arrayOf(
-        score,
-        confidence,
-        coverage,
-        usable,
-        composition
-    )
-
-    private fun MetricEvidence.toCsvValues(): Array<Any?> = arrayOf(
-        score,
-        confidence,
-        coverage,
-        usable,
-        baselineSource,
-        baselineCenter,
-        baselineSpread,
-        signedDistance,
-        normalizedDistance,
-        baselineScore,
-        trendScore,
-        signalQuality,
-        reasons,
-        log
-    )
 
     private fun appendCsv(file: File?, vararg values: Any?) {
-        file?.appendText(values.joinToString(",") { csv(it) } + "\n", Charsets.UTF_8)
+        if (file == null) return
+        // Upsert episode snapshots so process death does not lose all completed episodes,
+        // while later candidate selection updates still leave one row per episode.
+        stabilityRows[values[2].toString()] = values.joinToString(",") { csv(it) }
+        runCatching {
+            val header = file.bufferedReader(Charsets.UTF_8).use { it.readLine() }
+            val temporary = File(file.parentFile, "${file.name}.pending")
+            temporary.writeText(header + "\n" + stabilityRows.values.joinToString("\n", postfix = "\n"), Charsets.UTF_8)
+            Files.move(temporary.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+        }.onFailure { Log.e("PotchDataLogger", "Stability snapshot write failed; previous CSV retained", it) }
     }
 
     private fun csv(value: Any?): String {
@@ -811,10 +497,9 @@ class PotchDataLogger(context: Context) {
         private const val INTERNAL_LOG_DIR_NAME = "PotchLogs"
         private const val DOWNLOAD_SUBDIRECTORY = "PotchLogs"
         private const val UTF8_BOM = "\uFEFF"
+        private const val PHONE_TIME_SIZE_BYTES = Long.SIZE_BYTES
         private const val PACKET_SIZE_BYTES = 142
-        private const val PACKETS_PER_SUPERFRAME = 8
-        private const val COMPLETE_SUPERFRAME_SIZE_BYTES =
-            PACKET_SIZE_BYTES * PACKETS_PER_SUPERFRAME
+        private const val RAW_RECORD_SIZE_BYTES = PHONE_TIME_SIZE_BYTES + PACKET_SIZE_BYTES
 
         fun listInternalLogFiles(context: Context): List<InternalPotchLogFile> {
             val directory = File(context.applicationContext.filesDir, INTERNAL_LOG_DIR_NAME)

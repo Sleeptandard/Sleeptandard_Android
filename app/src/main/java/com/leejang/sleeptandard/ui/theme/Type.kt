@@ -14,7 +14,7 @@ val Pretandard = FontFamily(
     Font(R.font.pretendard_bold, FontWeight.Bold),
     Font(R.font.pretendard_medium, FontWeight.Medium),
     Font(R.font.pretendard_regular, FontWeight.Normal),
-    Font(R.font.pretendard_semibold, FontWeight.SemiBold)
+    Font(R.font.pretendard_semibold, FontWeight.SemiBold),
 )
 
 val Paperlogy = FontFamily(
@@ -61,15 +61,11 @@ val Typography = Typography(
         fontSize = 22.sp,
         letterSpacing = 0.em
     ),
-    /*
     labelSmall = TextStyle(
-        fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.Medium,
+        fontFamily = Pretandard,
+        fontWeight = FontWeight.Normal,
         fontSize = 11.sp,
-        lineHeight = 16.sp,
-        letterSpacing = 0.5.sp
+        letterSpacing = (-0.025).em
     )
-
-     */
 
 )

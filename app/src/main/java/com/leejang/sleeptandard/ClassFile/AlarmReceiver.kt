@@ -19,9 +19,53 @@ import android.os.VibratorManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.leejang.sleeptandard.AlarmRingActivity
+import com.leejang.sleeptandard.Potch.PotchDataLogger
+import com.leejang.sleeptandard.Potch.AlarmLogSessionStore
+import com.leejang.sleeptandard.Prefs.AlarmPreferences
 import com.leejang.sleeptandard.R
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 private const val ALARM_CHANNEL_ID = "alarm_channel"
+private const val WTF_TAG = "WTF"
+
+private object AlarmRingFileLogger {
+    private const val LOG_DIRECTORY = "PotchLogs"
+
+    @Synchronized
+    fun writeNewAndExport(context: Context, ringTimeMillis: Long, alarmType: String) {
+        runCatching {
+            val directory = File(context.applicationContext.filesDir, LOG_DIRECTORY).apply {
+                mkdirs()
+            }
+            val fileTimestamp = SimpleDateFormat(
+                "yyyyMMdd_HHmmss_SSS",
+                Locale.KOREA
+            ).format(Date(ringTimeMillis))
+            val phoneTime = SimpleDateFormat(
+                "yyyy-MM-dd HH:mm:ss.SSS",
+                Locale.KOREA
+            ).format(Date(ringTimeMillis))
+            val logFile = File(directory, "alarm_ring_log_$fileTimestamp.txt")
+            logFile.writeText(
+                "$phoneTime : $alarmType\n",
+                Charsets.UTF_8
+            )
+
+            val exportedPaths = PotchDataLogger.exportInternalLogFilesToDownloads(
+                context = context.applicationContext,
+                fileNames = listOf(logFile.name)
+            )
+            check(exportedPaths.isNotEmpty()) {
+                "Downloads/PotchLogs 내보내기에 실패했습니다."
+            }
+        }.onFailure { error ->
+            Log.e(WTF_TAG, "알람 울림 TXT 로그 저장 실패: ${error.message}", error)
+        }
+    }
+}
 
 // 소리/진동을 Activity에서도 끌 수 있도록 전역으로 관리하는 객체
 object AlarmPlayer {
@@ -112,15 +156,45 @@ object AlarmPlayer {
 
 class AlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        // 알람 정보 (없으면 기본값 사용)
-        // val label = intent.getStringExtra("label") ?: "알람"
-        val ringtoneUriString = intent.getStringExtra("ringtoneUri")
-        val vibrationEnabled = intent.getBooleanExtra("vibrationEnabled", true)
-        val alarmId = intent.getIntExtra("alarmId", 0)
-        val volume = intent.getIntExtra("volume", 10)
+        val ringtoneUriString = intent.getStringExtra(AlarmScheduler.EXTRA_RINGTONE_URI)
+        val vibrationEnabled =
+            intent.getBooleanExtra(AlarmScheduler.EXTRA_VIBRATION_ENABLED, true)
+        val alarmId = intent.getIntExtra(AlarmScheduler.EXTRA_ALARM_ID, 0)
+        val volume = intent.getIntExtra(AlarmScheduler.EXTRA_VOLUME, 10)
+        val targetTimeMillis =
+            intent.getLongExtra(AlarmScheduler.EXTRA_TARGET_TIME_MILLIS, 0L)
+        val triggerSource =
+            intent.getStringExtra(AlarmScheduler.EXTRA_TRIGGER_SOURCE) ?: "UNKNOWN"
+
+        Log.i(
+            WTF_TAG,
+            "AlarmReceiver.onReceive: action=${intent.action}, alarmId=$alarmId, " +
+                "triggerSource=$triggerSource, targetTimeMillis=$targetTimeMillis, " +
+                "hasAlarm=${AlarmPreferences(context).isAlarmSet()}, " +
+                "pid=${android.os.Process.myPid()}"
+        )
+
+        AlarmPreferences(context).setAlarmRinging(true)
+        val logSessionId = AlarmLogSessionStore(context).ring(alarmId, targetTimeMillis)
+
+        // Whether this is the target-time fallback or an early Potch trigger,
+        // make both exact-alarm reservations disappear before ringing.
+        AlarmScheduler(context).completeTriggeredAlarm(alarmId, targetTimeMillis)
 
         // 1) 소리/진동 시작 (Activity가 안 떠도 최소한 울리게)
         AlarmPlayer.start(context, ringtoneUriString, vibrationEnabled, volume)
+        val actualRingTimeMillis = System.currentTimeMillis()
+        val alarmType = when (triggerSource) {
+            AlarmScheduler.TRIGGER_SOURCE_POTCH_EARLY -> "각성 알람"
+            AlarmScheduler.TRIGGER_SOURCE_TARGET_TIME -> "정시 알람"
+            // 앱 업데이트 전에 예약된 정시 PendingIntent와의 호환 처리.
+            else -> if (targetTimeMillis > 0L) "정시 알람" else "각성 알람"
+        }
+        AlarmRingFileLogger.writeNewAndExport(
+            context = context,
+            ringTimeMillis = actualRingTimeMillis,
+            alarmType = alarmType
+        )
 
         // 2) 알람 채널 생성
         createAlarmChannel(context)
@@ -128,6 +202,7 @@ class AlarmReceiver : BroadcastReceiver() {
         // 3) 전체화면으로 띄울 Activity 인텐트
         val fullScreenIntent = Intent(context, AlarmRingActivity::class.java).apply {
             putExtra("alarmId", alarmId)
+            putExtra("logSessionId", logSessionId)
             // putExtra("label", label)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         }
@@ -163,6 +238,11 @@ class AlarmReceiver : BroadcastReceiver() {
 
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         nm.notify(alarmId, notification)
+        Log.i(
+            WTF_TAG,
+            "알람 full-screen notification 게시: alarmId=$alarmId, " +
+                "AlarmRingActivity intentFlags=${fullScreenIntent.flags}"
+        )
     }
 
     private fun createAlarmChannel(context: Context) {

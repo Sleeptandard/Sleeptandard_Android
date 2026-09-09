@@ -2,6 +2,7 @@ package com.leejang.sleeptandard.Component
 
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.MutatePriority
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.FlingBehavior
 import androidx.compose.foundation.gestures.ScrollScope
@@ -22,12 +23,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -39,6 +42,96 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.util.Calendar
 import kotlin.math.abs
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+
+
+data class CustomTimePickerValue(
+    val hour12: Int,
+    val minute: Int,
+    val isAm: Boolean,
+)
+
+@Stable
+class CustomTimePickerState internal constructor(
+    internal val ampmListState: LazyListState,
+    internal val hourListState: LazyListState,
+    internal val minuteListState: LazyListState,
+    initialHour12: Int,
+    initialMinute: Int,
+    initialIsAm: Boolean,
+) {
+    internal var ampmIndex by mutableIntStateOf(if (initialIsAm) 0 else 1)
+    internal var hourIndex by mutableIntStateOf((initialHour12 - 1).coerceIn(0, 11))
+    internal var minuteIndex by mutableIntStateOf(initialMinute.coerceIn(0, 59))
+
+    private val stopMutex = Mutex()
+
+    /**
+     * 진행 중인 드래그/플링을 취소한 뒤 현재 화면 중앙에 가장 가까운 값을 확정한다.
+     * PreventUserInput 우선순위로 첫 번째 손가락의 드래그 제스처도 함께 종료한다.
+     */
+    suspend fun stopAndCommit(): CustomTimePickerValue = stopMutex.withLock {
+        coroutineScope {
+            launch { ampmListState.stopScroll(MutatePriority.PreventUserInput) }
+            launch { hourListState.stopScroll(MutatePriority.PreventUserInput) }
+            launch { minuteListState.stopScroll(MutatePriority.PreventUserInput) }
+        }
+
+        // 마지막 스크롤 델타가 레이아웃에 반영된 뒤 중앙값을 읽는다.
+        withFrameNanos { }
+
+        ampmIndex = ampmListState.centeredRealIndex(itemCount = 2, fallback = ampmIndex)
+        hourIndex = hourListState.centeredRealIndex(itemCount = 12, fallback = hourIndex)
+        minuteIndex = minuteListState.centeredRealIndex(itemCount = 60, fallback = minuteIndex)
+
+        CustomTimePickerValue(
+            hour12 = hourIndex + 1,
+            minute = minuteIndex,
+            isAm = ampmIndex == 0,
+        )
+    }
+}
+
+@Composable
+fun rememberCustomTimePickerState(
+    initialHour12: Int = 6,
+    initialMinute: Int = 0,
+    initialIsAm: Boolean = true,
+): CustomTimePickerState {
+    val ampmListState = rememberLazyListState()
+    val hourListState = rememberLazyListState()
+    val minuteListState = rememberLazyListState()
+
+    return remember(ampmListState, hourListState, minuteListState) {
+        CustomTimePickerState(
+            ampmListState = ampmListState,
+            hourListState = hourListState,
+            minuteListState = minuteListState,
+            initialHour12 = initialHour12,
+            initialMinute = initialMinute,
+            initialIsAm = initialIsAm,
+        )
+    }
+}
+
+private fun LazyListState.centeredRealIndex(itemCount: Int, fallback: Int): Int {
+    if (itemCount <= 0) return fallback
+
+    val layout = layoutInfo
+    val centeredVirtualIndex = if (layout.visibleItemsInfo.isEmpty()) {
+        return fallback
+    } else {
+        val viewportCenter = (layout.viewportStartOffset + layout.viewportEndOffset) / 2
+        layout.visibleItemsInfo.minByOrNull { info ->
+            abs(info.offset + info.size / 2 - viewportCenter)
+        }?.index ?: return fallback
+    }
+
+    return ((centeredVirtualIndex % itemCount) + itemCount) % itemCount
+}
 
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -221,7 +314,11 @@ fun CustomTimePicker(
     defaultMinute: Int = 0,
     defaultIsAm: Boolean = true,
     onTimeChange: (hour12: Int, minute: Int, isAm: Boolean) -> Unit,
-    stopSignal: Int = 0, // ✅ 추가
+    state: CustomTimePickerState = rememberCustomTimePickerState(
+        initialHour12 = defaultHour12,
+        initialMinute = defaultMinute,
+        initialIsAm = defaultIsAm,
+    ),
     scrollEnable: Boolean = true,
     itemHeight: Dp = 65.dp,
     itemHeightAmPm: Dp = 42.dp,
@@ -244,24 +341,9 @@ fun CustomTimePicker(
     val hourItems = (1..12).map { it.toString() }
     val minuteItems = (0..59).map { it.toString().padStart(2, '0') }
 
-    var ampmIndex by remember { mutableIntStateOf(if (defaultIsAm) 0 else 1) }
-    var hourIndex by remember { mutableIntStateOf((defaultHour12 - 1).coerceIn(0, 11)) }
-    var minuteIndex by remember { mutableIntStateOf(defaultMinute.coerceIn(0, 59)) }
-
-    val ampmState = rememberLazyListState()
-    val hourState = rememberLazyListState()
-    val minuteState = rememberLazyListState()
-
-    LaunchedEffect(stopSignal) {
-        ampmState.stopScroll()
-        hourState.stopScroll()
-        minuteState.stopScroll()
-    }
-
-
     // 값 바뀔 때마다 콜백
-    LaunchedEffect(ampmIndex, hourIndex, minuteIndex) {
-        onTimeChange(hourIndex + 1, minuteIndex, ampmIndex == 0)
+    LaunchedEffect(state.ampmIndex, state.hourIndex, state.minuteIndex) {
+        onTimeChange(state.hourIndex + 1, state.minuteIndex, state.ampmIndex == 0)
     }
 
     Row(
@@ -273,11 +355,11 @@ fun CustomTimePicker(
             modifier = Modifier.width(40.dp),
             items = ampmItems,
             itemHeight = itemHeight,
-            selectedIndex = ampmIndex,
-            onSelectedIndexChange = { ampmIndex = it },
+            selectedIndex = state.ampmIndex,
+            onSelectedIndexChange = { state.ampmIndex = it },
             textStyle = ampmTextStyle,
             fadedTextStyle = ampmFadedTextStyle,
-            state = ampmState,
+            state = state.ampmListState,
             scrollEnable = scrollEnable
         )
 
@@ -286,10 +368,10 @@ fun CustomTimePicker(
         WheelPicker(
             modifier = Modifier.width(66.dp),
             items = hourItems,
-            selectedIndex = hourIndex,
-            onSelectedIndexChange = { hourIndex = it },
+            selectedIndex = state.hourIndex,
+            onSelectedIndexChange = { state.hourIndex = it },
             isCyclic = true,
-            state = hourState,
+            state = state.hourListState,
             scrollEnable = scrollEnable,
             itemHeight = itemHeight,
             textStyle = textStyle,
@@ -311,10 +393,10 @@ fun CustomTimePicker(
         WheelPicker(
             modifier = Modifier.width(66.dp),
             items = minuteItems,
-            selectedIndex = minuteIndex,
-            onSelectedIndexChange = { minuteIndex = it },
+            selectedIndex = state.minuteIndex,
+            onSelectedIndexChange = { state.minuteIndex = it },
             isCyclic = true,
-            state = minuteState,
+            state = state.minuteListState,
             scrollEnable = scrollEnable,
             itemHeight = itemHeight,
             textStyle = textStyle,

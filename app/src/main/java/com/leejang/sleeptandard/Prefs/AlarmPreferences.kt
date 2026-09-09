@@ -2,6 +2,7 @@ package com.leejang.sleeptandard.Prefs
 
 import android.content.Context
 import android.media.RingtoneManager
+import android.util.Log
 import com.leejang.sleeptandard.ClassFile.Alarm
 import androidx.core.content.edit
 
@@ -17,7 +18,8 @@ class AlarmPreferences(private val context: Context) {
         prefs.edit { putBoolean("is_first_run", false) }
     }
 
-    fun saveAlarm(alarm: Alarm) {
+    fun saveAlarm(alarm: Alarm, triggerTimeMillis: Long? = null) {
+        val before = prefs.getBoolean("hasAlarm", false)
         prefs.edit {
             putBoolean("hasAlarm", true)
                 .putInt("hour", alarm.hour)
@@ -26,9 +28,16 @@ class AlarmPreferences(private val context: Context) {
                 .putString("ringtoneUri", alarm.ringtoneUri)
                 .putInt("volume", alarm.volume) // ✅ 저장 추가
                 .putBoolean("vibrationEnabled", alarm.vibrationEnabled)
-                .putInt("earlyWakeUpMinutes", alarm.earlyWakeUpMinutes)
-                .putBoolean("isRem", alarm.isRem)
+            if (triggerTimeMillis != null) {
+                putLong(KEY_TRIGGER_TIME_MILLIS, triggerTimeMillis)
+            }
         }
+        Log.i(
+            WTF_TAG,
+            "AlarmPreferences.saveAlarm: hasAlarm $before -> ${prefs.getBoolean("hasAlarm", false)}, " +
+                "alarmId=${alarm.id}, time=${alarm.hour}:${alarm.minute}, " +
+                "isAm=${alarm.isAm}, triggerTimeMillis=$triggerTimeMillis"
+        )
     }
 
     fun loadAlarm(): Alarm {
@@ -42,18 +51,42 @@ class AlarmPreferences(private val context: Context) {
             isAm = prefs.getBoolean("isAm", true),
             ringtoneUri = prefs.getString("ringtoneUri", defaultRingtoneUri) ?: defaultRingtoneUri,
             volume = prefs.getInt("volume", 5), // ✅ 불러오기 추가
-            vibrationEnabled = prefs.getBoolean("vibrationEnabled", true),
-            earlyWakeUpMinutes = prefs.getInt("earlyWakeUpMinutes", 30)
+            vibrationEnabled = prefs.getBoolean("vibrationEnabled", true)
         )
     }
 
+    fun getScheduledTriggerTimeMillis(): Long =
+        prefs.getLong(KEY_TRIGGER_TIME_MILLIS, 0L)
+
+    fun clearScheduledTriggerTime() {
+        val previous = getScheduledTriggerTimeMillis()
+        prefs.edit { remove(KEY_TRIGGER_TIME_MILLIS) }
+        Log.i(WTF_TAG, "AlarmPreferences.clearScheduledTriggerTime: $previous -> ${getScheduledTriggerTimeMillis()}")
+    }
+
+    fun setAlarmRinging(ringing: Boolean) {
+        prefs.edit { putBoolean(KEY_ALARM_RINGING, ringing) }
+        Log.i(WTF_TAG, "AlarmPreferences.setAlarmRinging: ringing=$ringing")
+    }
+
+    fun isAlarmRinging(): Boolean = prefs.getBoolean(KEY_ALARM_RINGING, false)
+
     fun clearAlarm(){
+        val before = prefs.getBoolean("hasAlarm", false)
+        Log.i(WTF_TAG, "AlarmPreferences.clearAlarm 시작: hasAlarm=$before")
         prefs.edit {
             putBoolean("hasAlarm", false)
+                .putBoolean(KEY_ALARM_RINGING, false)
                 .putInt("hour", 8)
                 .putInt("minute", 30)
                 .putBoolean("isAm", true)
+                .remove(KEY_TRIGGER_TIME_MILLIS)
         }
+        Log.i(
+            WTF_TAG,
+            "AlarmPreferences.clearAlarm 완료: hasAlarm=${prefs.getBoolean("hasAlarm", false)}, " +
+                "triggerTimeMillis=${getScheduledTriggerTimeMillis()}"
+        )
     }
 
     /** 알람 설정 기억해놓기 위해서 위에거로 바꿈  10.23 **/
@@ -83,5 +116,11 @@ class AlarmPreferences(private val context: Context) {
         prefs.edit {
             putBoolean("show_window_tutorial", show)
         }
+    }
+
+    companion object {
+        private const val KEY_TRIGGER_TIME_MILLIS = "triggerTimeMillis"
+        private const val KEY_ALARM_RINGING = "alarmRinging"
+        private const val WTF_TAG = "WTF"
     }
 }

@@ -5,16 +5,24 @@ import android.net.Uri
 import android.provider.Settings
 import android.util.Log
 import android.widget.Toast
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
@@ -59,6 +67,7 @@ import com.leejang.sleeptandard.Screen.ExperimentScreen
 import com.leejang.sleeptandard.Screen.InquireScreen
 import com.leejang.sleeptandard.Screen.JournalScreen
 import com.leejang.sleeptandard.Screen.LoginDemoScreen
+import com.leejang.sleeptandard.Screen.PotchScreen
 import com.leejang.sleeptandard.Screen.QnAScreen
 import com.leejang.sleeptandard.Screen.QnADetailScreen
 import com.leejang.sleeptandard.Screen.ReviewAlarmScreen
@@ -72,6 +81,8 @@ import com.leejang.sleeptandard.ui.theme.AppIcons
 
 sealed class Screen(val route: String) {
     object Home : Screen("home")
+    object Potch : Screen("potch")
+    object PotchConnection : Screen("potch_connection")
     object Journal : Screen("journal")
     object Settings : Screen("settings")
     object SendingData: Screen("sendingdata")
@@ -117,10 +128,24 @@ fun AppNav(
                 rememberNavController.navigate(Screen.Experiment.route) {
                     launchSingleTop = true
                 }
-
-                onOpenScreenConsumed()
             }
+            Screen.ReviewAlarm.route -> {
+                Log.i("WTF", "알람 종료 명령 수신: ReviewAlarmScreen으로 이동")
+                rememberNavController.navigate(Screen.ReviewAlarm.route) {
+                    popUpTo(rememberNavController.graph.id) { inclusive = false }
+                    launchSingleTop = true
+                }
+            }
+            Screen.Home.route -> {
+                rememberNavController.navigate(Screen.Home.route) {
+                    popUpTo(rememberNavController.graph.id) { inclusive = false }
+                    launchSingleTop = true
+                }
+            }
+            null -> return@LaunchedEffect
+            else -> Log.w("WTF", "알 수 없는 화면 이동 명령: $openScreen")
         }
+        onOpenScreenConsumed()
     }
 
 
@@ -150,6 +175,14 @@ fun AppNav(
     // ✅ 1. 영구 저장소에서 초기 값을 가져와 세션 상태로 관리합니다.
     var showWindowTutorial by remember { mutableStateOf(alarmPrefs.getShowWindowTutorial()) }
 
+    LaunchedEffect(startDestination) {
+        Log.i(
+            "WTF",
+            "AppNav 초기화: startDestination=$startDestination, " +
+                "hasAlarmSnapshot=$isAlarmSetted, initialAlarm=${initialAlarm?.hour}:${initialAlarm?.minute}"
+        )
+    }
+
 
     val navGraph = rememberNavController.createGraph(startDestination = startDestination){
 
@@ -175,6 +208,11 @@ fun AppNav(
                 alarmViewModel = alarmViewModel,
                 scheduler = scheduler,
                 onClickConfirm = {
+                    Log.i(
+                        "WTF",
+                        "HomeScreen 알람 설정 완료 네비게이션 요청: " +
+                            "hasAlarm=${alarmPrefs.isAlarmSet()}"
+                    )
                     rememberNavController.navigate(Screen.SettedAlarm.route){
                         popUpTo(Screen.Home.route){inclusive = true}
                     }
@@ -182,6 +220,16 @@ fun AppNav(
 
                 goExperimentScreen = {
                     rememberNavController.navigate(Screen.Experiment.route)
+                },
+
+                goPotchConnectionScreen = {
+                    rememberNavController.navigate(Screen.PotchConnection.route) {
+                        launchSingleTop = true
+                    }
+                },
+
+                onBatteryWarningVisibilityChange = { visible ->
+                    isBlurred = visible
                 },
 
                 showWindowTutorial = showWindowTutorial,
@@ -201,6 +249,11 @@ fun AppNav(
                 alarmViewModel = alarmViewModel,
                 scheduler = scheduler,
                 onTurnAlarmOff = {
+                    Log.i(
+                        "WTF",
+                        "SettedAlarmScreen 알람 해제 네비게이션 요청: " +
+                            "hasAlarm=${alarmPrefs.isAlarmSet()}"
+                    )
                     rememberNavController.navigate(Screen.Home.route){
                         // 0번(루트)까지 모든 화면을 스택에서 제거(inclusive)합니다.
                         popUpTo(0) { inclusive = true }
@@ -213,13 +266,22 @@ fun AppNav(
         composable(Screen.ReviewAlarm.route){
             ReviewAlarmScreen(
                 onSubmit = {
+                    Log.i("WTF", "ReviewAlarmScreen 리뷰 완료: HomeScreen으로 이동")
                     rememberNavController.navigate(Screen.Home.route){
-                        // 네비 스택 초기화
-                        popUpTo(Screen.ReviewAlarm.route){inclusive = true}
+                        popUpTo(rememberNavController.graph.id) { inclusive = false }
+                        launchSingleTop = true
                     }
 
                 }
             )
+        }
+
+        composable(Screen.Potch.route){
+            PotchScreen()
+        }
+
+        composable(Screen.PotchConnection.route) {
+            PotchScreen(openConnectionSheetInitially = true)
         }
 
         composable(Screen.Journal.route) {
@@ -372,6 +434,11 @@ fun AppNav(
                     alarmPrefs.setShowWindowTutorial(true) // 영구 저장소 업데이트
                     showWindowTutorial = true               // 세션 상태 업데이트
 
+                    rememberNavController.navigate(Screen.Home.route) {
+                        popUpTo(Screen.Tutorial.route) { inclusive = true }
+                    }
+                    // 일단 로그인 기능 닫아놓음
+                    /*
                     if(userPrefs.isLogined()) {
                         rememberNavController.navigate(Screen.Home.route) {
                             popUpTo(Screen.Tutorial.route) { inclusive = true }
@@ -379,20 +446,10 @@ fun AppNav(
                     }else{
                         rememberNavController.navigate(Screen.LoginDemo.route)
                     }
-                }
-                /*
-                onFinish = {
-                    alarmPrefs.setFirstRunCompleted()
-                    rememberNavController.popBackStack()
-                    when{
-                        // TODO: 로그인 정보가 없는경우 -> Screen.LoginDemo.route
-                        alarmPrefs.isFirstRun() -> Screen.Tutorial.route
-                        else -> Screen.Home.route
-                    }
-                    rememberNavController.navigate(Screen.Home.route)
+
+                     */
                 }
 
-                 */
             )
         }
         composable(Screen.SendingData.route) {
@@ -431,18 +488,31 @@ fun AppNav(
 
     val navBackStackEntry by rememberNavController.currentBackStackEntryAsState()   // 최신 스택을 가져옴 (현재 위치한 경로)
     val currentRoute = navBackStackEntry?.destination?.route    // 최신 스택의 route를 가져옴 (현재 위치한 경로)
+    var previousRouteForLog by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(currentRoute) {
+        val destination = currentRoute ?: return@LaunchedEffect
+        val previous = previousRouteForLog ?: "null"
+        if (previous != destination) {
+            Log.i("WTF", "네비게이션 되었음: from $previous to $destination")
+            previousRouteForLog = destination
+        }
+    }
 
     Scaffold(
         bottomBar = {
             // 지금 라우트가 홈, 일지, 설정, 알람설정완료화면, 데이터보내기  이면 바텀네비바를 띄우기 위한 Boolean값임.
             val showBottom = when (currentRoute) {
                 Screen.Home.route,
+                Screen.Potch.route,
+                Screen.PotchConnection.route,
                 Screen.Journal.route,
                 Screen.SettedAlarm.route,
                 Screen.Settings.route,
                 Screen.QnA.route,
                 Screen.QnADetail.route,
                 Screen.SendingData.route -> true
+
                 Screen.AccountManagement.route -> true
                 else -> false
             }
@@ -454,27 +524,35 @@ fun AppNav(
                     selectedIndex = when (currentRoute) {
                         Screen.Home.route -> 0
                         Screen.SettedAlarm.route -> 0
-                        Screen.Journal.route -> 1
-                        Screen.Settings.route -> 2
-                        Screen.QnA.route -> 2
-                        Screen.QnADetail.route -> 2
-                        Screen.SendingData.route -> 2
+                        Screen.Potch.route -> 1
+                        Screen.PotchConnection.route -> 1
+                        Screen.Journal.route -> 2
+                        Screen.Settings.route -> 3
+                        Screen.QnA.route -> 3
+                        Screen.QnADetail.route -> 3
+                        Screen.SendingData.route -> 3
 
-                        else -> 2
+                        else -> 3
                     },
                     onSelect = { idx ->
                         val target = when (idx) {
                             0 -> if(isAlarmSetted) Screen.SettedAlarm.route else Screen.Home.route
-                            1 -> Screen.Journal.route
-                            2 -> Screen.Settings.route
+                            1 -> Screen.Potch.route
+                            2 -> Screen.Journal.route
+                            3 -> Screen.Settings.route
                             else -> Screen.Home.route
                         }
+                        Log.i(
+                            "WTF",
+                            "BottomNav 선택: idx=$idx, current=$currentRoute, target=$target, " +
+                                "hasAlarmSnapshot=$isAlarmSetted, hasAlarmNow=${alarmPrefs.isAlarmSet()}"
+                        )
                         rememberNavController.navigate(target) {
                             launchSingleTop = true  // 동일 화면이 스택 맨 위에 있다면 새로 만들지 않음
-                            restoreState = true     // 이전에 입력한 정보 등이 있다면 복구
-                            // 뒤로가기를 누르면 그래프에 설정되어 있는 startDestination으로 날아감
+                            // Home은 연결 모달 같은 하위 화면을 복원하지 않고 루트 자체로 돌아간다.
+                            restoreState = idx != 0
                             popUpTo(rememberNavController.graph.startDestinationId) {
-                                saveState = true
+                                saveState = idx != 0
                             }
                         }
                     }
@@ -507,28 +585,88 @@ fun AlarmBottomNavBar(
         containerColor = MaterialTheme.colorScheme.background,
         windowInsets = NavigationBarDefaults.windowInsets
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().blur(blurRadius),
-            horizontalArrangement = Arrangement.SpaceAround
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(BOTTOM_NAV_CONTENT_HEIGHT)
+                .blur(blurRadius)
         ) {
-            StandaloneBottomItem(
-                selected = selectedIndex == 0,
-                iconRes = AppIcons.NavAlarm,
-                label = "알람",
-                onClick = { onSelect(0) }
+            val itemWidth = maxWidth / BOTTOM_NAV_ITEM_COUNT
+            val indicatorOffsetX by animateDpAsState(
+                targetValue = itemWidth * selectedIndex.coerceIn(0, BOTTOM_NAV_ITEM_COUNT - 1),
+                animationSpec = tween(
+                    durationMillis = BOTTOM_NAV_TRANSITION_DURATION_MILLIS,
+                    easing = FastOutSlowInEasing
+                ),
+                label = "bottomNavIndicatorOffset"
             )
-            StandaloneBottomItem(
-                selected = selectedIndex == 1,
-                iconRes = AppIcons.NavJournal,
-                label = "일지",
-                onClick = { onSelect(1) }
-            )
-            StandaloneBottomItem(
-                selected = selectedIndex == 2,
-                iconRes = AppIcons.NavSettings,
-                label = "설정",
-                onClick = { onSelect(2) }
-            )
+
+            Row(modifier = Modifier.fillMaxSize()) {
+                StandaloneBottomItem(
+                    selected = selectedIndex == 0,
+                    iconRes = AppIcons.NavAlarm,
+                    label = "알람",
+                    onClick = { onSelect(0) },
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                )
+                StandaloneBottomItem(
+                    selected = selectedIndex == 1,
+                    iconRes = AppIcons.NavPotch,
+                    label = "팟치",
+                    onClick = { onSelect(1) },
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                )
+                StandaloneBottomItem(
+                    selected = selectedIndex == 2,
+                    iconRes = AppIcons.NavJournal,
+                    label = "일지",
+                    onClick = { onSelect(2) },
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                )
+                StandaloneBottomItem(
+                    selected = selectedIndex == 3,
+                    iconRes = AppIcons.NavSettings,
+                    label = "설정",
+                    onClick = { onSelect(3) },
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                )
+            }
+
+            // 선택 점은 메뉴마다 새로 그리지 않고, 하나의 점을 선택 위치까지 이동한다.
+            Column(
+                modifier = Modifier
+                    .offset(x = indicatorOffsetX)
+                    .width(itemWidth)
+                    .fillMaxHeight(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center
+            ) {
+                Spacer(Modifier.size(24.dp))
+                Spacer(Modifier.height(7.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(BOTTOM_NAV_LOWER_SLOT_HEIGHT),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .background(
+                                color = Color(0xFFE0F5FD),
+                                shape = CircleShape
+                            )
+                    )
+                }
+            }
         }
     }
 }
@@ -550,6 +688,7 @@ fun StandaloneBottomItem(
             )
             .padding(0.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
     ) {
         Icon(
             painter = painterResource(iconRes),
@@ -559,24 +698,28 @@ fun StandaloneBottomItem(
             else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
         )
 
-        if (selected) {
-            Spacer(Modifier.height(7.dp))
-            // ✅ 점 표시
-            Box(
-                modifier = Modifier
-                    .size(8.dp)
-                    .background(
-                        color = Color(0xFFE0F5FD),
-                        shape = CircleShape
-                    )
-            )
-        } else {
-            // ✅ 텍스트 표시
-            Text(
-                text = label,
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
-            )
+        Spacer(Modifier.height(7.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(BOTTOM_NAV_LOWER_SLOT_HEIGHT),
+            contentAlignment = Alignment.Center
+        ) {
+            if (!selected) {
+                Text(
+                    text = label,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+                )
+            }
         }
     }
 }
+
+private const val BOTTOM_NAV_ITEM_COUNT = 4
+
+// Navigation Compose 2.9.6 기본 화면 전환 시간과 맞춘다.
+private const val BOTTOM_NAV_TRANSITION_DURATION_MILLIS = 300
+
+private val BOTTOM_NAV_CONTENT_HEIGHT = 80.dp
+private val BOTTOM_NAV_LOWER_SLOT_HEIGHT = 15.dp

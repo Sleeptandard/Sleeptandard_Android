@@ -8,12 +8,17 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
+import com.leejang.sleeptandard.ClassFile.AlarmScheduler
+import com.leejang.sleeptandard.ClassFile.PotchPostAlarmStopReceiver
+import com.leejang.sleeptandard.ClassFile.PotchAlarmTriggerPolicy
 import com.leejang.sleeptandard.MainActivity
+import com.leejang.sleeptandard.Prefs.AlarmPreferences
 import com.leejang.sleeptandard.Potch.PotchBleManager
 import com.leejang.sleeptandard.Potch.PotchDataLogger
 import com.leejang.sleeptandard.Potch.PotchDataProcessor
@@ -77,6 +82,36 @@ class PotchBleForegroundService : Service() {
          */
         const val ACTION_START = "com.leejang.sleeptandard.Potch.ACTION_START"
 
+        const val ACTION_START_HOME_CONNECTION =
+            "com.leejang.sleeptandard.Potch.ACTION_START_HOME_CONNECTION"
+        const val ACTION_START_DEVICE_DISCOVERY =
+            "com.leejang.sleeptandard.Potch.ACTION_START_DEVICE_DISCOVERY"
+        const val ACTION_SELECT_DEVICE =
+            "com.leejang.sleeptandard.Potch.ACTION_SELECT_DEVICE"
+        const val ACTION_CANCEL_DEVICE_DISCOVERY =
+            "com.leejang.sleeptandard.Potch.ACTION_CANCEL_DEVICE_DISCOVERY"
+        const val ACTION_REMOVE_REGISTERED_DEVICE =
+            "com.leejang.sleeptandard.Potch.ACTION_REMOVE_REGISTERED_DEVICE"
+        const val EXTRA_DEVICE_ADDRESS = "extra_device_address"
+
+        /** Fixed-window alarm monitoring commands sent by AlarmScheduler. */
+        const val ACTION_START_ALARM_MONITORING =
+            "com.leejang.sleeptandard.Potch.ACTION_START_ALARM_MONITORING"
+        const val ACTION_STOP_ALARM_MONITORING =
+            "com.leejang.sleeptandard.Potch.ACTION_STOP_ALARM_MONITORING"
+        const val ACTION_DISARM_ALARM_MONITORING =
+            "com.leejang.sleeptandard.Potch.ACTION_DISARM_ALARM_MONITORING"
+        const val ACTION_SYNC_ALARM_LOGGING =
+            "com.leejang.sleeptandard.Potch.ACTION_SYNC_ALARM_LOGGING"
+        const val ACTION_FINISH_POST_ALARM_LOGGING =
+            "com.leejang.sleeptandard.Potch.ACTION_FINISH_POST_ALARM_LOGGING"
+
+        fun requestSyncAlarmLogging(context: android.content.Context) {
+            ContextCompat.startForegroundService(context, Intent(context, PotchBleForegroundService::class.java).apply {
+                action = ACTION_SYNC_ALARM_LOGGING
+            })
+        }
+
         /**
          * Potch 수신 종료 및 로그 저장 명령.
          *
@@ -102,6 +137,45 @@ class PotchBleForegroundService : Service() {
          * 로그 확인용 태그
          */
         private const val TAG = "PotchBleFgService"
+
+        private const val SERVICE_PREFS = "potch_service"
+        private const val KEY_ALARM_MONITORING_ACTIVE = "alarm_monitoring_active"
+        private const val KEY_MONITORED_ALARM_ID = "monitored_alarm_id"
+        private const val KEY_MONITORED_TARGET_TIME = "monitored_target_time"
+        private const val KEY_ALARM_MONITOR_OWNS_SESSION = "alarm_monitor_owns_session"
+
+        /** Avoid starting a stopped service merely to deliver a no-op stop command. */
+        fun requestStopAlarmMonitoring(context: android.content.Context, targetTimeMillis: Long) {
+            val preferences = context.getSharedPreferences(SERVICE_PREFS, MODE_PRIVATE)
+            if (!preferences.getBoolean(KEY_ALARM_MONITORING_ACTIVE, false)) return
+
+            val monitoredTarget = preferences.getLong(KEY_MONITORED_TARGET_TIME, 0L)
+            if (targetTimeMillis > 0L && monitoredTarget != targetTimeMillis) return
+
+            val intent = Intent(context, PotchBleForegroundService::class.java).apply {
+                action = ACTION_STOP_ALARM_MONITORING
+                putExtra(AlarmScheduler.EXTRA_TARGET_TIME_MILLIS, targetTimeMillis)
+            }
+            ContextCompat.startForegroundService(context, intent)
+        }
+
+        /** 알람은 더 평가하지 않되, 해제 후 추가 수집을 위해 Potch 세션은 유지한다. */
+        fun requestDisarmAlarmMonitoring(
+            context: android.content.Context,
+            targetTimeMillis: Long,
+        ) {
+            val preferences = context.getSharedPreferences(SERVICE_PREFS, MODE_PRIVATE)
+            if (!preferences.getBoolean(KEY_ALARM_MONITORING_ACTIVE, false)) return
+
+            val monitoredTarget = preferences.getLong(KEY_MONITORED_TARGET_TIME, 0L)
+            if (targetTimeMillis > 0L && monitoredTarget != targetTimeMillis) return
+
+            val intent = Intent(context, PotchBleForegroundService::class.java).apply {
+                action = ACTION_DISARM_ALARM_MONITORING
+                putExtra(AlarmScheduler.EXTRA_TARGET_TIME_MILLIS, targetTimeMillis)
+            }
+            ContextCompat.startForegroundService(context, intent)
+        }
     }
 
     /**
@@ -140,6 +214,8 @@ class PotchBleForegroundService : Service() {
     private var bleManager: PotchBleManager? = null
 
     private var isStoppingService = false
+    private var registerDeviceWhenReady = false
+    private var hasTriggeredCurrentAlarm = false
 
     // ── 추론 파이프라인 ────────────────────────────────────────────────
     private var inferenceManager: PotchInferenceManager? = null
@@ -164,10 +240,7 @@ class PotchBleForegroundService : Service() {
 
         // Service를 foreground 상태로 올림
         // 이 알림이 떠 있어야 Android가 장시간 백그라운드 작업으로 인정해준다.
-        startForeground(
-            NOTIFICATION_ID,
-            buildNotification("Potch 수신 준비 중")
-        )
+        promoteToForeground("Potch 수신 준비 중")
 
         // Logger / Processor / BLE Manager 생성
         initializePotchObjects()
@@ -191,6 +264,26 @@ class PotchBleForegroundService : Service() {
         dataLogger?.logDebug(TAG, "onStartCommand() action=${intent?.action}, flags=$flags, startId=$startId, sessionRunning=${isSessionRunning()}", "I")
 
         when (intent?.action) {
+            ACTION_SYNC_ALARM_LOGGING -> {
+                syncAlarmLogging()
+                stopServiceIfIdle()
+            }
+            ACTION_FINISH_POST_ALARM_LOGGING -> {
+                val id = intent.getStringExtra(PotchPostAlarmStopReceiver.EXTRA_LOG_SESSION_ID)
+                val store = AlarmLogSessionStore(this)
+                val sessions = store.load()
+                val now = System.currentTimeMillis()
+                val finished = sessions.find { it.id == id && it.phase == AlarmLogPhase.POST_ALARM && now >= it.rawStopAtMillis }
+                if (finished != null) {
+                    val disconnect = AlarmLogSessionPolicy.shouldDisconnectAfterTail(sessions, finished.id, now)
+                    syncAlarmLogging()
+                    store.removeFinished(setOf(finished.id))
+                    if (disconnect) {
+                        markSessionRunning(false)
+                        stopPotchReceivingAndSave()
+                    } else stopServiceIfIdle()
+                }
+            }
             ACTION_UPDATE_MICRO_BPF -> {
                 val low = intent.getDoubleExtra(EXTRA_MICRO_LOW_CUT, 0.5)
                 val high = intent.getDoubleExtra(EXTRA_MICRO_HIGH_CUT, 5.0)
@@ -255,6 +348,66 @@ class PotchBleForegroundService : Service() {
 
                 // BLE 스캔/연결 시작
                 startPotchReceiving()
+            }
+
+            ACTION_START_HOME_CONNECTION -> {
+                isStoppingService = false
+                registerDeviceWhenReady = false
+                markSessionRunning(true)
+                startPotchReceiving(useRegisteredDevice = true)
+            }
+
+            ACTION_START_DEVICE_DISCOVERY -> {
+                isStoppingService = false
+                registerDeviceWhenReady = false
+                markSessionRunning(true)
+                startPotchReceiving(forceDeviceDiscovery = true)
+            }
+
+            ACTION_SELECT_DEVICE -> {
+                val address = intent.getStringExtra(EXTRA_DEVICE_ADDRESS)
+                if (address.isNullOrBlank()) {
+                    dataLogger?.logDebug(TAG, "ACTION_SELECT_DEVICE ignored: missing address", "E")
+                } else {
+                    registerDeviceWhenReady = true
+                    val started = bleManager?.selectDiscoveredDevice(address) ?: false
+                    if (!started) registerDeviceWhenReady = false
+                }
+            }
+
+            ACTION_CANCEL_DEVICE_DISCOVERY -> {
+                registerDeviceWhenReady = false
+                markSessionRunning(false)
+                bleManager?.cancelDeviceDiscovery()
+                clearStabilitySessionId()
+                stopServiceIfIdle()
+            }
+
+            ACTION_REMOVE_REGISTERED_DEVICE -> {
+                registerDeviceWhenReady = false
+                clearRegisteredPotch()
+                bleManager?.reportRegisteredDeviceRemoved()
+
+                stopServiceIfIdle()
+            }
+
+            ACTION_START_ALARM_MONITORING -> {
+                val alarmId = intent.getIntExtra(AlarmScheduler.EXTRA_ALARM_ID, 0)
+                val targetTimeMillis =
+                    intent.getLongExtra(AlarmScheduler.EXTRA_TARGET_TIME_MILLIS, 0L)
+                startAlarmMonitoring(alarmId, targetTimeMillis)
+            }
+
+            ACTION_STOP_ALARM_MONITORING -> {
+                val targetTimeMillis =
+                    intent.getLongExtra(AlarmScheduler.EXTRA_TARGET_TIME_MILLIS, 0L)
+                stopAlarmMonitoring(targetTimeMillis)
+            }
+
+            ACTION_DISARM_ALARM_MONITORING -> {
+                val targetTimeMillis =
+                    intent.getLongExtra(AlarmScheduler.EXTRA_TARGET_TIME_MILLIS, 0L)
+                disarmAlarmMonitoring(targetTimeMillis)
             }
 
             ACTION_STOP_AND_SAVE -> {
@@ -347,13 +500,22 @@ class PotchBleForegroundService : Service() {
         val manager = PotchBleManager(
             context = applicationContext,
             dataProcessor = processor,
-            dataLogger = logger
+            dataLogger = logger,
+            onConnectionSessionEnded = {
+                serviceScope.launch {
+                    markSessionRunning(false)
+                    stopServiceIfIdle()
+                }
+            }
         )
 
         dataLogger = logger
         dataProcessor = processor
         stabilityCalculator = stability
         bleManager = manager
+        syncAlarmLogging()
+        AlarmLogSessionStore(this).load().filter { it.phase == AlarmLogPhase.POST_ALARM }
+            .forEach { PotchPostAlarmStopReceiver.arm(this, it) }
 
         Log.i(TAG, "Potch objects initialized")
         dataLogger?.logDebug(TAG, "Potch objects initialized", "I")
@@ -397,19 +559,28 @@ class PotchBleForegroundService : Service() {
 
                 Log.d(
                     TAG,
-                    "BLE state: connected=${state.isConnected}, scanning=${state.isScanning}, reconnecting=${state.isReconnecting}, device=${state.deviceName}, log=${state.lastLog}, error=${state.lastError}"
+                    "BLE state: connected=${state.isConnected}, connecting=${state.isConnecting}, scanning=${state.isScanning}, reconnecting=${state.isReconnecting}, device=${state.deviceName}, log=${state.lastLog}, error=${state.lastError}"
                 )
-                dataLogger?.logDebug(TAG, "BLE state: connected=${state.isConnected}, scanning=${state.isScanning}, reconnecting=${state.isReconnecting}, device=${state.deviceName}, log=${state.lastLog}, error=${state.lastError}")
+                dataLogger?.logDebug(TAG, "BLE state: connected=${state.isConnected}, connecting=${state.isConnecting}, scanning=${state.isScanning}, reconnecting=${state.isReconnecting}, device=${state.deviceName}, log=${state.lastLog}, error=${state.lastError}")
 
                 // Service 내부 상태를 UI에서 볼 수 있게 공용 StateHolder에 전달
                 PotchServiceStateHolder.updateBleState(state)
                 stabilityCalculator?.onBleConnectionState(state.isConnected)
+
+                if (state.isNotificationReady && registerDeviceWhenReady) {
+                    val address = state.deviceAddress
+                    if (!address.isNullOrBlank()) {
+                        saveRegisteredPotch(address, state.deviceName)
+                        registerDeviceWhenReady = false
+                    }
+                }
 
                 // BLE 상태에 따라 foreground notification 문구 변경
                 val text = when {
                     state.isConnected -> "Potch 연결됨 · 데이터 수신 중"
                     state.isReconnecting -> "Potch 재연결 시도 중"
                     state.isScanning -> "Potch 검색 중"
+                    state.isConnecting -> "Potch 연결 중"
                     else -> "Potch 대기 중"
                 }
 
@@ -440,6 +611,7 @@ class PotchBleForegroundService : Service() {
         serviceScope.launch {
             processor.state.collect { state ->
                 PotchServiceStateHolder.updateProcessorState(state)
+                evaluatePotchAlarm(state.arousalState.finalWakeScore)
 
                 // 새 SensorData가 파싱될 때마다 accumulator에 전달
                 state.lastParsedData?.let { sensorData ->
@@ -491,20 +663,26 @@ class PotchBleForegroundService : Service() {
      *
      * startScan() 이후 Potch가 발견되면 BLE 연결과 notify 구독이 이어진다.
      */
-    private fun startPotchReceiving() {
+    private fun startPotchReceiving(
+        useRegisteredDevice: Boolean = false,
+        forceDeviceDiscovery: Boolean = false
+    ) {
         Log.i(TAG, "startPotchReceiving() called")
 
         initializePotchObjects()
 
-        dataLogger?.startIfNeeded()
         dataLogger?.logDebug(TAG, "startPotchReceiving() called", "I")
 
         if (!hasRequiredPermissions()) {
             Log.e(TAG, "startPotchReceiving() blocked - missing permissions")
             dataLogger?.logDebug(TAG, "startPotchReceiving() blocked - missing permissions", "E")
+            dataLogger?.stopBleAndSave("Potch receiving blocked by missing permissions")
+            markSessionRunning(false)
             updateNotification("Potch 권한이 부족합니다")
+            stopServiceIfIdle()
             return
         }
+        promoteToForeground("Potch 수신 준비 중")
 
         Log.i(TAG, "Permissions OK. Starting BLE scan.")
         dataLogger?.logDebug(TAG, "Permissions OK. Starting BLE scan.", "I")
@@ -512,7 +690,19 @@ class PotchBleForegroundService : Service() {
         // 앱 프로세스가 START_STICKY로 재생성되어도 동일 수면 session id를 재사용한다.
         stabilityCalculator?.startSession(getOrCreateStabilitySessionId())
         dataProcessor?.refreshStabilityState()
-        bleManager?.startScan()
+        if (forceDeviceDiscovery) {
+            bleManager?.startDeviceDiscovery()
+        } else if (useRegisteredDevice) {
+            val registeredAddress = getRegisteredPotchAddress()
+            if (!registeredAddress.isNullOrBlank()) {
+                val started = bleManager?.connectToAddress(registeredAddress) ?: false
+                if (started) return
+                clearRegisteredPotch()
+            }
+            bleManager?.startDeviceDiscovery()
+        } else {
+            bleManager?.startScan()
+        }
     }
 
     /**
@@ -524,73 +714,52 @@ class PotchBleForegroundService : Service() {
      * - 저장 완료 후 foreground 알림을 내리고 Service를 종료한다.
      */
     private fun stopPotchReceivingAndSave() {
-        Log.i(TAG, "stopPotchReceivingAndSave() called")
-        dataLogger?.logDebug(TAG, "stopPotchReceivingAndSave() called", "I")
-        val manager = bleManager
+        // A manual BLE stop does not cancel an alarm's Raw/Stability recording window.
+        isStoppingService = true
+        bleManager?.stopReconnectOnly()
+        stabilityCalculator?.endSession()
+        clearStabilitySessionId()
+        val savedPath = dataLogger?.stopBleAndSave("Potch connection ended by user or post-alarm deadline")
+        bleManager?.updateLogSavedState(savedPath)
+        isStoppingService = false
+        updateNotification("Potch 연결 종료 · 알람 기록 대기")
+        stopServiceIfIdle()
+    }
 
-        if (manager == null) {
-            Log.w(TAG, "stopPotchReceivingAndSave() - manager is null. Stop service only.")
-            dataLogger?.logDebug(TAG, "stopPotchReceivingAndSave() - manager is null. Stop service only.", "W")
-            stabilityCalculator?.endSession()
-            clearStabilitySessionId()
-            stopForeground(STOP_FOREGROUND_REMOVE)
-
-            val notificationManager =
-                getSystemService(NotificationManager::class.java)
-            notificationManager.cancel(NOTIFICATION_ID)
-
-            stopSelf()
-            return
+    private fun syncAlarmLogging() {
+        val store = AlarmLogSessionStore(this)
+        val sessions = store.load()
+        val desired = sessions.lastOrNull { it.recordsStability }
+        val currentId = dataLogger?.stabilitySessionId
+        if (currentId != desired?.id) {
+            val ending = sessions.find { it.id == currentId }
+            val boundary = ending?.stabilityStopAtMillis?.takeIf { it > 0L }
+                ?: desired?.startedAtMillis ?: System.currentTimeMillis()
+            stabilityCalculator?.checkpointLogWindow(boundary)
         }
+        dataLogger?.syncAlarmFiles(sessions)
+        store.removeFinished(sessions.filter { it.phase == AlarmLogPhase.CLOSED }.map { it.id }.toSet())
+        if (sessions.any { it.recordsRaw(System.currentTimeMillis()) } && !isSessionRunning()) {
+            updateNotification("알람 데이터 기록 대기 · Potch 연결 필요")
+        }
+    }
 
-        updateNotification("Potch 로그 저장 중...")
+    private fun promoteToForeground(text: String) {
+        val notification = buildNotification(text)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val hasBluetoothPermission = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+                ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
+            // Do not start a connected-device FGS without its permission for a file-only alarm session.
+            val type = if (hasBluetoothPermission) ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+                else ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+            startForeground(NOTIFICATION_ID, notification, type)
+        } else startForeground(NOTIFICATION_ID, notification)
+    }
 
-        Log.i(TAG, "Stopping BLE reconnect/scan/gatt before saving log")
-        dataLogger?.logDebug(TAG, "Stopping BLE reconnect/scan/gatt before saving log", "I")
-
-        // BLE 연결, 스캔, 재연결 시도를 중지한다.
-        // 이 함수는 파일 저장까지 하지 않고 BLE 정리만 먼저 한다.
-        manager.stopReconnectOnly()
-
-        // 대용량 CSV 복사는 메인 스레드에서 하면 ANR/강제 종료 위험이 있으므로 IO 스레드에서 실행
-        serviceScope.launch {
-
-            Log.i(TAG, "Saving log on Dispatchers.IO")
-            dataLogger?.logDebug(TAG, "Saving log on Dispatchers.IO", "I")
-
-            val savedPath = kotlinx.coroutines.withContext(Dispatchers.IO) {
-                val stabilitySummary = stabilityCalculator?.endSession()
-                dataLogger?.logDebug(
-                    TAG,
-                    "Stability session summary=$stabilitySummary",
-                    "I"
-                )
-                clearStabilitySessionId()
-                manager.saveCurrentLog()
-            }
-
-            // 저장 결과를 BLE 상태에 반영해서 UI에서 볼 수 있게 한다.
-            manager.updateLogSavedState(savedPath)
-
-            updateNotification(
-                if (savedPath != null) {
-                    "로그 저장 완료"
-                } else {
-                    "저장할 로그가 없습니다"
-                }
-            )
-
-            Log.i(TAG, "Stopping foreground service after save")
-            dataLogger?.logDebug(TAG, "Stopping foreground service after save", "I")
-
-            // ForegroundService 알림까지 완전히 제거
+    private fun stopServiceIfIdle() {
+        val recording = AlarmLogSessionStore(this).load().any { it.recordsRaw(System.currentTimeMillis()) }
+        if (!isSessionRunning() && !isAlarmMonitoringActive() && !recording) {
             stopForeground(STOP_FOREGROUND_REMOVE)
-
-            val notificationManager =
-                getSystemService(NotificationManager::class.java)
-            notificationManager.cancel(NOTIFICATION_ID)
-
-            // Service 종료
             stopSelf()
         }
     }
@@ -612,6 +781,7 @@ class PotchBleForegroundService : Service() {
 
         // BLE 스캔/연결/GATT 자원 정리
         bleManager?.close()
+        dataLogger?.closeHandlesForRecovery()
 
         // Service에서 돌던 coroutine 취소
         serviceScope.cancel()
@@ -793,6 +963,31 @@ class PotchBleForegroundService : Service() {
             .edit { remove("stability_session_id") }
     }
 
+    private fun getRegisteredPotchAddress(): String? {
+        return getSharedPreferences("potch_service", MODE_PRIVATE)
+            .getString("registered_potch_address", null)
+    }
+
+    private fun saveRegisteredPotch(address: String, name: String?) {
+        getSharedPreferences("potch_service", MODE_PRIVATE)
+            .edit {
+                putString("registered_potch_address", address)
+                putString("registered_potch_name", name)
+            }
+        dataLogger?.logConnectionEvent(
+            event = "device_registered",
+            message = "Registered Potch name=${name ?: "Potch"}, address=$address"
+        )
+    }
+
+    private fun clearRegisteredPotch() {
+        getSharedPreferences("potch_service", MODE_PRIVATE)
+            .edit {
+                remove("registered_potch_address")
+                remove("registered_potch_name")
+            }
+    }
+
     /**
      * 현재 Potch 수신 세션이 진행 중인지 SharedPreferences에 저장한다.
      *
@@ -818,7 +1013,150 @@ class PotchBleForegroundService : Service() {
      * Android가 Service를 복구한 것으로 보고 다시 Potch 수신을 시작한다.
      */
     private fun isSessionRunning(): Boolean {
-        return getSharedPreferences("potch_service", MODE_PRIVATE)
+        return getSharedPreferences(SERVICE_PREFS, MODE_PRIVATE)
             .getBoolean("session_running", false)
     }
+
+    private fun startAlarmMonitoring(alarmId: Int, targetTimeMillis: Long) {
+        val alarmPreferences = AlarmPreferences(this)
+        val now = System.currentTimeMillis()
+        val isCurrentReservation =
+            alarmPreferences.isAlarmSet() &&
+                targetTimeMillis > now &&
+                alarmPreferences.getScheduledTriggerTimeMillis() == targetTimeMillis
+
+        if (!isCurrentReservation) {
+            Log.w(
+                "WTF",
+                "Potch 모니터링 요청 거부: alarmId=$alarmId, target=$targetTimeMillis, " +
+                    "now=$now, hasAlarm=${alarmPreferences.isAlarmSet()}, " +
+                    "savedTarget=${alarmPreferences.getScheduledTriggerTimeMillis()}"
+            )
+            Log.w(TAG, "Ignoring stale Potch alarm monitor request: target=$targetTimeMillis")
+            dataLogger?.logDebug(
+                TAG,
+                "Ignoring stale Potch alarm monitor request: target=$targetTimeMillis",
+                "W"
+            )
+            if (!isSessionRunning() && !isAlarmMonitoringActive()) stopSelf()
+            return
+        }
+
+        val preferences = getSharedPreferences(SERVICE_PREFS, MODE_PRIVATE)
+        val isSameMonitor =
+            preferences.getBoolean(KEY_ALARM_MONITORING_ACTIVE, false) &&
+                preferences.getInt(KEY_MONITORED_ALARM_ID, 0) == alarmId &&
+                preferences.getLong(KEY_MONITORED_TARGET_TIME, 0L) == targetTimeMillis
+
+        if (!isSameMonitor) {
+            preferences.edit {
+                putBoolean(KEY_ALARM_MONITORING_ACTIVE, true)
+                putInt(KEY_MONITORED_ALARM_ID, alarmId)
+                putLong(KEY_MONITORED_TARGET_TIME, targetTimeMillis)
+                putBoolean(KEY_ALARM_MONITOR_OWNS_SESSION, false)
+            }
+        }
+
+        hasTriggeredCurrentAlarm = false
+        isStoppingService = false
+        // Monitoring only consumes already-received scores. It never starts logging or BLE.
+        updateNotification("Potch 각성점수 모니터링 중")
+        Log.i(TAG, "Potch alarm monitoring armed: alarmId=$alarmId target=$targetTimeMillis")
+        Log.i(
+            "WTF",
+            "Potch 각성점수 모니터링 시작: alarmId=$alarmId, " +
+                "targetTimeMillis=$targetTimeMillis, ownsSession=${preferences.getBoolean(KEY_ALARM_MONITOR_OWNS_SESSION, false)}"
+        )
+    }
+
+    private fun stopAlarmMonitoring(expectedTargetTimeMillis: Long) {
+        val preferences = getSharedPreferences(SERVICE_PREFS, MODE_PRIVATE)
+        if (!preferences.getBoolean(KEY_ALARM_MONITORING_ACTIVE, false)) return
+
+        val monitoredTarget = preferences.getLong(KEY_MONITORED_TARGET_TIME, 0L)
+        if (expectedTargetTimeMillis > 0L && expectedTargetTimeMillis != monitoredTarget) return
+
+        val ownsSession = preferences.getBoolean(KEY_ALARM_MONITOR_OWNS_SESSION, false)
+        Log.i(
+            "WTF",
+            "Potch 각성점수 모니터링 종료: monitoredTarget=$monitoredTarget, " +
+                "expectedTarget=$expectedTargetTimeMillis, ownsSession=$ownsSession"
+        )
+        preferences.edit {
+            remove(KEY_ALARM_MONITORING_ACTIVE)
+            remove(KEY_MONITORED_ALARM_ID)
+            remove(KEY_MONITORED_TARGET_TIME)
+            remove(KEY_ALARM_MONITOR_OWNS_SESSION)
+        }
+        hasTriggeredCurrentAlarm = false
+
+        updateNotification("Potch 데이터 수신 중")
+    }
+
+    private fun disarmAlarmMonitoring(expectedTargetTimeMillis: Long) {
+        val preferences = getSharedPreferences(SERVICE_PREFS, MODE_PRIVATE)
+        if (!preferences.getBoolean(KEY_ALARM_MONITORING_ACTIVE, false)) return
+
+        val monitoredTarget = preferences.getLong(KEY_MONITORED_TARGET_TIME, 0L)
+        if (expectedTargetTimeMillis > 0L && expectedTargetTimeMillis != monitoredTarget) return
+
+        Log.i(
+            "WTF",
+            "Potch 각성점수 모니터링만 해제: monitoredTarget=$monitoredTarget, " +
+                "추가 데이터 수집을 위해 연결 유지"
+        )
+        preferences.edit {
+            remove(KEY_ALARM_MONITORING_ACTIVE)
+            remove(KEY_MONITORED_ALARM_ID)
+            remove(KEY_MONITORED_TARGET_TIME)
+            remove(KEY_ALARM_MONITOR_OWNS_SESSION)
+        }
+        hasTriggeredCurrentAlarm = false
+        updateNotification("알람 후 Potch 데이터 수집 중")
+    }
+
+    private fun evaluatePotchAlarm(finalWakeScore: Double) {
+        if (hasTriggeredCurrentAlarm || !isAlarmMonitoringActive()) return
+
+        val preferences = getSharedPreferences(SERVICE_PREFS, MODE_PRIVATE)
+        val targetTimeMillis = preferences.getLong(KEY_MONITORED_TARGET_TIME, 0L)
+        val alarmPreferences = AlarmPreferences(this)
+
+        if (
+            alarmPreferences.getScheduledTriggerTimeMillis() != targetTimeMillis ||
+            !alarmPreferences.isAlarmSet()
+        ) {
+            stopAlarmMonitoring(targetTimeMillis)
+            return
+        }
+
+        if (
+            !PotchAlarmTriggerPolicy.shouldTrigger(
+                score = finalWakeScore,
+                nowMillis = System.currentTimeMillis(),
+                targetTimeMillis = targetTimeMillis
+            )
+        ) {
+            return
+        }
+
+        hasTriggeredCurrentAlarm = true
+        val alarm = alarmPreferences.loadAlarm()
+        Log.i(TAG, "Potch early alarm triggered: score=$finalWakeScore target=$targetTimeMillis")
+        Log.i(
+            "WTF",
+            "Potch 조기 알람 조건 충족: finalWakeScore=$finalWakeScore, " +
+                "threshold=${AlarmScheduler.POTCH_SCORE_THRESHOLD}, targetTimeMillis=$targetTimeMillis"
+        )
+        dataLogger?.logDebug(
+            TAG,
+            "Potch early alarm triggered: score=$finalWakeScore target=$targetTimeMillis",
+            "I"
+        )
+        AlarmScheduler(this).triggerFromPotch(alarm, targetTimeMillis)
+    }
+
+    private fun isAlarmMonitoringActive(): Boolean =
+        getSharedPreferences(SERVICE_PREFS, MODE_PRIVATE)
+            .getBoolean(KEY_ALARM_MONITORING_ACTIVE, false)
 }
