@@ -52,6 +52,17 @@ android {
         buildConfig = true
     }
 
+    packaging {
+        resources {
+            pickFirsts += listOf(
+                "lib/arm64-v8a/libc++_shared.so",
+                "lib/armeabi-v7a/libc++_shared.so",
+                "lib/x86/libc++_shared.so",
+                "lib/x86_64/libc++_shared.so"
+            )
+        }
+    }
+
 }
 
 dependencies {
@@ -109,5 +120,13 @@ dependencies {
     implementation("io.github.jan-tennert.supabase:postgrest-kt")
     implementation("io.github.jan-tennert.supabase:storage-kt")
     implementation("io.ktor:ktor-client-okhttp:3.1.2")
+
+
+    // 워치앱 선언 (현재 비활성화 중)
+    // wearApp(project(":wear"))
+
+    // PyTorch Lite — 온디바이스 수면 단계 추론
+    implementation("org.pytorch:pytorch_android_lite:1.13.1")
+    implementation("org.pytorch:pytorch_android_torchvision_lite:1.13.1")
 
 }

@@ -35,6 +35,9 @@ class PotchBleViewModel(
     val bleState = PotchServiceStateHolder.bleState
     val processorState = PotchServiceStateHolder.processorState
 
+    /** 가장 최근 수면 단계 추론 결과 — UI에서 collectAsState()로 관찰 */
+    val sleepStage = PotchServiceStateHolder.sleepStage
+
     /**
      * ble(3).c 및 iOS 구현과 동일하게 0x01 명령을 Write Without Response로 전송한다.
      * 펌웨어에서는 이 Write를 받으면 trigger_led_flash()를 실행한다.

@@ -22,7 +22,10 @@ import com.leejang.sleeptandard.Prefs.AlarmPreferences
 import com.leejang.sleeptandard.Potch.PotchBleManager
 import com.leejang.sleeptandard.Potch.PotchDataLogger
 import com.leejang.sleeptandard.Potch.PotchDataProcessor
+import com.leejang.sleeptandard.Potch.PotchEpochAccumulator
+import com.leejang.sleeptandard.Potch.PotchInferenceManager
 import com.leejang.sleeptandard.Potch.PotchServiceStateHolder
+import com.leejang.sleeptandard.Potch.PotchWindowBuffer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -213,6 +216,12 @@ class PotchBleForegroundService : Service() {
     private var isStoppingService = false
     private var registerDeviceWhenReady = false
     private var hasTriggeredCurrentAlarm = false
+
+    // ── 추론 파이프라인 ────────────────────────────────────────────────
+    private var inferenceManager: PotchInferenceManager? = null
+    private var windowBuffer: PotchWindowBuffer? = null
+    private var epochAccumulator: PotchEpochAccumulator? = null
+    // ──────────────────────────────────────────────────────────────────
 
     /**
      * Service가 처음 생성될 때 호출된다.
@@ -511,6 +520,27 @@ class PotchBleForegroundService : Service() {
         Log.i(TAG, "Potch objects initialized")
         dataLogger?.logDebug(TAG, "Potch objects initialized", "I")
 
+
+        // ── 추론 파이프라인 초기화 ─────────────────────────────────────
+        val inference = PotchInferenceManager(applicationContext)
+
+        val window = PotchWindowBuffer(windowSize = 5) { epochWindow ->
+            // 5 에포크 완성 → 추론 실행 (백그라운드 스레드)
+            serviceScope.launch(Dispatchers.Default) {
+                val stage = inference.predict(epochWindow)
+                PotchServiceStateHolder.updateSleepStage(stage)
+            }
+        }
+
+        val accumulator = PotchEpochAccumulator { epoch ->
+            window.addEpoch(epoch)
+        }
+
+        inferenceManager = inference
+        windowBuffer = window
+        epochAccumulator = accumulator
+        // ──────────────────────────────────────────────────────────────
+
         /**
          * BLE 상태를 계속 관찰한다.
          *
@@ -582,6 +612,13 @@ class PotchBleForegroundService : Service() {
             processor.state.collect { state ->
                 PotchServiceStateHolder.updateProcessorState(state)
                 evaluatePotchAlarm(state.arousalState.finalWakeScore)
+
+                // 새 SensorData가 파싱될 때마다 accumulator에 전달
+                state.lastParsedData?.let { sensorData ->
+                    serviceScope.launch(Dispatchers.Default) {
+                        accumulator.process(sensorData)
+                    }
+                }
 
                 val hasNewError =
                     state.missingSequenceErrors != lastLoggedSeqErr ||
