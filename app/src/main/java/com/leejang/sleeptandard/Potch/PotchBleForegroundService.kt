@@ -218,9 +218,10 @@ class PotchBleForegroundService : Service() {
     private var hasTriggeredCurrentAlarm = false
 
     // ── 추론 파이프라인 ────────────────────────────────────────────────
-    private var inferenceManager: PotchInferenceManager? = null
-    private var windowBuffer: PotchWindowBuffer? = null
-    private var epochAccumulator: PotchEpochAccumulator? = null
+    // SSE 수면 단계 추론 파이프라인은 Potch510 데이터 포맷에 맞게 수정할 때까지 비활성화한다.
+    // private var inferenceManager: PotchInferenceManager? = null
+    // private var windowBuffer: PotchWindowBuffer? = null
+    // private var epochAccumulator: PotchEpochAccumulator? = null
     // ──────────────────────────────────────────────────────────────────
 
     /**
@@ -522,6 +523,7 @@ class PotchBleForegroundService : Service() {
 
 
         // ── 추론 파이프라인 초기화 ─────────────────────────────────────
+        /*
         val inference = PotchInferenceManager(applicationContext)
 
         val window = PotchWindowBuffer(windowSize = 5) { epochWindow ->
@@ -539,6 +541,7 @@ class PotchBleForegroundService : Service() {
         inferenceManager = inference
         windowBuffer = window
         epochAccumulator = accumulator
+        */
         // ──────────────────────────────────────────────────────────────
 
         /**
@@ -614,11 +617,13 @@ class PotchBleForegroundService : Service() {
                 evaluatePotchAlarm(state.arousalState.finalWakeScore)
 
                 // 새 SensorData가 파싱될 때마다 accumulator에 전달
+                /*
                 state.lastParsedData?.let { sensorData ->
                     serviceScope.launch(Dispatchers.Default) {
                         accumulator.process(sensorData)
                     }
                 }
+                */
 
                 val hasNewError =
                     state.missingSequenceErrors != lastLoggedSeqErr ||
