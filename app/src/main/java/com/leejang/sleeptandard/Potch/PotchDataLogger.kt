@@ -6,6 +6,7 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
+import com.leejang.sleeptandard.backend.RawDataUploadManager
 import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileInputStream
@@ -66,7 +67,10 @@ class PotchDataLogger(context: Context, private val closedFileExporter: ((File) 
             val file = alarmFile(it, "potch_stability_episode_log", "csv")
             if (file.exists() && !PotchLogExporter.isClosed(appContext, file.name)) openStability(it)
         }
-        if (closedFileExporter == null) PotchLogExporter.retryPending(appContext)
+        if (closedFileExporter == null) {
+            PotchLogExporter.retryPending(appContext)
+            RawDataUploadManager.enqueuePendingClosedFiles(appContext)
+        }
     }
 
     var lastSavedFilePath: String? = null
@@ -468,7 +472,12 @@ class PotchDataLogger(context: Context, private val closedFileExporter: ((File) 
     private fun exportClosed(file: File) {
         if (!file.exists()) return
         lastSavedFilePath = file.absolutePath
-        closedFileExporter?.invoke(file) ?: PotchLogExporter.enqueue(appContext, file.name)
+        closedFileExporter?.invoke(file) ?: run {
+            PotchLogExporter.enqueue(appContext, file.name)
+            if (file.name.startsWith("potch_packet_raw_data_") && file.extension == "bin") {
+                RawDataUploadManager.enqueue(appContext, file)
+            }
+        }
     }
 
     private fun appendCsv(file: File?, vararg values: Any?) {
