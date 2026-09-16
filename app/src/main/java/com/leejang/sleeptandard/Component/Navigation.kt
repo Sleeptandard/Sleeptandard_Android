@@ -23,6 +23,8 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
@@ -38,6 +40,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -78,6 +81,7 @@ import com.leejang.sleeptandard.Screen.TutorialScreen
 import com.leejang.sleeptandard.ViewModel.AlarmViewModel
 import com.leejang.sleeptandard.ViewModel.AuthViewModel
 import com.leejang.sleeptandard.ui.theme.AppIcons
+import kotlinx.coroutines.launch
 
 sealed class Screen(val route: String) {
     object Home : Screen("home")
@@ -204,44 +208,68 @@ fun AppNav(
         }
 
         composable(Screen.Home.route){
-            HomeScreen(
-                alarmViewModel = alarmViewModel,
-                scheduler = scheduler,
-                onClickConfirm = {
-                    Log.i(
-                        "WTF",
-                        "HomeScreen 알람 설정 완료 네비게이션 요청: " +
-                            "hasAlarm=${alarmPrefs.isAlarmSet()}"
-                    )
-                    rememberNavController.navigate(Screen.SettedAlarm.route){
-                        popUpTo(Screen.Home.route){inclusive = true}
-                    }
-                },
-
-                goExperimentScreen = {
-                    rememberNavController.navigate(Screen.Experiment.route)
-                },
-
-                goPotchConnectionScreen = {
-                    rememberNavController.navigate(Screen.PotchConnection.route) {
-                        launchSingleTop = true
-                    }
-                },
-
-                onBatteryWarningVisibilityChange = { visible ->
-                    isBlurred = visible
-                },
-
-                showWindowTutorial = showWindowTutorial,
-                onDismissTutorial = { isChecked ->
-                    // 2번 요구사항: 체크박스를 체크하고 닫았다면 영구적으로 보이지 않게 저장
-                    if (isChecked) {
-                        alarmPrefs.setShowWindowTutorial(false)
-                    }
-                    // 현재 세션에서 창 닫기
-                    showWindowTutorial = false
-                }
+            val homePotchPagerState = rememberPagerState(
+                initialPage = HOME_PAGE_INDEX,
+                pageCount = { HOME_POTCH_PAGE_COUNT }
             )
+            val pagerScope = rememberCoroutineScope()
+
+            HorizontalPager(
+                state = homePotchPagerState,
+                modifier = Modifier.fillMaxSize(),
+            ) { page ->
+                when (page) {
+                    POTCH_PAGE_INDEX -> PotchScreen(
+                        onNavigateHome = {
+                            pagerScope.launch {
+                                homePotchPagerState.animateScrollToPage(HOME_PAGE_INDEX)
+                            }
+                        },
+                        swipeToHomeEnabled = false,
+                        backNavigationEnabled =
+                            homePotchPagerState.currentPage == POTCH_PAGE_INDEX,
+                    )
+
+                    else -> HomeScreen(
+                        alarmViewModel = alarmViewModel,
+                        scheduler = scheduler,
+                        onClickConfirm = {
+                            Log.i(
+                                "WTF",
+                                "HomeScreen 알람 설정 완료 네비게이션 요청: " +
+                                    "hasAlarm=${alarmPrefs.isAlarmSet()}"
+                            )
+                            rememberNavController.navigate(Screen.SettedAlarm.route){
+                                popUpTo(Screen.Home.route){inclusive = true}
+                            }
+                        },
+
+                        goExperimentScreen = {
+                            rememberNavController.navigate(Screen.Experiment.route)
+                        },
+
+                        goPotchConnectionScreen = {
+                            rememberNavController.navigate(Screen.PotchConnection.route) {
+                                launchSingleTop = true
+                            }
+                        },
+
+                        onBatteryWarningVisibilityChange = { visible ->
+                            isBlurred = visible
+                        },
+
+                        showWindowTutorial = showWindowTutorial,
+                        onDismissTutorial = { isChecked ->
+                            // 2번 요구사항: 체크박스를 체크하고 닫았다면 영구적으로 보이지 않게 저장
+                            if (isChecked) {
+                                alarmPrefs.setShowWindowTutorial(false)
+                            }
+                            // 현재 세션에서 창 닫기
+                            showWindowTutorial = false
+                        }
+                    )
+                }
+            }
         }
 
         composable(Screen.SettedAlarm.route){
@@ -277,11 +305,28 @@ fun AppNav(
         }
 
         composable(Screen.Potch.route){
-            PotchScreen()
+            PotchScreen(
+                onNavigateHome = {
+                    if (!rememberNavController.popBackStack(Screen.Home.route, inclusive = false)) {
+                        rememberNavController.navigate(Screen.Home.route) {
+                            launchSingleTop = true
+                        }
+                    }
+                }
+            )
         }
 
         composable(Screen.PotchConnection.route) {
-            PotchScreen(openConnectionSheetInitially = true)
+            PotchScreen(
+                openConnectionSheetInitially = true,
+                onNavigateHome = {
+                    if (!rememberNavController.popBackStack(Screen.Home.route, inclusive = false)) {
+                        rememberNavController.navigate(Screen.Home.route) {
+                            launchSingleTop = true
+                        }
+                    }
+                }
+            )
         }
 
         composable(Screen.Journal.route) {
@@ -529,22 +574,21 @@ fun AppNav(
                     selectedIndex = when (currentRoute) {
                         Screen.Home.route -> 0
                         Screen.SettedAlarm.route -> 0
-                        Screen.Potch.route -> 1
-                        Screen.PotchConnection.route -> 1
-                        Screen.Journal.route -> 2
-                        Screen.Settings.route -> 3
-                        Screen.QnA.route -> 3
-                        Screen.QnADetail.route -> 3
-                        Screen.SendingData.route -> 3
+                        Screen.Potch.route -> 0
+                        Screen.PotchConnection.route -> 0
+                        Screen.Journal.route -> 1
+                        Screen.Settings.route -> 2
+                        Screen.QnA.route -> 2
+                        Screen.QnADetail.route -> 2
+                        Screen.SendingData.route -> 2
 
-                        else -> 3
+                        else -> 2
                     },
                     onSelect = { idx ->
                         val target = when (idx) {
                             0 -> if(isAlarmSetted) Screen.SettedAlarm.route else Screen.Home.route
-                            1 -> Screen.Potch.route
-                            2 -> Screen.Journal.route
-                            3 -> Screen.Settings.route
+                            1 -> Screen.Journal.route
+                            2 -> Screen.Settings.route
                             else -> Screen.Home.route
                         }
                         Log.i(
@@ -618,8 +662,8 @@ fun AlarmBottomNavBar(
                 )
                 StandaloneBottomItem(
                     selected = selectedIndex == 1,
-                    iconRes = AppIcons.NavPotch,
-                    label = "팟치",
+                    iconRes = AppIcons.NavJournal,
+                    label = "일지",
                     onClick = { onSelect(1) },
                     modifier = Modifier
                         .weight(1f)
@@ -627,18 +671,9 @@ fun AlarmBottomNavBar(
                 )
                 StandaloneBottomItem(
                     selected = selectedIndex == 2,
-                    iconRes = AppIcons.NavJournal,
-                    label = "일지",
-                    onClick = { onSelect(2) },
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                )
-                StandaloneBottomItem(
-                    selected = selectedIndex == 3,
                     iconRes = AppIcons.NavSettings,
                     label = "설정",
-                    onClick = { onSelect(3) },
+                    onClick = { onSelect(2) },
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxHeight()
@@ -721,7 +756,10 @@ fun StandaloneBottomItem(
     }
 }
 
-private const val BOTTOM_NAV_ITEM_COUNT = 4
+private const val BOTTOM_NAV_ITEM_COUNT = 3
+private const val POTCH_PAGE_INDEX = 0
+private const val HOME_PAGE_INDEX = 1
+private const val HOME_POTCH_PAGE_COUNT = 2
 
 // Navigation Compose 2.9.6 기본 화면 전환 시간과 맞춘다.
 private const val BOTTOM_NAV_TRANSITION_DURATION_MILLIS = 300

@@ -4,10 +4,12 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.BackHandler
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.DrawableRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -40,6 +42,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
@@ -50,6 +53,8 @@ import androidx.compose.ui.draw.innerShadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.shadow.Shadow
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
@@ -70,8 +75,13 @@ import kotlin.math.roundToInt
 fun PotchScreen(
     potchViewModel: PotchBleViewModel = viewModel(),
     openConnectionSheetInitially: Boolean = false,
+    onNavigateHome: () -> Unit = {},
+    swipeToHomeEnabled: Boolean = true,
+    backNavigationEnabled: Boolean = true,
 ) {
     val context = LocalContext.current
+    val swipeThresholdPx = with(LocalDensity.current) { 72.dp.toPx() }
+    var horizontalDragAmount by remember { mutableFloatStateOf(0f) }
     val bleState by potchViewModel.bleState.collectAsState()
     val processorState by potchViewModel.processorState.collectAsState()
     val latestData = processorState.lastParsedData
@@ -80,6 +90,10 @@ fun PotchScreen(
     var displayedDevices by remember { mutableStateOf<List<DiscoveredPotch>>(emptyList()) }
     var permissionDenied by remember { mutableStateOf(false) }
     val isPotchConnected = bleState.isConnected || bleState.isNotificationReady
+
+    BackHandler(enabled = backNavigationEnabled && !showConnectionSheet) {
+        onNavigateHome()
+    }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
@@ -156,6 +170,27 @@ fun PotchScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .then(
+                if (swipeToHomeEnabled) {
+                    Modifier.pointerInput(onNavigateHome, swipeThresholdPx) {
+                        detectHorizontalDragGestures(
+                            onDragStart = { horizontalDragAmount = 0f },
+                            onHorizontalDrag = { _, dragAmount ->
+                                horizontalDragAmount += dragAmount
+                            },
+                            onDragEnd = {
+                                if (horizontalDragAmount <= -swipeThresholdPx) {
+                                    onNavigateHome()
+                                }
+                                horizontalDragAmount = 0f
+                            },
+                            onDragCancel = { horizontalDragAmount = 0f }
+                        )
+                    }
+                } else {
+                    Modifier
+                }
+            )
             .padding(horizontal = 28.dp),
     ) {
         Spacer(Modifier.height(32.dp))
