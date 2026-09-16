@@ -230,15 +230,17 @@ fun OptionsSection(
                                 colors =
                                         SwitchDefaults.colors(
                                                 checkedThumbColor = Color.White,
-                                                checkedTrackColor = Color(0xFFB1F7FC),
+                                                checkedTrackColor = SkyBlue,
                                                 uncheckedThumbColor = Color.White,
-                                                uncheckedTrackColor = Color(0xFF858585),
+                                                uncheckedTrackColor = Color(0xFF4F5B5D),
+                                                uncheckedBorderColor = Color.Transparent,
                                         ),
                                 checked = vibTogglechecked,
                                 onCheckedChange = onCheckedChange,
                                 enabled = vibToggleEnabled
                         )
                     }
+                    /*
                     if (!isSystemVibrationOn) {
                         Text(
                                 text = "※ 시스템 알림 진동세기가 0으로 설정되어 있어 진동이 울리지 않아요!",
@@ -250,6 +252,8 @@ fun OptionsSection(
                         )
                         Spacer(Modifier.height(4.dp))
                     }
+
+                     */
                 }
             }
         }
@@ -360,7 +364,7 @@ fun ConfirmButton(modifier: Modifier = Modifier, onClick: () -> Unit) {
             modifier = modifier.height(56.dp).fillMaxWidth().neumorphicBackground(),
             shape = RoundedCornerShape(100.dp),
             onClick = onClick,
-            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF1F4F9))
+            colors = ButtonDefaults.buttonColors(containerColor = SkyBlue)
     ) {
         Text(
                 text = "완료",
