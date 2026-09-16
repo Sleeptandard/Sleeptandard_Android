@@ -71,6 +71,7 @@ import com.leejang.sleeptandard.Potch.PotchBleViewModel
 import com.leejang.sleeptandard.Prefs.AlarmPreferences
 import com.leejang.sleeptandard.ViewModel.AlarmViewModel
 import com.leejang.sleeptandard.ui.theme.AppIcons
+import com.leejang.sleeptandard.ui.theme.SkyBlue
 import kotlinx.coroutines.delay
 import java.util.Locale
 import kotlin.math.roundToInt
@@ -181,9 +182,12 @@ fun SettedAlarmScreen(
 
         Box(
             modifier = Modifier
-                .size(320.dp, 60.dp)
+                .neumorphicBackground()
+                .padding(horizontal = 20.dp)
+                .fillMaxWidth()
+                .height(56.dp)
                 .clip(RoundedCornerShape(100.dp))
-                .background(color = Color.White)
+                .background(color = SkyBlue)
                 .clickable {
                     // 1) 알람 스케줄 취소
                     scheduler.cancel(alarmViewModel.alarm)
@@ -206,31 +210,8 @@ fun SettedAlarmScreen(
             )
         }
 
-        Spacer(Modifier.height(80.dp))
+        Spacer(Modifier.height(25.dp))
 
-        /*
-        Button(
-            modifier = Modifier
-                .size(320.dp, 56.dp),
-            onClick = {
-                // 1) 알람 스케줄 취소
-                scheduler.cancel(alarmViewModel.alarm)
-
-                // 2) 워치에 수면 추적 중지 명령 전송
-                alarmViewModel.stopSleepTracking()
-
-                // 3) SharedPreferences 플래그/값 삭제
-                val alarmPrefs = AlarmPreferences(context)
-                alarmPrefs.clearAlarm()
-
-                // 4) 네비게이션 처리
-                onTurnAlarmOff()
-            }
-        ){
-            Text("알람 중지")
-        }
-
-         */
     }
 }
 

@@ -562,11 +562,6 @@ fun HomeScreen(
             onDismissRequest = {
                 // ✅ 핵심: 모달이 어떤 방식으로든 닫힐 때 모든 입력 상태를 초기화합니다.
                 showSoundSheet = false
-                /*
-                isCustomMode = false  // 다음번 열 때 리스트가 보이도록 리셋
-                customText = ""       // 입력하던 텍스트도 비워줌
-
-                 */
             },
             sheetState = soundSheetState,
             containerColor = DarkBackground,
@@ -595,47 +590,6 @@ fun HomeScreen(
             )
         }
     }
-
-    /*
-    /*** 상황 설정 모달 ***/
-    if (showSituationModal) {
-
-        val sheetState = rememberModalBottomSheetState(
-            skipPartiallyExpanded = true
-        )
-
-        ModalBottomSheet(
-            onDismissRequest = { showSituationModal = false },
-            sheetState = sheetState,
-            containerColor = Color(0xFF050C16),
-            // 밖 영역은 어두워지고 클릭 막힘(scrim)
-            scrimColor = Color.Black.copy(alpha = 0.55f),
-            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
-            dragHandle = { BottomSheetDefaults.DragHandle(width = 126.dp) }
-        ) {
-            // 진짜 개지랄
-            SituationContent(
-                alarmViewModel = alarmViewModel,
-                scheduler = scheduler,
-                selectedHour = selectedHour,
-                selectedMinute = selectedMinute,
-                selectedIsAm = selectedIsAm,
-                selectedRingtoneUri = selectedRingtoneUri,
-                selectedVibrationEnabled = selectedVibrationEnabled,
-                selectedVolume = selectedVolume,
-                isCustomMode = isCustomMode,
-                situationOptions = situationOptions,
-                onCustomMode = { isCustomMode = true },
-                offCustomMode = { isCustomMode = false },
-                offSituationModal = { showSituationModal = false },
-                onClickConfirm = onClickConfirm,
-                customText = customText,
-                onCustomTextChange = { customText = it }
-            )
-        }
-    }
-
-     */
 
     /**** 윈도우 튜토리얼창 ****/
     if (showWindowTutorial) {

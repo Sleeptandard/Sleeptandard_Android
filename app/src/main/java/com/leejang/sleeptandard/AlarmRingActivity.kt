@@ -11,9 +11,11 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -178,7 +180,8 @@ fun AlarmRingScreen(
     onStop: () -> Unit
 ) {
     val currentTime = remember {
-        LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm"))
+        mutableListOf<String>(LocalTime.now().format(DateTimeFormatter.ofPattern("HH")), ":", LocalTime.now().format(DateTimeFormatter.ofPattern("mm")))
+
     }
 
     val linearGradation = Brush.verticalGradient(
@@ -196,21 +199,34 @@ fun AlarmRingScreen(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
 
-        Spacer(modifier = Modifier.height(240.dp))
+        Spacer(modifier = Modifier.weight(240f))
 
         Column(
             modifier = Modifier
                 .fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text(
-                text = currentTime,
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    fontSize = 100.sp,
-                    fontWeight = FontWeight(600),
-                    color = Color.White
-                )
-            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp)
+            ){
+                Spacer(Modifier.weight(1f))
+                currentTime.map {
+                    item ->
+                    Text(
+                        text = item,
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontSize = 100.sp,
+                            fontWeight = FontWeight(600),
+                            color = Color.White
+                        )
+                    )
+                }
+                Spacer(Modifier.weight(1f))
+            }
+
 
             Spacer(Modifier.height(18.dp))
 
@@ -223,15 +239,17 @@ fun AlarmRingScreen(
             )
         }
 
-        Spacer(modifier = Modifier.height(222.dp))
+        Spacer(modifier = Modifier.weight(192f))
 
 
         SwipeToStopButton(
             onComplete = {
                 onStop() },
             modifier = Modifier
-                .fillMaxWidth()
+                .fillMaxWidth(),
         )
+
+        Spacer(Modifier.height(100.dp))
     }
 }
 
@@ -334,7 +352,7 @@ fun SwipeToStopButton(
                     modifier = Modifier.fillMaxWidth(),
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                     style = MaterialTheme.typography.bodyMedium.copy(
-                        fontSize = 18.sp,
+                        fontSize = 22.sp,
                         brush = textGradient
                     )
                 )
