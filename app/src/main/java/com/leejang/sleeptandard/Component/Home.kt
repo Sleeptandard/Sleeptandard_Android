@@ -16,6 +16,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -112,6 +113,7 @@ fun OptionsSection(
             else MaterialTheme.colorScheme.onSurface
 
     val entireHeight = 128.dp
+    val disabledToggleInteractionSource = remember { MutableInteractionSource() }
     var vibTogglechecked = checked
     var vibToggleEnabled = true
 
@@ -225,20 +227,34 @@ fun OptionsSection(
                             )
                         }
                         Spacer(Modifier.weight(1f))
-                        Switch(
-                                modifier = Modifier.scale(37f / 52f),
-                                colors =
-                                        SwitchDefaults.colors(
-                                                checkedThumbColor = Color.White,
-                                                checkedTrackColor = SkyBlue,
-                                                uncheckedThumbColor = Color.White,
-                                                uncheckedTrackColor = Color(0xFF4F5B5D),
-                                                uncheckedBorderColor = Color.Transparent,
-                                        ),
-                                checked = vibTogglechecked,
-                                onCheckedChange = onCheckedChange,
-                                enabled = vibToggleEnabled
-                        )
+                        Box(contentAlignment = Alignment.Center) {
+                            Switch(
+                                    modifier = Modifier.scale(37f / 52f),
+                                    colors =
+                                            SwitchDefaults.colors(
+                                                    checkedThumbColor = Color.White,
+                                                    checkedTrackColor = SkyBlue,
+                                                    uncheckedThumbColor = Color.White,
+                                                    uncheckedTrackColor = Color(0xFF4F5B5D),
+                                                    uncheckedBorderColor = Color.Transparent,
+                                            ),
+                                    checked = vibTogglechecked,
+                                    onCheckedChange = onCheckedChange,
+                                    enabled = vibToggleEnabled
+                            )
+
+                            if (!vibToggleEnabled) {
+                                Box(
+                                        modifier = Modifier
+                                                .matchParentSize()
+                                                .clickable(
+                                                        interactionSource = disabledToggleInteractionSource,
+                                                        indication = null,
+                                                        onClick = onVibrationClick
+                                                )
+                                )
+                            }
+                        }
                     }
                     /*
                     if (!isSystemVibrationOn) {
