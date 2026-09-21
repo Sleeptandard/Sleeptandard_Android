@@ -152,33 +152,36 @@ fun OptionsSection(
                                                             offset = DpOffset(x = 5.dp, 6.dp)
                                                     )
                                     )
-                                    .clickable { onSoundClick() }
+
             ) {
                 Row(
-                        modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(30.dp))
+                        .clickable { onSoundClick() }.padding(horizontal = 20.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(
-                            painter = painterResource(AppIcons.HomeVolume),
-                            contentDescription = "알람음 설정",
-                            tint = MaterialTheme.colorScheme.tertiary
+                        painter = painterResource(AppIcons.HomeVolume),
+                        contentDescription = "알람음 설정",
+                        tint = MaterialTheme.colorScheme.tertiary
                     )
                     Text(
-                            modifier = Modifier.weight(1f).padding(end = 10.dp),
-                            text = alarmName,
-                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 15.sp),
-                            textAlign = TextAlign.End,
-                            color = textColor,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                        modifier = Modifier.weight(1f).padding(end = 10.dp),
+                        text = alarmName,
+                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 15.sp),
+                        textAlign = TextAlign.End,
+                        color = textColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     Icon(
-                            painter = painterResource(AppIcons.HomeArrowRight),
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.tertiary
+                        painter = painterResource(AppIcons.HomeArrowRight),
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.tertiary
                     )
                 }
+
+
             }
 
             Spacer(Modifier.height(16.dp))
@@ -211,7 +214,7 @@ fun OptionsSection(
                         horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Row(
-                            modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp),
+                            modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(30.dp)).clickable { onVibrationClick() }.padding(horizontal = 20.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                     ) {
