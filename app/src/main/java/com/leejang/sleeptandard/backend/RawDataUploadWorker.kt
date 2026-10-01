@@ -152,11 +152,28 @@ class RawDataUploadWorker(
             Result.success()
         } catch (error: HttpStatusException) {
             Log.e(TAG, "FastAPI 업로드 오류 HTTP ${error.code}: ${error.responseBody}")
-            if (error.isRetryable && runAttemptCount + 1 < MAX_WORK_ATTEMPTS) {
+            if (error.code == 401) {
+                SleepServerAuthProvider.clear(appContext)
+                Result.failure(
+                    workDataOf(
+                        "http_status" to error.code,
+                        "auth_required" to true,
+                        "error" to "로그인이 만료되었습니다. 다시 로그인해주세요."
+                    )
+                )
+            } else if (error.isRetryable && runAttemptCount + 1 < MAX_WORK_ATTEMPTS) {
                 Result.retry()
             } else {
                 Result.failure(workDataOf("http_status" to error.code, "error" to error.responseBody))
             }
+        } catch (error: AuthenticationRequiredException) {
+            Log.w(TAG, "Raw multipart upload 중단: 로그인 필요")
+            Result.failure(
+                workDataOf(
+                    "auth_required" to true,
+                    "error" to "로그인이 필요합니다."
+                )
+            )
         } catch (error: Exception) {
             Log.e(TAG, "Raw multipart upload 실패, attempt=${runAttemptCount + 1}", error)
             if (runAttemptCount + 1 < MAX_WORK_ATTEMPTS) {
@@ -308,9 +325,9 @@ class RawDataUploadWorker(
     }
 
     private fun executeJson(builder: Request.Builder): JSONObject {
-        SleepServerAuthProvider.bearerToken(appContext)?.let { token ->
-            builder.header("Authorization", "Bearer $token")
-        } ?: Log.w(TAG, "TODO(App/Auth): FastAPI Authorization token이 아직 연결되지 않음")
+        val token = SleepServerAuthProvider.bearerToken(appContext)
+            ?: throw AuthenticationRequiredException()
+        builder.header("Authorization", "Bearer $token")
 
         http.newCall(builder.build()).execute().use { response ->
             val body = response.body?.string().orEmpty()
@@ -416,4 +433,6 @@ class RawDataUploadWorker(
             (presignedS3Request && code in setOf(403, 404)) ||
                 code == 408 || code == 409 || code == 429 || code in 500..599
     }
+
+    private class AuthenticationRequiredException : IOException()
 }

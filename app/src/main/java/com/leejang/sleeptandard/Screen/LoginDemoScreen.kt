@@ -192,10 +192,12 @@ fun LoginDemoScreen(
                         viewModel = authViewModel,
                         onLoginSend = {
                             // TODO: 백엔드 로그인 처리
-                            // AuthViewModel의 로그인 처리 더미 로직
                             authViewModel.performLogin(
+                                context = context,
                                 onSuccess = {onConfirm(it)},
-                                onError = {Toast.makeText(context, "비밀번호가 틀렸습니다.", Toast.LENGTH_SHORT).show()}
+                                onError = { message ->
+                                    Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                                }
                             )
                         },
                         onPwChange = {
@@ -263,11 +265,13 @@ fun LoginDemoScreen(
                     is AuthStep.SignupGenderBirth -> GenderBirthStep(
                         viewModel = authViewModel,
                         onSubmit = {
-                            // TODO: 백엔드 회원가입 처리 로직
-                            // AuthViewModel의 최종 회원가입 처리 더미 로직
                             authViewModel.completeSignup(
+                                context = context,
                                 onComplete = { nickname -> Log.d("Signup", "$nickname 가입 완료") },
-                                onError = { error -> Log.e("Signup", "가입 에러: $error") }
+                                onError = { error ->
+                                    Log.e("Signup", "가입 에러: $error")
+                                    Toast.makeText(context, error, Toast.LENGTH_SHORT).show()
+                                }
                             )
                         },
                         onBack = {

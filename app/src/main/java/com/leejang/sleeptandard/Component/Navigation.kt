@@ -359,6 +359,7 @@ fun AppNav(
                 },
                 onLogout = {
                     authViewModel.logoutUser(
+                        context = context,
                         onSuccess = {
                             userPrefs.clearUserInfo()
                             rememberNavController.navigate(Screen.LoginDemo.route) {

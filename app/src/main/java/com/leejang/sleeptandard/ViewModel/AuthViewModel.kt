@@ -1,5 +1,6 @@
 package com.leejang.sleeptandard.ViewModel
 
+import android.content.Context
 import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -10,6 +11,9 @@ import androidx.lifecycle.viewModelScope
 import com.leejang.sleeptandard.ClassFile.AuthRepository
 import com.leejang.sleeptandard.ClassFile.User
 import com.leejang.sleeptandard.Screen.AuthStep
+import com.leejang.sleeptandard.backend.SleepServerAuthClient
+import com.leejang.sleeptandard.backend.SleepServerAuthProvider
+import com.leejang.sleeptandard.backend.SleepServerUser
 import com.leejang.sleeptandard.backend.SupabaseClientProvider
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.providers.builtin.Email
@@ -38,7 +42,7 @@ class AuthViewModel : ViewModel() {
     var currentStep by mutableStateOf<AuthStep>(AuthStep.EmailInput)
         private set
 
-    private val supabase = SupabaseClientProvider.client
+    private val supabase by lazy { SupabaseClientProvider.client }
 
     // ✅ 1. 모달 표시 상태 (true일 때만 화면에 Dialog가 뜸)
     var showDatePickerModal by mutableStateOf(false)
@@ -127,29 +131,11 @@ class AuthViewModel : ViewModel() {
         currentStep = AuthStep.SignupPassword(email)
     }
 
-    // 이메일 확인 API 호출 로직
-    // 1단계: 이메일 확인 로직
+    // 새 서버에는 이메일 존재 여부 공개 API가 없으므로 로그인 화면으로 이동한다.
+    // 신규 사용자는 같은 화면의 회원가입 버튼으로 가입 흐름을 시작한다.
     fun checkEmail() {
-        viewModelScope.launch {
-            try {
-                // email 컬럼만 요청해서 역직렬화 문제 방지
-                val result =
-                        supabase.postgrest["profiles"]
-                                .select(columns = Columns.list("email")) {
-                                    filter { eq("email", email) }
-                                }
-                                .decodeList<ProfileEmail>()
-                currentStep =
-                        if (result.isNotEmpty()) {
-                            AuthStep.LoginPassword(email)
-                        } else {
-                            AuthStep.SignupPassword(email)
-                        }
-            } catch (e: Exception) {
-                Log.e("AuthVM", "checkEmail 실패: ${e.message}", e)
-                currentStep = AuthStep.LoginPassword(email)
-            }
-        }
+        if (!isEmailValid) return
+        currentStep = AuthStep.LoginPassword(email)
     }
 
     fun findingPassword() {
@@ -188,43 +174,30 @@ class AuthViewModel : ViewModel() {
     }
 
     // 2단계(경로A): 로그인 실행
-    fun performLogin(onSuccess: (User) -> Unit, onError: () -> Unit) {
+    fun performLogin(
+        context: Context,
+        onSuccess: (User) -> Unit,
+        onError: (String) -> Unit
+    ) {
         viewModelScope.launch {
             try {
-                supabase.auth.signInWith(Email) {
-                    this.email = this@AuthViewModel.email
-                    this.password = this@AuthViewModel.password
-                }
-                val uid = supabase.auth.currentUserOrNull()?.id ?: ""
-                val authEmail = supabase.auth.currentUserOrNull()?.email ?: ""
-                val profile =
-                        supabase.postgrest["profiles"]
-                                .select { filter { eq("id", uid) } }
-                                .decodeSingle<ProfileInsert>()
-                                
-                // DB와 Auth의 이메일이 다를 경우(사용자가 이메일 변경 요청 후 인증 링크를 누르지 않아 싱크가 어긋난 경우) 자체 교정
-                if(authEmail.isNotEmpty() && profile.email != authEmail) {
-                    supabase.postgrest["profiles"].update({ set("email", authEmail) }) { filter { eq("id", uid) } }
-                }
-                                
-                val returnedUser = User(
-                    email = if (authEmail.isNotEmpty()) authEmail else profile.email,
-                    pw = password,
-                    nickname = profile.nickname,
-                    gender = profile.gender ?: "",
-                    birthdate = profile.birthdate ?: ""
+                val session = SleepServerAuthClient.login(email, password)
+                SleepServerAuthProvider.saveSession(
+                    context = context,
+                    accessToken = session.accessToken,
+                    userId = session.user.userId,
+                    expiresInSeconds = session.expiresIn
                 )
+                val verifiedUser = SleepServerAuthClient.me(session.accessToken)
+                val returnedUser = verifiedUser.toAppUser()
 
-                // 앱 전역적으로 사용할 수 있도록 뷰모델 상태 업데이트
                 getUserInfo(returnedUser)
-
                 onSuccess(returnedUser)
-
-                // 로그아웃 했을때 무조건 이메일 입력창으로 들어오게 하기.
                 clearCurrentStep()
-
             } catch (e: Exception) {
-                onError()
+                SleepServerAuthProvider.clear(context)
+                Log.e("AuthVM", "FastAPI 로그인 실패: ${e.message}", e)
+                onError(e.message ?: "로그인 중 오류가 발생했습니다.")
             }
         }
     }
@@ -239,31 +212,34 @@ class AuthViewModel : ViewModel() {
     }
 
     // 3단계: 회원가입 완료 및 가입 처리
-    fun completeSignup(onComplete: (String) -> Unit, onError: (String) -> Unit) {
+    fun completeSignup(
+        context: Context,
+        onComplete: (String) -> Unit,
+        onError: (String) -> Unit
+    ) {
         viewModelScope.launch {
             try {
-                // 1) Supabase Auth 가입
-                supabase.auth.signUpWith(Email) {
-                    this.email = this@AuthViewModel.email
-                    this.password = this@AuthViewModel.password
-                }
-                // 2) 발급된 UID 가져오기
-                val uid = supabase.auth.currentUserOrNull()?.id ?: ""
-                // 3) profiles 테이블에 닉네임 + 이메일 + 성별 + 생년월일 저장
-                supabase.postgrest["profiles"].insert(
-                        ProfileInsert(
-                                id = uid,
-                                nickname = nickname,
-                                email = email,
-                                gender = gender,
-                                birthdate = birthdate
-                        )
+                val session = SleepServerAuthClient.signup(
+                    email = email,
+                    password = password,
+                    nickname = nickname,
+                    gender = gender.toServerGender(),
+                    birthdate = birthdate.toServerBirthdate()
                 )
+                SleepServerAuthProvider.saveSession(
+                    context = context,
+                    accessToken = session.accessToken,
+                    userId = session.user.userId,
+                    expiresInSeconds = session.expiresIn
+                )
+                val verifiedUser = SleepServerAuthClient.me(session.accessToken)
+                getUserInfo(verifiedUser.toAppUser())
 
                 onComplete(nickname)
                 currentStep = AuthStep.Completed(nickname)
             } catch (e: Exception) {
-                Log.e("AuthVM", "completeSignup 실패: ${e.message}", e)
+                SleepServerAuthProvider.clear(context)
+                Log.e("AuthVM", "FastAPI 회원가입 실패: ${e.message}", e)
                 onError(e.message ?: "회원가입 처리 중 오류가 발생했습니다.")
             }
         }
@@ -418,26 +394,17 @@ class AuthViewModel : ViewModel() {
         }
     }
 
-    // 완전한 로그아웃 (Supabase 세션 종료 포함)
-    fun logoutUser(onSuccess: () -> Unit = {}) {
-        viewModelScope.launch {
-            try {
-                supabase.auth.signOut()
-                clearUserInfo()
-                Log.d("AuthVM", "로그아웃 처리 완료")
-                onSuccess()
-            } catch (e: Exception) {
-                Log.e("AuthVM", "로그아웃 실패: ${e.message}", e)
-                // 만약 에러가 나더라도 클라이언트측 로그아웃은 진행
-                clearUserInfo()
-                onSuccess()
-            }
-        }
+    // FastAPI 세션 로그아웃
+    fun logoutUser(context: Context, onSuccess: () -> Unit = {}) {
+        SleepServerAuthProvider.clear(context)
+        clearUserInfo()
+        Log.d("AuthVM", "FastAPI 로그아웃 처리 완료")
+        onSuccess()
     }
 
     fun getUserInfo(user: User){
         email = user.email
-        password = user.pw
+        password = ""
         nickname = user.nickname
         gender = user.gender
         birthdate = user.birthdate
@@ -499,4 +466,28 @@ class AuthViewModel : ViewModel() {
         gender = ""
         birthdate = ""
     }
+
+    private fun SleepServerUser.toAppUser(): User = User(
+        email = email,
+        pw = "",
+        nickname = nickname,
+        gender = when (gender) {
+            "male" -> "남"
+            "female" -> "여"
+            "other", "prefer_not_to_say" -> "선택안함"
+            else -> ""
+        },
+        birthdate = birthdate?.replace('-', '.') ?: ""
+    )
+
+    private fun String.toServerGender(): String? = when (trim()) {
+        "남", "male" -> "male"
+        "여", "female" -> "female"
+        "선택안함", "prefer_not_to_say" -> "prefer_not_to_say"
+        "other" -> "other"
+        else -> null
+    }
+
+    private fun String.toServerBirthdate(): String? =
+        trim().takeIf { it.isNotEmpty() }?.replace('.', '-')
 }

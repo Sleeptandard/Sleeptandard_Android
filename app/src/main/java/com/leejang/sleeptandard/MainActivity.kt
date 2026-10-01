@@ -129,8 +129,14 @@ class MainActivity : ComponentActivity() {
             "MainActivity startDestination 결정: selected=$startDestination, " +
                 "intentExtra=${intent.getStringExtra("startDestination")}, hasAlarm=${alarmPrefs.isAlarmSet()}"
         )
-        // 자동 로그인으로 홈 화면에 진입한 경우 환영 메시지 띄우기
-        if (startDestination == Screen.Home.route) {
+        val hasSupabaseConfig =
+            BuildConfig.SUPABASE_URL.startsWith("https://") &&
+                BuildConfig.SUPABASE_URL != "null" &&
+                BuildConfig.SUPABASE_ANON_KEY.isNotBlank() &&
+                BuildConfig.SUPABASE_ANON_KEY != "null"
+
+        // 이전 Supabase 설정이 남아 있는 빌드에서만 기존 환영 메시지를 조회한다.
+        if (startDestination == Screen.Home.route && hasSupabaseConfig) {
             lifecycleScope.launch(Dispatchers.IO) {
                 try {
                     val uid = SupabaseClientProvider.client.auth.currentUserOrNull()?.id ?: ""
@@ -279,4 +285,3 @@ class MainActivity : ComponentActivity() {
     }
 
 }
-
