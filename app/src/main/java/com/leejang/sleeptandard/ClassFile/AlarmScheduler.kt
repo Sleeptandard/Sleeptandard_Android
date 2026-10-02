@@ -8,6 +8,7 @@ import android.util.Log
 import com.leejang.sleeptandard.Potch.PotchBleForegroundService
 import com.leejang.sleeptandard.Potch.AlarmLogSessionStore
 import com.leejang.sleeptandard.Prefs.AlarmPreferences
+import com.leejang.sleeptandard.backend.SleepSessionStartManager
 import java.util.Calendar
 
 /**
@@ -67,8 +68,11 @@ class AlarmScheduler(private val context: Context) {
                 monitoringPendingIntent(alarm.id, targetTime)
             )
         }
-        AlarmLogSessionStore(context).schedule(alarm.id, targetTime)
-        PotchBleForegroundService.requestSyncAlarmLogging(context)
+        SleepSessionStartManager.createOrUpdate(
+            context = context,
+            alarmId = alarm.id,
+            targetTimeMillis = targetTime
+        )
     }
 
     fun calculateNextTriggerTime(alarm: Alarm): Long {
@@ -96,6 +100,7 @@ class AlarmScheduler(private val context: Context) {
         val targetTime = preferences.getScheduledTriggerTimeMillis()
         cancelPendingIntents(alarm.id)
         preferences.clearScheduledTriggerTime()
+        SleepSessionStartManager.cancel(context, alarm.id)
         PotchBleForegroundService.requestStopAlarmMonitoring(context, targetTime)
         AlarmLogSessionStore(context).cancel(targetTime)
         PotchBleForegroundService.requestSyncAlarmLogging(context)

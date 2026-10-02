@@ -331,7 +331,21 @@ class RawDataUploadWorker(
 
         http.newCall(builder.build()).execute().use { response ->
             val body = response.body?.string().orEmpty()
-            if (!response.isSuccessful) throw HttpStatusException(response.code, body)
+            if (!response.isSuccessful) {
+                val serverRetryable = runCatching {
+                    val error = JSONObject(body)
+                    if (error.has("retryable") && !error.isNull("retryable")) {
+                        error.getBoolean("retryable")
+                    } else {
+                        null
+                    }
+                }.getOrNull()
+                throw HttpStatusException(
+                    code = response.code,
+                    responseBody = body,
+                    serverRetryable = serverRetryable
+                )
+            }
             return JSONObject(body.ifBlank { "{}" })
         }
     }
@@ -427,12 +441,26 @@ class RawDataUploadWorker(
     private class HttpStatusException(
         val code: Int,
         val responseBody: String,
-        private val presignedS3Request: Boolean = false
+        private val presignedS3Request: Boolean = false,
+        private val serverRetryable: Boolean? = null
     ) : IOException() {
-        val isRetryable: Boolean =
-            (presignedS3Request && code in setOf(403, 404)) ||
-                code == 408 || code == 409 || code == 429 || code in 500..599
+        val isRetryable: Boolean = RawUploadRetryPolicy.shouldRetry(
+            code = code,
+            serverRetryable = serverRetryable,
+            presignedS3Request = presignedS3Request
+        )
     }
 
     private class AuthenticationRequiredException : IOException()
+}
+
+internal object RawUploadRetryPolicy {
+    fun shouldRetry(
+        code: Int,
+        serverRetryable: Boolean?,
+        presignedS3Request: Boolean = false
+    ): Boolean = serverRetryable ?: (
+        (presignedS3Request && code in setOf(403, 404)) ||
+            code == 408 || code == 409 || code == 429 || code in 500..599
+        )
 }

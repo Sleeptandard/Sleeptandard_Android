@@ -1,7 +1,9 @@
 package com.leejang.sleeptandard.Potch
 
+import com.leejang.sleeptandard.backend.PotchRawFileContract
 import org.junit.Assert.*
 import org.junit.Test
+import java.io.File
 
 class AlarmLogSessionPolicyTest {
     private val start = 1_000L
@@ -64,6 +66,23 @@ class AlarmLogSessionPolicyTest {
         val canceled = AlarmLogSessionPolicy.cancel(scheduled(), 900_000L, 2_000L)
         val next = AlarmLogSessionPolicy.schedule(canceled, 7, 950_000L, 3_000L, "b")
         assertEquals("b", next.single { it.recordsStability }.id)
+    }
+
+    @Test fun serverSessionIdBecomesRawUploadPathIdentity() {
+        val serverSessionId = "550e8400-e29b-41d4-a716-446655440000"
+        val session = AlarmLogSessionPolicy.schedule(
+            emptyList(),
+            7,
+            900_000L,
+            start,
+            serverSessionId
+        ).single()
+        val rawFile = File(
+            "potch_packet_raw_data_20261001_220000_000_${session.id}.bin"
+        )
+
+        assertEquals(serverSessionId, session.id)
+        assertEquals(serverSessionId, PotchRawFileContract.sessionId(rawFile))
     }
 
     @Test fun staleRingAndDismissAreIgnored() {

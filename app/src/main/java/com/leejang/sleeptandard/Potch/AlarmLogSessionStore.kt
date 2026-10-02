@@ -3,7 +3,6 @@ package com.leejang.sleeptandard.Potch
 import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
-import java.util.UUID
 
 /** Synchronous small metadata commits keep receiver/service races from reopening finished files. */
 class AlarmLogSessionStore(context: Context) {
@@ -11,8 +10,47 @@ class AlarmLogSessionStore(context: Context) {
 
     fun load(): List<AlarmLogSession> = synchronized(lock) { read() }
 
-    fun schedule(alarmId: Int, target: Long) = update {
-        AlarmLogSessionPolicy.schedule(it, alarmId, target, System.currentTimeMillis(), UUID.randomUUID().toString())
+    fun bindServerSession(
+        alarmId: Int,
+        target: Long,
+        serverSessionId: String,
+        startedAtMillis: Long
+    ) = update { sessions ->
+        val previous = sessions.lastOrNull { it.phase == AlarmLogPhase.SCHEDULED }
+        if (previous == null) {
+            AlarmLogSessionPolicy.schedule(
+                sessions,
+                alarmId,
+                target,
+                startedAtMillis,
+                serverSessionId
+            )
+        } else {
+            sessions.map { session ->
+                if (session.id == previous.id) {
+                    session.copy(
+                        id = serverSessionId,
+                        alarmId = alarmId,
+                        targetTimeMillis = target,
+                        startedAtMillis = startedAtMillis
+                    )
+                } else {
+                    session
+                }
+            }
+        }
+    }
+
+    fun updateScheduledAlarm(alarmId: Int, target: Long) = update { sessions ->
+        val previous = sessions.lastOrNull { it.phase == AlarmLogPhase.SCHEDULED }
+            ?: return@update sessions
+        AlarmLogSessionPolicy.schedule(
+            sessions,
+            alarmId,
+            target,
+            previous.startedAtMillis,
+            previous.id
+        )
     }
 
     fun cancel(target: Long) = update {
