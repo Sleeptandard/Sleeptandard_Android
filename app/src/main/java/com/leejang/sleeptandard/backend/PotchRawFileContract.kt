@@ -5,7 +5,6 @@ import java.io.FileInputStream
 import java.io.RandomAccessFile
 import java.security.MessageDigest
 import java.util.Base64
-import java.util.zip.CRC32C
 
 /**
  * S3에 업로드하는 Potch 원본 파일 규격.
@@ -54,7 +53,7 @@ object PotchRawFileContract {
     /** S3 x-amz-checksum-crc32c에 사용할 big-endian uint32 Base64 값. */
     fun crc32cBase64(file: File, offset: Long, byteCount: Long): String {
         require(offset >= 0L && byteCount >= 0L && offset + byteCount <= file.length())
-        val checksum = CRC32C()
+        val checksum = SoftwareCrc32c()
         RandomAccessFile(file, "r").use { input ->
             input.seek(offset)
             val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
@@ -75,5 +74,35 @@ object PotchRawFileContract {
             (value and 0xFF).toByte()
         )
         return Base64.getEncoder().encodeToString(bytes)
+    }
+}
+
+/** java.util.zip.CRC32C is unavailable before Android API 34. */
+internal class SoftwareCrc32c {
+    private var crc = -1
+
+    val value: Long
+        get() = crc.inv().toLong() and 0xFFFF_FFFFL
+
+    fun update(bytes: ByteArray, offset: Int, length: Int) {
+        require(offset >= 0 && length >= 0 && offset + length <= bytes.size)
+        for (index in offset until offset + length) {
+            crc = TABLE[(crc xor bytes[index].toInt()) and 0xFF] xor (crc ushr 8)
+        }
+    }
+
+    private companion object {
+        private const val REVERSED_CASTAGNOLI_POLYNOMIAL = 0x82F63B78.toInt()
+        private val TABLE = IntArray(256) { tableIndex ->
+            var value = tableIndex
+            repeat(8) {
+                value = if (value and 1 == 1) {
+                    (value ushr 1) xor REVERSED_CASTAGNOLI_POLYNOMIAL
+                } else {
+                    value ushr 1
+                }
+            }
+            value
+        }
     }
 }

@@ -32,6 +32,13 @@ class PotchRawFileContractTest {
         }
     }
 
+    @Test
+    fun crc32cCalculatesOnlyTheRequestedFileSlice() {
+        withRawFile("before123456789after".encodeToByteArray()) { file ->
+            assertEquals("4waSgw==", PotchRawFileContract.crc32cBase64(file, 6, 9))
+        }
+    }
+
     private fun withRawFile(bytes: ByteArray, block: (File) -> Unit) {
         val directory = Files.createTempDirectory("potch-raw-contract").toFile()
         val file = File(
