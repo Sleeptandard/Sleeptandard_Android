@@ -20,6 +20,7 @@ import org.json.JSONObject
 import java.io.File
 import java.io.IOException
 import java.io.RandomAccessFile
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 import kotlin.math.ceil
 
@@ -62,6 +63,7 @@ class RawDataUploadWorker(
         val sessionId = requireNotNull(PotchRawFileContract.sessionId(file))
         val initialSize = file.length()
         val initialModified = file.lastModified()
+        var activeUploadId: String? = null
 
         try {
             val sha256 = PotchRawFileContract.sha256Hex(file)
@@ -72,6 +74,8 @@ class RawDataUploadWorker(
             } ?: initiateUpload(file, sessionId, sha256).also {
                 stateStore.save(sessionId, it)
             }
+            activeUploadId = localState.uploadId
+            reportAttemptBestEffort(sessionId, localState.uploadId)
 
             val remoteStatus = try {
                 fetchStatus(sessionId, localState.uploadId)
@@ -82,6 +86,8 @@ class RawDataUploadWorker(
                 localState = initiateUpload(file, sessionId, sha256).also {
                     stateStore.save(sessionId, it)
                 }
+                activeUploadId = localState.uploadId
+                reportAttemptBestEffort(sessionId, localState.uploadId)
                 UploadStatus(status = "UPLOADING", uploadedParts = emptyList())
             }
 
@@ -152,6 +158,13 @@ class RawDataUploadWorker(
             Result.success()
         } catch (error: HttpStatusException) {
             Log.e(TAG, "FastAPI 업로드 오류 HTTP ${error.code}: ${error.responseBody}")
+            reportFailureBestEffort(
+                sessionId = sessionId,
+                uploadId = activeUploadId,
+                errorCode = error.errorCode ?: "HTTP_${error.code}",
+                errorMessage = error.responseBody.ifBlank { "HTTP ${error.code}" },
+                retryable = error.isRetryable
+            )
             if (error.code == 401) {
                 SleepServerAuthProvider.clear(appContext)
                 Result.failure(
@@ -174,9 +187,27 @@ class RawDataUploadWorker(
                     "error" to "로그인이 필요합니다."
                 )
             )
+        } catch (error: LinkageError) {
+            Log.e(TAG, "Raw multipart upload 호환성 오류", error)
+            reportFailureBestEffort(
+                sessionId = sessionId,
+                uploadId = activeUploadId,
+                errorCode = errorCode(error),
+                errorMessage = error.message ?: error.javaClass.simpleName,
+                retryable = false
+            )
+            Result.failure(workDataOf("error" to (error.message ?: error.javaClass.simpleName)))
         } catch (error: Exception) {
             Log.e(TAG, "Raw multipart upload 실패, attempt=${runAttemptCount + 1}", error)
-            if (runAttemptCount + 1 < MAX_WORK_ATTEMPTS) {
+            val retryable = runAttemptCount + 1 < MAX_WORK_ATTEMPTS
+            reportFailureBestEffort(
+                sessionId = sessionId,
+                uploadId = activeUploadId,
+                errorCode = errorCode(error),
+                errorMessage = error.message ?: error.javaClass.simpleName,
+                retryable = retryable
+            )
+            if (retryable) {
                 Result.retry()
             } else {
                 Result.failure(workDataOf("error" to (error.message ?: error.javaClass.simpleName)))
@@ -236,6 +267,46 @@ class RawDataUploadWorker(
         }
         return UploadStatus(response.getString("status"), parts)
     }
+
+    private fun reportAttemptBestEffort(sessionId: String, uploadId: String) {
+        runCatching {
+            executeJson(
+                Request.Builder()
+                    .url("$baseUrl/v1/sleep-sessions/$sessionId/raw-uploads/$uploadId/attempts")
+                    .post(ByteArray(0).toRequestBody(null))
+            )
+        }.onFailure { error ->
+            Log.w(TAG, "업로드 시도 상태 보고 실패; 실제 업로드는 계속 진행", error)
+        }
+    }
+
+    private fun reportFailureBestEffort(
+        sessionId: String,
+        uploadId: String?,
+        errorCode: String,
+        errorMessage: String,
+        retryable: Boolean
+    ) {
+        if (uploadId == null) return
+        val payload = JSONObject()
+            .put("errorCode", errorCode.take(100))
+            .put("errorMessage", errorMessage.take(2000))
+            .put("retryable", retryable)
+        runCatching {
+            executeJson(
+                Request.Builder()
+                    .url("$baseUrl/v1/sleep-sessions/$sessionId/raw-uploads/$uploadId/failure")
+                    .post(payload.toString().toRequestBody(JSON_MEDIA_TYPE))
+            )
+        }.onFailure { error ->
+            Log.w(TAG, "업로드 실패 상태 보고 실패", error)
+        }
+    }
+
+    private fun errorCode(error: Throwable): String = error.javaClass.simpleName
+        .replace(Regex("([a-z0-9])([A-Z])"), "$1_$2")
+        .uppercase(Locale.US)
+        .take(100)
 
     private fun requestPresignedPart(
         sessionId: String,
@@ -444,6 +515,9 @@ class RawDataUploadWorker(
         private val presignedS3Request: Boolean = false,
         private val serverRetryable: Boolean? = null
     ) : IOException() {
+        val errorCode: String? = runCatching {
+            JSONObject(responseBody).optString("code").takeIf { it.isNotBlank() }
+        }.getOrNull()
         val isRetryable: Boolean = RawUploadRetryPolicy.shouldRetry(
             code = code,
             serverRetryable = serverRetryable,
