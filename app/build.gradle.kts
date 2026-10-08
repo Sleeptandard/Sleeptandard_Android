@@ -12,8 +12,14 @@ val localProps = Properties().apply {
 }
 
 val sleepServerBaseUrl = localProps.getProperty("SLEEP_SERVER_BASE_URL", "")
+    .trim()
+    .trimEnd('/')
     .replace("\\", "\\\\")
     .replace("\"", "\\\"")
+
+require(sleepServerBaseUrl.isEmpty() || sleepServerBaseUrl.startsWith("https://")) {
+    "SLEEP_SERVER_BASE_URL must use HTTPS. Current value: $sleepServerBaseUrl"
+}
 
 android {
     namespace = "com.leejang.sleeptandard"
@@ -31,7 +37,6 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "SUPABASE_URL", "\"${localProps["SUPABASE_URL"]}\"")
         buildConfigField("String", "SUPABASE_ANON_KEY", "\"${localProps["SUPABASE_ANON_KEY"]}\"")
-        // TODO(Server): FastAPI 배포 후 local.properties에 SLEEP_SERVER_BASE_URL을 설정한다.
         buildConfigField("String", "SLEEP_SERVER_BASE_URL", "\"$sleepServerBaseUrl\"")
     }
 
