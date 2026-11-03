@@ -11,6 +11,16 @@ val localProps = Properties().apply {
     load(rootProject.file("local.properties").inputStream())
 }
 
+val sleepServerBaseUrl = localProps.getProperty("SLEEP_SERVER_BASE_URL", "")
+    .trim()
+    .trimEnd('/')
+    .replace("\\", "\\\\")
+    .replace("\"", "\\\"")
+
+require(sleepServerBaseUrl.isEmpty() || sleepServerBaseUrl.startsWith("https://")) {
+    "SLEEP_SERVER_BASE_URL must use HTTPS. Current value: $sleepServerBaseUrl"
+}
+
 android {
     namespace = "com.leejang.sleeptandard"
     compileSdk {
@@ -27,6 +37,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "SUPABASE_URL", "\"${localProps["SUPABASE_URL"]}\"")
         buildConfigField("String", "SUPABASE_ANON_KEY", "\"${localProps["SUPABASE_ANON_KEY"]}\"")
+        buildConfigField("String", "SLEEP_SERVER_BASE_URL", "\"$sleepServerBaseUrl\"")
     }
 
     buildTypes {
@@ -52,6 +63,17 @@ android {
         buildConfig = true
     }
 
+    packaging {
+        resources {
+            pickFirsts += listOf(
+                "lib/arm64-v8a/libc++_shared.so",
+                "lib/armeabi-v7a/libc++_shared.so",
+                "lib/x86/libc++_shared.so",
+                "lib/x86_64/libc++_shared.so"
+            )
+        }
+    }
+
 }
 
 dependencies {
@@ -64,7 +86,6 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.material3)
-    implementation("com.google.android.gms:play-services-wearable:18.1.0") // [추가] 워치 통신용
 
     // icons를 import 할 수 없는 문제 때문에 추가
     implementation("androidx.compose.material:material-icons-core")
@@ -93,12 +114,6 @@ dependencies {
     // numberpicker
     implementation("com.chargemap.compose:numberpicker:1.0.3")
     
-    // Wearable API for Phone-Watch communication
-    implementation("com.google.android.gms:play-services-wearable:18.1.0")
-    
-    // Coroutines support for Play Services (await() 사용)
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3")
-
     // 앱 시작 화면
     implementation("androidx.core:core-splashscreen:1.0.1")
 
@@ -118,7 +133,11 @@ dependencies {
     implementation("io.ktor:ktor-client-okhttp:3.1.2")
 
 
-    // 워치앱 선언 (현재 활성화 중)
-    wearApp(project(":wear"))
+    // 워치앱 선언 (현재 비활성화 중)
+    // wearApp(project(":wear"))
+
+    // PyTorch Lite — 온디바이스 수면 단계 추론
+    implementation("org.pytorch:pytorch_android_lite:1.13.1")
+    implementation("org.pytorch:pytorch_android_torchvision_lite:1.13.1")
 
 }

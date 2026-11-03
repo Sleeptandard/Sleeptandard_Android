@@ -1,12 +1,14 @@
 package com.leejang.sleeptandard
 
+import android.content.Intent
 import android.os.Bundle
+import android.util.Log
 import java.io.File
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
-import androidx.interpolator.view.animation.FastOutSlowInInterpolator
+import android.view.animation.AccelerateDecelerateInterpolator
 
 import com.leejang.sleeptandard.ClassFile.AlarmScheduler
 import com.leejang.sleeptandard.Component.AppNav
@@ -21,6 +23,9 @@ import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.handleDeeplinks
 import kotlinx.coroutines.runBlocking
 import android.widget.Toast
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.lifecycleScope
 import com.leejang.sleeptandard.ViewModel.ProfileInsert
 import io.github.jan.supabase.postgrest.postgrest
@@ -32,10 +37,49 @@ import com.leejang.sleeptandard.Prefs.UserInfoPreferences
 // 마이크 테스트
 class MainActivity : ComponentActivity() {
 
+    private var openScreenFromNotification by mutableStateOf<String?>(null)
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+
+        Log.i(
+            WTF_TAG,
+            "MainActivity.onNewIntent: activity=${System.identityHashCode(this)}, taskId=$taskId, " +
+                "flags=${intent.flags}, startDestination=${intent.getStringExtra("startDestination")}, " +
+                "open_screen=${intent.getStringExtra("open_screen")}, " +
+                "hasAlarm=${AlarmPreferences(this).isAlarmSet()}"
+        )
+
+        setIntent(intent)
+
+        if (redirectToAlarmRingIfNeeded()) {
+            openScreenFromNotification = null
+            Log.i(WTF_TAG, "알람 울림 중이므로 AlarmRingActivity를 최우선 실행")
+            return
+        }
+
+        openScreenFromNotification = requestedScreen(intent)
+        Log.i(
+            WTF_TAG,
+            "MainActivity.onNewIntent 처리 완료: openScreenFromNotification=$openScreenFromNotification, " +
+                "requestedScreen을 AppNav에 전달"
+        )
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         val splash = installSplashScreen()
 
         super.onCreate(savedInstanceState)
+
+        Log.i(
+            WTF_TAG,
+            "MainActivity.onCreate: activity=${System.identityHashCode(this)}, " +
+                "savedInstanceState=${savedInstanceState != null}, taskId=$taskId, pid=${android.os.Process.myPid()}, " +
+                "flags=${intent.flags}, startDestination=${intent.getStringExtra("startDestination")}, " +
+                "open_screen=${intent.getStringExtra("open_screen")}"
+        )
+
+        openScreenFromNotification = requestedScreen(intent)
 
         // 권한 설정 여부 확인. 안되어 있으면 설정 창으로
         val scheduler = AlarmScheduler(applicationContext)
@@ -44,6 +88,7 @@ class MainActivity : ComponentActivity() {
         checkNotificationPermission(this)
 
         val alarmPrefs = AlarmPreferences(this)
+        Log.i(WTF_TAG, "MainActivity.onCreate 저장상태: hasAlarm=${alarmPrefs.isAlarmSet()}")
 
         enableEdgeToEdge()
 
@@ -56,7 +101,7 @@ class MainActivity : ComponentActivity() {
                 .scaleX(0.98f)
                 .scaleY(0.98f)
                 .setDuration(750L)
-                .setInterpolator(FastOutSlowInInterpolator())
+                .setInterpolator(AccelerateDecelerateInterpolator())
                 .withEndAction {
                     // ✅ 반드시 제거해줘야 함
                     splashScreenView.remove()
@@ -77,10 +122,21 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        val startDestination = getStartDestination(alarmPrefs, isResetPassword)
+        //val startDestination = getStartDestination(alarmPrefs, isResetPassword)
+        val startDestination = Screen.Home.route
+        Log.i(
+            WTF_TAG,
+            "MainActivity startDestination 결정: selected=$startDestination, " +
+                "intentExtra=${intent.getStringExtra("startDestination")}, hasAlarm=${alarmPrefs.isAlarmSet()}"
+        )
+        val hasSupabaseConfig =
+            BuildConfig.SUPABASE_URL.startsWith("https://") &&
+                BuildConfig.SUPABASE_URL != "null" &&
+                BuildConfig.SUPABASE_ANON_KEY.isNotBlank() &&
+                BuildConfig.SUPABASE_ANON_KEY != "null"
 
-        // 자동 로그인으로 홈 화면에 진입한 경우 환영 메시지 띄우기
-        if (startDestination == Screen.Home.route) {
+        // 이전 Supabase 설정이 남아 있는 빌드에서만 기존 환영 메시지를 조회한다.
+        if (startDestination == Screen.Home.route && hasSupabaseConfig) {
             lifecycleScope.launch(Dispatchers.IO) {
                 try {
                     val uid = SupabaseClientProvider.client.auth.currentUserOrNull()?.id ?: ""
@@ -112,14 +168,38 @@ class MainActivity : ComponentActivity() {
                     startDestination = startDestination,
                     initialAlarm = alarmPrefs.loadAlarm(),
                     userInfo = loadedUser,
-                    isPasswordReset = isResetPassword
+                    isPasswordReset = isResetPassword,
+                    openScreen = openScreenFromNotification,
+                    onOpenScreenConsumed = {
+                        openScreenFromNotification = null
+                    }
                 )
             }
+        }
+        Log.i(
+            WTF_TAG,
+            "MainActivity.setContent 설정 완료: AppNav startDestination=$startDestination, " +
+                "initialAlarm=${alarmPrefs.loadAlarm().hour}:${alarmPrefs.loadAlarm().minute}"
+        )
+
+        if (redirectToAlarmRingIfNeeded()) {
+            openScreenFromNotification = null
+            Log.i(WTF_TAG, "MainActivity.onCreate: 알람 울림 중이므로 AlarmRingActivity 실행")
         }
 
         // [안전망] 앱 실행 시 미전송 CSV 파일 자동 재업로드
         // WorkManager가 대용량 파일 전송 중 시스템에 의해 종료된 경우를 대비
         enqueueUnsentCsvFiles()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        Log.i(
+            WTF_TAG,
+            "MainActivity.onResume: activity=${System.identityHashCode(this)}, taskId=$taskId, " +
+                "startDestinationExtra=${intent.getStringExtra("startDestination")}, " +
+                "hasAlarm=${AlarmPreferences(this).isAlarmSet()}"
+        )
     }
 
     /**
@@ -178,5 +258,30 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-}
+    private fun requestedScreen(intent: Intent): String? =
+        intent.getStringExtra("open_screen")
+            ?: intent.getStringExtra("startDestination")
 
+    /**
+     * Potch 알림 등 다른 진입점을 눌러도 알람이 울리는 동안은
+     * 반드시 AlarmRingActivity가 우선하도록 한다.
+     */
+    private fun redirectToAlarmRingIfNeeded(): Boolean {
+        val alarmPreferences = AlarmPreferences(this)
+        if (!alarmPreferences.isAlarmRinging()) return false
+
+        val alarm = alarmPreferences.loadAlarm()
+        startActivity(
+            Intent(this, AlarmRingActivity::class.java).apply {
+                putExtra("alarmId", alarm.id)
+                addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            }
+        )
+        return true
+    }
+
+    companion object {
+        private const val WTF_TAG = "WTF"
+    }
+
+}

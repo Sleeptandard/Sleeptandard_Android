@@ -2,8 +2,12 @@ package com.leejang.sleeptandard.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-/******** 새로 정의한 색상들2 *******/
+/******** 새로 정의한 색상들3 *******/
+val SkyBlue = Color(0xFFC2E4E9)
+val White = Color(0xFFF1F2F3)
+val WRed = Color(0xFFE05A5A)
 
+/******** 새로 정의한 색상들2 *******/
 val Key = Color(0xFF050C16)
 val Neon = Color(0xFFAFF4F9)
 val Red = Color(0xFFFF5967)

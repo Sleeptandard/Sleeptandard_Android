@@ -28,6 +28,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -184,16 +185,19 @@ fun LoginDemoScreen(
                         // TODO: 이메일 탐색 백엔드 통신
                         // AuthViewModel의 이메일 탐색 더미 로직
                         onEmailCheck = {authViewModel.checkEmail()},
+                        onGoToSignup = { email -> authViewModel.goToSignupPassword(email) },
                         )
 
                     is AuthStep.LoginPassword -> LoginPasswordStep(
                         viewModel = authViewModel,
                         onLoginSend = {
                             // TODO: 백엔드 로그인 처리
-                            // AuthViewModel의 로그인 처리 더미 로직
                             authViewModel.performLogin(
+                                context = context,
                                 onSuccess = {onConfirm(it)},
-                                onError = {Toast.makeText(context, "비밀번호가 틀렸습니다.", Toast.LENGTH_SHORT).show()}
+                                onError = { message ->
+                                    Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                                }
                             )
                         },
                         onPwChange = {
@@ -261,11 +265,13 @@ fun LoginDemoScreen(
                     is AuthStep.SignupGenderBirth -> GenderBirthStep(
                         viewModel = authViewModel,
                         onSubmit = {
-                            // TODO: 백엔드 회원가입 처리 로직
-                            // AuthViewModel의 최종 회원가입 처리 더미 로직
                             authViewModel.completeSignup(
+                                context = context,
                                 onComplete = { nickname -> Log.d("Signup", "$nickname 가입 완료") },
-                                onError = { error -> Log.e("Signup", "가입 에러: $error") }
+                                onError = { error ->
+                                    Log.e("Signup", "가입 에러: $error")
+                                    Toast.makeText(context, error, Toast.LENGTH_SHORT).show()
+                                }
                             )
                         },
                         onBack = {
@@ -423,6 +429,7 @@ fun WhiteTextField(
 fun EmailInputStep(
     viewModel: AuthViewModel,
     onEmailCheck: () -> Unit,
+    onGoToSignup: (String) -> Unit,
 ) {
 
     val buttonGradient = linearGradient(
@@ -520,6 +527,27 @@ fun EmailInputStep(
                     )
                 )
             }
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        Button(
+            onClick = { onGoToSignup(viewModel.email) },
+            enabled = viewModel.isEmailValid,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(60.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Color.White,
+                contentColor = Color.Black,
+                disabledContainerColor = Color.White.copy(alpha = 0.5f),
+                disabledContentColor = Color.Black.copy(alpha = 0.5f)
+            )
+        ) {
+            Text(
+                text = "회원가입 스텝으로",
+                color = Color.Black
+            )
         }
 
         Spacer(Modifier.height(20.dp))
