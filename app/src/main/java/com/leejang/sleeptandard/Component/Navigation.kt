@@ -38,6 +38,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -121,6 +122,8 @@ fun AppNav(
     val rememberNavController = rememberNavController()
     val alarmViewModel: AlarmViewModel = viewModel()
     val authViewModel: AuthViewModel = viewModel()
+    // Home 탭은 백스택을 저장하지 않으므로 일지 상태는 AppNav 수명에 맞춰 보관한다.
+    val journalStateHolder = rememberSaveableStateHolder()
 
     LaunchedEffect(openScreen) {
         when (openScreen) {
@@ -285,8 +288,9 @@ fun AppNav(
         }
 
         composable(Screen.Journal.route) {
-
-            JournalScreen()
+            journalStateHolder.SaveableStateProvider(Screen.Journal.route) {
+                JournalScreen()
+            }
         }
 
         composable(Screen.Settings.route) {
