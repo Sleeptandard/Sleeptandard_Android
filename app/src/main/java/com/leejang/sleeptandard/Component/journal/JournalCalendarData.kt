@@ -96,3 +96,12 @@ internal enum class JournalMetric(val title: String, val unit: String, val min: 
 
     fun format(value: Float): String = if (this == DURATION) String.format(Locale.KOREAN, "%.1f", value) else value.roundToInt().toString()
 }
+
+/** 주간/월간에서 공유하는 선택 항목. 비율 분포는 숫자 하나인 지표와 구분한다. */
+internal enum class JournalChartMetric(val numeric: JournalMetric?) {
+    SCORE(JournalMetric.SCORE), DURATION(JournalMetric.DURATION),
+    EFFICIENCY(JournalMetric.EFFICIENCY), LATENCY(JournalMetric.LATENCY),
+    HR(JournalMetric.HR), RR(JournalMetric.RR), STAGES(null);
+
+    val title: String get() = numeric?.title ?: "수면 단계 비율"
+}

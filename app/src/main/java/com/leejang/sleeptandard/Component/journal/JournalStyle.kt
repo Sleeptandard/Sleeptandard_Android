@@ -6,19 +6,12 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.BarChart
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -26,8 +19,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -76,17 +67,10 @@ internal fun JournalPanel(
 }
 
 @Composable
-internal fun JournalHeader(title: String, subtitle: String, compact: Boolean = false, onStatistics: () -> Unit = {}) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text(title, color = White, style = MaterialTheme.typography.titleLarge.copy(fontSize = if (compact) 20.sp else 22.sp))
-            JournalLabel(subtitle, size = 11)
-        }
-        TextButton(onClick = onStatistics, modifier = Modifier.semantics { contentDescription = "$title 통계 보기" }) {
-            Icon(Icons.Outlined.BarChart, null, Modifier.size(17.dp), tint = SkyBlue)
-            Spacer(Modifier.width(4.dp))
-            JournalLabel("통계", color = SkyBlue)
-        }
+internal fun JournalHeader(title: String, subtitle: String, compact: Boolean = false) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Text(title, color = White, style = MaterialTheme.typography.titleLarge.copy(fontSize = if (compact) 20.sp else 22.sp))
+        JournalLabel(subtitle, size = 11)
     }
 }
 

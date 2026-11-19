@@ -56,7 +56,6 @@ fun JournalMainContent(
     data: JournalPreviewData = JournalPreviewData(),
     today: LocalDate = LocalDate.now(),
     onCalendar: () -> Unit = {},
-    onStatistics: () -> Unit = {},
 ) {
     BoxWithConstraints(modifier.fillMaxSize().background(Key), contentAlignment = Alignment.TopCenter) {
         val compact = maxHeight < 640.dp
@@ -66,7 +65,7 @@ fun JournalMainContent(
             Modifier.widthIn(max = 560.dp).fillMaxSize().padding(horizontal = 20.dp, vertical = if (compact) 8.dp else 16.dp),
             verticalArrangement = Arrangement.spacedBy(gap),
         ) {
-            JournalHeader("수면 리포트", today.format(DateTimeFormatter.ofPattern("M월 d일 EEEE", Locale.KOREAN)), compact, onStatistics)
+            JournalHeader("수면 리포트", today.format(DateTimeFormatter.ofPattern("M월 d일 EEEE", Locale.KOREAN)), compact)
             JournalPanel(Modifier.weight(0.36f), hero = true, padding = cardPadding) {
                 JournalLabel("오늘의 수면 평가", color = SkyBlue)
                 Row(Modifier.fillMaxWidth().weight(1f), verticalAlignment = Alignment.CenterVertically) {
